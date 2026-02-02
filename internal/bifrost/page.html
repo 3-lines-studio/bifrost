@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    {{.Head}}
+  </head>
+  <body>
+    <div id="app">{{.Body}}</div>
+    <script id="__BIFROST_PROPS__" type="application/json">
+      {{.Props}}
+    </script>
+    {{range .Chunks}}
+    <script src="{{.}}" type="module" defer></script>
+    {{end}}
+    <script src="{{.ScriptSrc}}" type="module" defer></script>
+  </body>
+</html>
