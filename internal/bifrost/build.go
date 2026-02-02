@@ -25,6 +25,12 @@ func BuildCmd() {
 
 	mainFile := os.Args[1]
 
+	originalCwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to get current working directory: %v\n", err)
+		os.Exit(1)
+	}
+
 	mainDir := filepath.Dir(mainFile)
 	if mainDir != "." && mainDir != "" {
 		fmt.Printf("Changing to directory: %s\n", mainDir)
@@ -51,7 +57,7 @@ func BuildCmd() {
 		fmt.Printf("  - %s\n", path)
 	}
 
-	entryDir := BifrostDir
+	entryDir := filepath.Join(originalCwd, BifrostDir)
 	outdir := filepath.Join(entryDir, DistDir)
 
 	if err := os.MkdirAll(entryDir, 0755); err != nil {
@@ -80,7 +86,9 @@ func BuildCmd() {
 		entryName := EntryNameForPath(componentPath)
 		entryPath := filepath.Join(entryDir, entryName+".tsx")
 
-		componentImport, err := ComponentImportPath(entryPath, componentPath)
+		absComponentPath := filepath.Join(originalCwd, componentPath)
+
+		componentImport, err := ComponentImportPath(entryPath, absComponentPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: failed to get import path for %s: %v\n", componentPath, err)
 			os.Exit(1)
@@ -97,7 +105,7 @@ func BuildCmd() {
 	fmt.Println("\nStarting Bun renderer...")
 	socket := filepath.Join(os.TempDir(), fmt.Sprintf("bifrost-build-%d.sock", os.Getpid()))
 
-	cmd := exec.Command("bun", "run", "-")
+	cmd := exec.Command("bun", "run", "--smol", "-")
 	cmd.Dir = "."
 	cmd.Env = append(os.Environ(), "BIFROST_SOCKET="+socket, "BIFROST_PROD=1")
 	cmd.Stdout = os.Stdout

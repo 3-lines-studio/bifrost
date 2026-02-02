@@ -14,7 +14,7 @@ import (
 var bifrostFS embed.FS
 
 func main() {
-	r, err := bifrost.New(bifrost.WithAssetsFS(bifrostFS))
+	r, err := bifrost.New(bifrost.WithAssetsFS(bifrostFS), bifrost.WithTiming())
 	if err != nil {
 		log.Fatalf("Failed to start renderer: %v", err)
 	}
@@ -23,6 +23,11 @@ func main() {
 	homeHandler := r.NewPage("./pages/home.tsx", func(*http.Request) (map[string]interface{}, error) {
 		return map[string]interface{}{
 			"name": "World",
+		}, nil
+	})
+	nestedHandler := r.NewPage("./pages/nested/page.tsx", func(*http.Request) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"name": "Nested",
 		}, nil
 	})
 	aboutHandler := r.NewPage("./pages/about.tsx")
@@ -44,6 +49,7 @@ func main() {
 
 	router.Handle("/", homeHandler)
 	router.Handle("/about", aboutHandler)
+	router.Handle("/nested", nestedHandler)
 	router.Handle("/message/{message}", messageHandler)
 	router.Handle("/error-test", errorHandler)
 	router.Handle("/error-render", renderErrorHandler)

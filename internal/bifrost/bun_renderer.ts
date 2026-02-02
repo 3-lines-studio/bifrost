@@ -120,7 +120,7 @@ async function handleBuild(req: Bun.BunRequest) {
     splitting: true,
     naming: isProduction
       ? {
-          entry: "[dir]/[name]-[hash].[ext]",
+          entry: "[name]-[hash].[ext]",
           chunk: "[name]-[hash].[ext]",
           asset: "[name]-[hash].[ext]",
         }

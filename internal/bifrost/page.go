@@ -35,16 +35,36 @@ func (p *Page) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
+	var loaderStart time.Time
+	if p.renderer.timingEnabled {
+		loaderStart = time.Now()
+	}
+
 	props, err := p.propsLoader(req)
 	if err != nil {
 		p.handlePropsError(w, req, err)
 		return
 	}
 
+	if p.renderer.timingEnabled {
+		loaderDuration := time.Since(loaderStart)
+		fmt.Printf("[bifrost] data loader: %v\n", loaderDuration)
+	}
+
+	var renderStart time.Time
+	if p.renderer.timingEnabled {
+		renderStart = time.Now()
+	}
+
 	page, err := p.renderer.Render(p.opts.ComponentPath, props)
 	if err != nil {
 		p.serveError(w, err)
 		return
+	}
+
+	if p.renderer.timingEnabled {
+		renderDuration := time.Since(renderStart)
+		fmt.Printf("[bifrost] ssr render: %v\n", renderDuration)
 	}
 
 	p.renderPage(w, props, page)

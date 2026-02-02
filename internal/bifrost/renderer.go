@@ -21,11 +21,12 @@ import (
 var activeBuildWatchers sync.Map
 
 type Renderer struct {
-	cmd         *exec.Cmd
-	socket      string
-	client      *http.Client
-	renderCache *renderCache
-	AssetsFS    embed.FS
+	cmd           *exec.Cmd
+	socket        string
+	client        *http.Client
+	renderCache   *renderCache
+	AssetsFS      embed.FS
+	timingEnabled bool
 }
 
 func NewRenderer() (*Renderer, error) {
@@ -36,7 +37,7 @@ func NewRenderer() (*Renderer, error) {
 		return nil, fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	cmd := exec.Command("bun", "run", "-")
+	cmd := exec.Command("bun", "run", "--smol", "-")
 	cmd.Dir = cwd
 	cmd.Env = append(os.Environ(), "BIFROST_SOCKET="+socket)
 	cmd.Stdout = os.Stdout
@@ -65,6 +66,10 @@ func NewRenderer() (*Renderer, error) {
 		client:      client,
 		renderCache: newRenderCache(5 * time.Minute),
 	}, nil
+}
+
+func (r *Renderer) SetTimingEnabled(enabled bool) {
+	r.timingEnabled = enabled
 }
 
 func (r *Renderer) Render(componentPath string, props map[string]interface{}) (renderedPage, error) {

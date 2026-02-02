@@ -7,11 +7,19 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/bifrost"
 )
 
+type Renderer = bifrost.Renderer
+
 type Option func(*bifrost.Renderer)
 
 func WithAssetsFS(fs embed.FS) Option {
 	return func(r *bifrost.Renderer) {
 		r.SetAssetsFS(fs)
+	}
+}
+
+func WithTiming() Option {
+	return func(r *bifrost.Renderer) {
+		r.SetTimingEnabled(true)
 	}
 }
 
