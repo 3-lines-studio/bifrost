@@ -206,7 +206,7 @@ func publicFileExistsInFS(path string) bool {
 }
 
 func publicFileExistsInEmbed(assetsFS embed.FS, path string) bool {
-	embedPath := filepath.Join(".bifrost", PublicDir, path)
+	embedPath := filepath.Join(PublicDir, path)
 	embedPath = filepath.ToSlash(embedPath)
 	_, err := assetsFS.ReadFile(embedPath)
 	return err == nil
@@ -237,7 +237,7 @@ func servePublicFromFS(w http.ResponseWriter, req *http.Request, path string) {
 }
 
 func servePublicFromEmbed(assetsFS embed.FS, w http.ResponseWriter, req *http.Request, path string) {
-	embedPath := filepath.Join(".bifrost", PublicDir, path)
+	embedPath := filepath.Join(PublicDir, path)
 	embedPath = filepath.ToSlash(embedPath)
 
 	data, err := assetsFS.ReadFile(embedPath)

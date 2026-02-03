@@ -9,6 +9,8 @@ import (
 
 type Renderer = bifrost.Renderer
 
+type Page = bifrost.Page
+
 type Option func(*bifrost.Renderer)
 
 func WithAssetsFS(fs embed.FS) Option {

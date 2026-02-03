@@ -13,7 +13,7 @@ build:
 	go run ../cmd/build main.go
 	go build -o bifrost main.go
 
-run: build
+start: build
 	rm -rf .bifrost/*
 	./bifrost
 

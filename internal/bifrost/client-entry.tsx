@@ -19,4 +19,10 @@ if (!Component) {
   throw new Error("No component export found in {{.ComponentImport}}");
 }
 
-hydrateRoot(root, <Component {...props} />);
+const doHydrate = () => hydrateRoot(root, <Component {...props} />);
+
+if ("requestIdleCallback" in window) {
+  requestIdleCallback(doHydrate, { timeout: 2000 });
+} else {
+  setTimeout(doHydrate, 0);
+}

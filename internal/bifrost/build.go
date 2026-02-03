@@ -200,7 +200,7 @@ func BuildCmd() {
 	fmt.Printf("Created %s\n", manifestPath)
 
 	fmt.Println("\nCopying public assets...")
-	publicSrc := PublicDir
+	publicSrc := filepath.Join(originalCwd, PublicDir)
 	publicDst := filepath.Join(entryDir, PublicDir)
 	if err := copyPublicDir(publicSrc, publicDst); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to copy public dir: %v\n", err)
