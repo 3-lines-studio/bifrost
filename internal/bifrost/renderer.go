@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -27,6 +28,7 @@ type Renderer struct {
 	renderCache   *renderCache
 	AssetsFS      embed.FS
 	timingEnabled bool
+	logger        *slog.Logger
 }
 
 func NewRenderer() (*Renderer, error) {
@@ -72,6 +74,15 @@ func (r *Renderer) SetTimingEnabled(enabled bool) {
 	r.timingEnabled = enabled
 }
 
+type renderResponse struct {
+	HTML  string `json:"html"`
+	Head  string `json:"head"`
+	Error *struct {
+		Message string `json:"message"`
+		Stack   string `json:"stack"`
+	} `json:"error"`
+}
+
 func (r *Renderer) Render(componentPath string, props map[string]interface{}) (renderedPage, error) {
 	propsHash, err := hashProps(props)
 	if err != nil {
@@ -88,21 +99,15 @@ func (r *Renderer) Render(componentPath string, props map[string]interface{}) (r
 		"props": props,
 	}
 
-	var result struct {
-		HTML  string `json:"html"`
-		Head  string `json:"head"`
-		Error string `json:"error"`
-		Stack string `json:"stack"`
-	}
-
+	var result renderResponse
 	if err := r.postJSON("/render", reqBody, &result); err != nil {
 		return renderedPage{}, err
 	}
 
-	if result.Error != "" {
-		fullError := result.Error
-		if result.Stack != "" {
-			fullError = result.Stack
+	if result.Error != nil {
+		fullError := result.Error.Message
+		if result.Error.Stack != "" {
+			fullError = result.Error.Stack
 		}
 		return renderedPage{}, fmt.Errorf("%s", fullError)
 	}
@@ -137,6 +142,13 @@ func (r *Renderer) postJSON(endpoint string, body interface{}, result interface{
 	return json.NewDecoder(resp.Body).Decode(result)
 }
 
+type buildResponse struct {
+	OK    bool `json:"ok"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
 func (r *Renderer) Build(entrypoints []string, outdir string) error {
 	if len(entrypoints) == 0 {
 		return fmt.Errorf("missing entrypoints")
@@ -151,17 +163,13 @@ func (r *Renderer) Build(entrypoints []string, outdir string) error {
 		"outdir":      outdir,
 	}
 
-	var result struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error"`
-	}
-
+	var result buildResponse
 	if err := r.postJSON("/build", reqBody, &result); err != nil {
 		return err
 	}
 
-	if result.Error != "" {
-		return fmt.Errorf("build error: %s", result.Error)
+	if result.Error != nil {
+		return fmt.Errorf("build error: %s", result.Error.Message)
 	}
 
 	if !result.OK {

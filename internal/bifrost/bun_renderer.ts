@@ -6,25 +6,60 @@ const socket = process.env.BIFROST_SOCKET;
 const isDev =
   process.env.BIFROST_DEV === "1" || process.env.BIFROST_DEV === "true";
 
-if (!socket) {
-  console.error("BIFROST_SOCKET environment variable not set");
-  process.exit(1);
-}
-
 const componentCache = new Map<
   string,
   { Component: React.ComponentType; Head?: React.ComponentType }
 >();
 
-async function handleRender(req: Bun.BunRequest) {
-  const body = await req.json();
+interface RenderResult {
+  html?: string;
+  head?: string;
+  error?: {
+    message: string;
+    stack?: string;
+  };
+}
+
+interface BuildResult {
+  ok?: boolean;
+  error?: {
+    message: string;
+    stack?: string;
+  };
+}
+
+function createErrorResponse(message: string, stack?: string): Response {
+  const result: RenderResult = {
+    error: {
+      message,
+      stack,
+    },
+  };
+  return new Response(JSON.stringify(result) + "\n");
+}
+
+function createBuildErrorResponse(message: string): Response {
+  const result: BuildResult = {
+    error: {
+      message,
+    },
+  };
+  return new Response(JSON.stringify(result) + "\n");
+}
+
+async function handleRender(req: Bun.BunRequest): Promise<Response> {
+  let body: { path?: string; props?: Record<string, unknown> };
+  try {
+    body = await req.json();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Invalid JSON body";
+    return createErrorResponse(`Failed to parse request: ${message}`);
+  }
+
   const { path, props } = body;
 
   if (!path) {
-    return new Response(
-      JSON.stringify({ error: "Missing 'path' in request" }) + "\n",
-      { status: 400 },
-    );
+    return createErrorResponse("Missing 'path' in request");
   }
 
   const importPath = isDev ? `${path}?t=${Date.now()}` : path;
@@ -32,49 +67,46 @@ async function handleRender(req: Bun.BunRequest) {
   let Component: React.ComponentType;
   let Head: React.ComponentType | undefined;
 
-  const cached = componentCache.get(path);
-  if (!isDev && cached) {
-    Component = cached.Component;
-    Head = cached.Head;
-  } else {
-    const mod = await import(importPath);
-    Component =
-      mod.default ||
-      mod.Page ||
-      Object.values(mod).find((x) => typeof x === "function");
-    Head = mod.Head;
+  try {
+    const cached = componentCache.get(path);
+    if (!isDev && cached) {
+      Component = cached.Component;
+      Head = cached.Head;
+    } else {
+      const mod = await import(importPath);
+      Component =
+        mod.default ||
+        mod.Page ||
+        Object.values(mod).find((x) => typeof x === "function");
+      Head = mod.Head;
 
-    if (!isDev && Component) {
-      componentCache.set(path, { Component, Head });
+      if (!isDev && Component) {
+        componentCache.set(path, { Component, Head });
+      }
     }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    return createErrorResponse(`Failed to import component: ${message}`, stack);
   }
 
   if (!Component) {
-    return new Response(
-      JSON.stringify({
-        error: `No component export found in ${path}. Expected default export, Page export, or a function export.`,
-      }) + "\n",
-      { status: 500 },
+    return createErrorResponse(
+      `No component export found in ${path}. Expected default export, Page export, or a function export.`,
     );
   }
 
   const componentProps = props || {};
 
-  let html;
+  let html: string;
   try {
     const el = React.createElement(Component, componentProps);
     html = renderToString(el);
   } catch (renderErr) {
-    const errorMessage =
+    const message =
       renderErr instanceof Error ? renderErr.message : String(renderErr);
-    const errorStack = renderErr instanceof Error ? renderErr.stack : "";
-    return new Response(
-      JSON.stringify({
-        error: errorMessage,
-        stack: errorStack,
-      }) + "\n",
-      { status: 500 },
-    );
+    const stack = renderErr instanceof Error ? renderErr.stack : undefined;
+    return createErrorResponse(`Render error: ${message}`, stack);
   }
 
   let head = "";
@@ -87,55 +119,63 @@ async function handleRender(req: Bun.BunRequest) {
     }
   }
 
-  return new Response(JSON.stringify({ html, head }) + "\n");
+  const result: RenderResult = { html, head };
+  return new Response(JSON.stringify(result) + "\n");
 }
 
-async function handleBuild(req: Bun.BunRequest) {
-  const body = await req.json();
+async function handleBuild(req: Bun.BunRequest): Promise<Response> {
+  let body: { entrypoints?: string[]; outdir?: string };
+  try {
+    body = await req.json();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Invalid JSON body";
+    return createBuildErrorResponse(`Failed to parse request: ${message}`);
+  }
+
   const { entrypoints, outdir } = body;
 
   if (!Array.isArray(entrypoints) || entrypoints.length === 0) {
-    return new Response(
-      JSON.stringify({ error: "Missing entrypoints" }) + "\n",
-      {
-        status: 400,
-      },
-    );
+    return createBuildErrorResponse("Missing entrypoints");
   }
 
   if (!outdir) {
-    return new Response(JSON.stringify({ error: "Missing outdir" }) + "\n", {
-      status: 400,
-    });
+    return createBuildErrorResponse("Missing outdir");
   }
 
   const isProduction =
     process.env.BIFROST_PROD === "1" || process.env.BIFROST_PROD === "true";
 
-  const result = await Bun.build({
-    entrypoints,
-    outdir,
-    target: "browser",
-    minify: true,
-    splitting: true,
-    naming: isProduction
-      ? {
-          entry: "[name]-[hash].[ext]",
-          chunk: "[name]-[hash].[ext]",
-          asset: "[name]-[hash].[ext]",
-        }
-      : undefined,
-    plugins: [tailwind],
-  });
+  try {
+    const result = await Bun.build({
+      entrypoints,
+      outdir,
+      target: "browser",
+      minify: true,
+      splitting: true,
+      naming: isProduction
+        ? {
+            entry: "[name]-[hash].[ext]",
+            chunk: "[name]-[hash].[ext]",
+            asset: "[name]-[hash].[ext]",
+          }
+        : undefined,
+      plugins: [tailwind],
+    });
 
-  if (!result.success) {
-    return new Response(
-      JSON.stringify({ error: "Failed to build client bundle" }) + "\n",
-      { status: 500 },
-    );
+    if (!result.success) {
+      const errors = result.logs
+        .filter((log) => log.level === "error")
+        .map((log) => log.message)
+        .join("\n");
+      return createBuildErrorResponse(`Build failed: ${errors}`);
+    }
+
+    const response: BuildResult = { ok: true };
+    return new Response(JSON.stringify(response) + "\n");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return createBuildErrorResponse(`Build error: ${message}`);
   }
-
-  return new Response(JSON.stringify({ ok: true }) + "\n");
 }
 
 Bun.serve({
@@ -145,5 +185,3 @@ Bun.serve({
     "/build": { POST: handleBuild },
   },
 });
-
-console.log(`[bifrost] Renderer ready on ${socket}`);

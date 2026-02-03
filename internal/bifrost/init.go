@@ -8,8 +8,11 @@ import (
 
 func InitCmd() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: init <project-dir>\n")
-		fmt.Fprintf(os.Stderr, "Example: init .\n")
+		PrintHeader("Bifrost Init")
+		PrintError("Missing project directory argument")
+		fmt.Println()
+		PrintInfo("Usage: bifrost-init <project-dir>")
+		PrintStep(EmojiInfo, "Example: bifrost-init .")
 		os.Exit(1)
 	}
 
@@ -18,29 +21,41 @@ func InitCmd() {
 		projectDir = "."
 	}
 
+	PrintHeader("Bifrost Init")
+
 	bifrostDir := filepath.Join(projectDir, ".bifrost")
 	gitkeepPath := filepath.Join(bifrostDir, ".gitkeep")
 
+	PrintStep(EmojiFolder, "Creating .bifrost directory...")
 	if err := os.MkdirAll(bifrostDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to create .bifrost directory: %v\n", err)
+		PrintError("Failed to create .bifrost directory: %v", err)
 		os.Exit(1)
 	}
 
 	if _, err := os.Stat(gitkeepPath); os.IsNotExist(err) {
 		if err := os.WriteFile(gitkeepPath, []byte("# This file ensures .bifrost directory exists for go:embed\n"), 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to create .gitkeep: %v\n", err)
+			PrintError("Failed to create .gitkeep: %v", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Created %s\n", gitkeepPath)
+		PrintSuccess("Created %s", gitkeepPath)
 	} else {
-		fmt.Printf("Already exists: %s\n", gitkeepPath)
+		PrintWarning("Already exists: %s", gitkeepPath)
 	}
 
-	fmt.Println("\nInitialization complete!")
-	fmt.Println("You can now add the following to your main.go:")
-	fmt.Println("")
-	fmt.Println("  //go:embed all:.bifrost")
-	fmt.Println("  var bifrostFS embed.FS")
-	fmt.Println("")
-	fmt.Println("  r, err := bifrost.New(bifrost.WithAssetsFS(bifrostFS))")
+	PrintDone("Initialization complete!")
+
+	fmt.Println()
+	PrintStep(EmojiInfo, "Next steps:")
+	fmt.Println()
+	fmt.Printf("  %s Add this to your main.go:\n", ColorCyan+"1."+ColorReset)
+	fmt.Println()
+	fmt.Printf("     %s//go:embed all:.bifrost%s\n", ColorGray, ColorReset)
+	fmt.Printf("     %svar bifrostFS embed.FS%s\n", ColorGray, ColorReset)
+	fmt.Println()
+	fmt.Printf("  %s Initialize Bifrost with:\n", ColorCyan+"2."+ColorReset)
+	fmt.Println()
+	fmt.Printf("     %sr, err := bifrost.New(%s\n", ColorGray, ColorReset)
+	fmt.Printf("         %sbifrost.WithAssetsFS(bifrostFS),%s\n", ColorGray, ColorReset)
+	fmt.Printf("     %s)%s\n", ColorGray, ColorReset)
+	fmt.Println()
 }

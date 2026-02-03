@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -255,7 +255,7 @@ func servePublicFromEmbed(assetsFS embed.FS, w http.ResponseWriter, req *http.Re
 func watchDirs(watcher *fsnotify.Watcher, root string) error {
 	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			log.Printf("Error accessing path %s: %v", path, err)
+			slog.Error("error accessing path", "path", path, "error", err)
 			return nil
 		}
 

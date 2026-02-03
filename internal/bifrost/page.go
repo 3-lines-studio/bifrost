@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"html"
 	"html/template"
+	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -48,7 +50,7 @@ func (p *Page) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	if p.renderer.timingEnabled {
 		loaderDuration := time.Since(loaderStart)
-		fmt.Printf("[bifrost] data loader: %v\n", loaderDuration)
+		slog.Debug("data loader timing", "duration", loaderDuration)
 	}
 
 	var renderStart time.Time
@@ -64,7 +66,7 @@ func (p *Page) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	if p.renderer.timingEnabled {
 		renderDuration := time.Since(renderStart)
-		fmt.Printf("[bifrost] ssr render: %v\n", renderDuration)
+		slog.Debug("ssr render timing", "duration", renderDuration)
 	}
 
 	p.renderPage(w, props, page)
@@ -124,15 +126,17 @@ func (p *Page) renderPage(w http.ResponseWriter, props map[string]interface{}, p
 
 func (p *Page) serveError(w http.ResponseWriter, err error) {
 	message := "Internal Server Error"
+	var stackTrace string
+
 	if err != nil {
-		message = err.Error()
+		message, stackTrace = splitErrorAndStack(err)
 	}
 
 	var buf bytes.Buffer
 	if err := ErrorTemplate.Execute(&buf, map[string]interface{}{
-		"Message":            template.HTML(message),
-		"IsDev":              p.isDev,
-		"ErrorComponentPath": p.opts.ErrorComponentPath,
+		"Message":    template.HTML(html.EscapeString(message)),
+		"StackTrace": template.HTML(html.EscapeString(stackTrace)),
+		"IsDev":      p.isDev,
 	}); err != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -143,4 +147,18 @@ func (p *Page) serveError(w http.ResponseWriter, err error) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusInternalServerError)
 	w.Write(buf.Bytes())
+}
+
+func splitErrorAndStack(err error) (message string, stackTrace string) {
+	if err == nil {
+		return "Internal Server Error", ""
+	}
+
+	errStr := err.Error()
+
+	if idx := strings.Index(errStr, "\n"); idx != -1 {
+		return errStr[:idx], errStr[idx+1:]
+	}
+
+	return errStr, ""
 }

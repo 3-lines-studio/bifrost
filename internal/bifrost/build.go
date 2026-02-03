@@ -18,66 +18,71 @@ import (
 
 func BuildCmd() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: build <main.go>\n")
-		fmt.Fprintf(os.Stderr, "Example: build ./main.go\n")
+		PrintHeader("Bifrost Build")
+		PrintError("Missing main.go file argument")
+		fmt.Println()
+		PrintInfo("Usage: bifrost-build <main.go>")
+		PrintStep(EmojiInfo, "Example: bifrost-build ./main.go")
 		os.Exit(1)
 	}
 
 	mainFile := os.Args[1]
 
+	PrintHeader("Bifrost Build")
+
 	originalCwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to get current working directory: %v\n", err)
+		PrintError("Failed to get current working directory: %v", err)
 		os.Exit(1)
 	}
 
 	mainDir := filepath.Dir(mainFile)
 	if mainDir != "." && mainDir != "" {
-		fmt.Printf("Changing to directory: %s\n", mainDir)
+		PrintStep(EmojiFolder, "Changing to directory: %s", mainDir)
 		if err := os.Chdir(mainDir); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to change to directory %s: %v\n", mainDir, err)
+			PrintError("Failed to change to directory %s: %v", mainDir, err)
 			os.Exit(1)
 		}
 	}
 
-	fmt.Printf("Scanning %s for components...\n", filepath.Base(mainFile))
+	PrintStep(EmojiSearch, "Scanning %s for components...", filepath.Base(mainFile))
 	componentPaths, err := extractComponentPaths(filepath.Base(mainFile))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to parse %s: %v\n", mainFile, err)
+		PrintError("Failed to parse %s: %v", mainFile, err)
 		os.Exit(1)
 	}
 
 	if len(componentPaths) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no NewPage calls found in %s\n", mainFile)
+		PrintError("No NewPage calls found in %s", mainFile)
 		os.Exit(1)
 	}
 
-	fmt.Printf("Found %d component(s):\n", len(componentPaths))
+	PrintSuccess("Found %d component(s)", len(componentPaths))
 	for _, path := range componentPaths {
-		fmt.Printf("  - %s\n", path)
+		PrintFile(path)
 	}
 
 	entryDir := filepath.Join(originalCwd, BifrostDir)
 	outdir := filepath.Join(entryDir, DistDir)
 
+	PrintStep(EmojiFolder, "Creating output directories...")
 	if err := os.MkdirAll(entryDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to create entry dir: %v\n", err)
+		PrintError("Failed to create entry dir: %v", err)
 		os.Exit(1)
 	}
 	if err := os.MkdirAll(outdir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to create outdir: %v\n", err)
+		PrintError("Failed to create outdir: %v", err)
 		os.Exit(1)
 	}
+	PrintSuccess("Directories ready")
 
-	fmt.Println("\nGenerating client entry files...")
+	PrintStep(EmojiFile, "Generating client entry files...")
 	var entryFiles []string
 	defer func() {
-		fmt.Println("\nCleaning up entry files...")
+		PrintStep(EmojiGear, "Cleaning up entry files...")
 		for _, entryFile := range entryFiles {
 			if err := os.Remove(entryFile); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to remove entry file %s: %v\n", entryFile, err)
-			} else {
-				fmt.Printf("  Removed %s\n", entryFile)
+				PrintWarning("Failed to remove entry file %s: %v", entryFile, err)
 			}
 		}
 	}()
@@ -90,19 +95,20 @@ func BuildCmd() {
 
 		componentImport, err := ComponentImportPath(entryPath, absComponentPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to get import path for %s: %v\n", componentPath, err)
+			PrintError("Failed to get import path for %s: %v", componentPath, err)
 			os.Exit(1)
 		}
 
 		if err := writeClientEntry(entryPath, componentImport); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to write entry file: %v\n", err)
+			PrintError("Failed to write entry file: %v", err)
 			os.Exit(1)
 		}
 		entryFiles = append(entryFiles, entryPath)
-		fmt.Printf("  Created %s\n", entryPath)
+		PrintFile(entryPath)
 	}
+	PrintSuccess("Generated %d entry file(s)", len(entryFiles))
 
-	fmt.Println("\nStarting Bun renderer...")
+	PrintStep(EmojiRocket, "Starting Bun renderer...")
 	socket := filepath.Join(os.TempDir(), fmt.Sprintf("bifrost-build-%d.sock", os.Getpid()))
 
 	cmd := exec.Command("bun", "run", "--smol", "-")
@@ -113,15 +119,20 @@ func BuildCmd() {
 	cmd.Stdin = strings.NewReader(BunRendererSource)
 
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to start bun: %v\n", err)
+		PrintError("Failed to start bun: %v", err)
 		os.Exit(1)
 	}
 	defer cmd.Process.Kill()
 
+	spinner := NewSpinner("Waiting for renderer")
+	spinner.Start()
 	if err := waitForSocket(socket, 10*time.Second); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		spinner.Stop()
+		PrintError("%v", err)
 		os.Exit(1)
 	}
+	spinner.Stop()
+	PrintSuccess("Renderer ready")
 
 	transport := &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -130,7 +141,10 @@ func BuildCmd() {
 	}
 	client := &http.Client{Transport: transport}
 
-	fmt.Println("\nBuilding assets...")
+	PrintStep(EmojiZap, "Building assets...")
+	buildSpinner := NewSpinner("Building client bundle")
+	buildSpinner.Start()
+
 	reqBody := map[string]interface{}{
 		"entrypoints": entryFiles,
 		"outdir":      outdir,
@@ -138,76 +152,85 @@ func BuildCmd() {
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to marshal request: %v\n", err)
+		buildSpinner.Stop()
+		PrintError("Failed to marshal request: %v", err)
 		os.Exit(1)
 	}
 
 	req, err := http.NewRequest("POST", "http://localhost/build", bytes.NewReader(jsonBody))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to create request: %v\n", err)
+		buildSpinner.Stop()
+		PrintError("Failed to create request: %v", err)
 		os.Exit(1)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: build request failed: %v\n", err)
+		buildSpinner.Stop()
+		PrintError("Build request failed: %v", err)
 		os.Exit(1)
 	}
 	defer resp.Body.Close()
 
 	var result struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error"`
+		OK    bool `json:"ok"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to decode response: %v\n", err)
+		buildSpinner.Stop()
+		PrintError("Failed to decode response: %v", err)
 		os.Exit(1)
 	}
 
-	if result.Error != "" {
-		fmt.Fprintf(os.Stderr, "Error: build failed: %s\n", result.Error)
+	buildSpinner.Stop()
+
+	if result.Error != nil {
+		PrintError("Build failed: %s", result.Error.Message)
 		os.Exit(1)
 	}
 
 	if !result.OK {
-		fmt.Fprintf(os.Stderr, "Error: build failed\n")
+		PrintError("Build failed")
 		os.Exit(1)
 	}
 
-	fmt.Println("Build successful!")
+	PrintSuccess("Build successful")
 
-	fmt.Println("\nGenerating manifest...")
+	PrintStep(EmojiPackage, "Generating manifest...")
 	man, err := generateManifest(outdir, componentPaths)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to generate manifest: %v\n", err)
+		PrintError("Failed to generate manifest: %v", err)
 		os.Exit(1)
 	}
 
 	manifestPath := filepath.Join(entryDir, ManifestFile)
 	manifestData, err := json.MarshalIndent(man, "", "  ")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to marshal manifest: %v\n", err)
+		PrintError("Failed to marshal manifest: %v", err)
 		os.Exit(1)
 	}
 
 	if err := os.WriteFile(manifestPath, manifestData, 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to write manifest: %v\n", err)
+		PrintError("Failed to write manifest: %v", err)
 		os.Exit(1)
 	}
+	PrintFile(manifestPath)
+	PrintSuccess("Manifest created")
 
-	fmt.Printf("Created %s\n", manifestPath)
-
-	fmt.Println("\nCopying public assets...")
+	PrintStep(EmojiCopy, "Copying public assets...")
 	publicSrc := filepath.Join(originalCwd, PublicDir)
 	publicDst := filepath.Join(entryDir, PublicDir)
 	if err := copyPublicDir(publicSrc, publicDst); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to copy public dir: %v\n", err)
+		PrintError("Failed to copy public dir: %v", err)
 		os.Exit(1)
 	}
+	PrintSuccess("Assets copied")
 
-	fmt.Println("\nBuild complete! You can now compile your Go binary with embedded assets.")
+	PrintDone("Build complete! You can now compile your Go binary with embedded assets.")
 }
 
 func copyPublicDir(src, dst string) error {

@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"html/template"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -86,18 +87,18 @@ func extractComponentPaths(filename string) ([]string, error) {
 		firstArg := callExpr.Args[argIndex]
 		lit, ok := firstArg.(*ast.BasicLit)
 		if !ok {
-			fmt.Fprintf(os.Stderr, "Warning: NewPage call with non-string argument at %s\n", fset.Position(callExpr.Pos()))
+			slog.Warn("NewPage call with non-string argument", "position", fset.Position(callExpr.Pos()))
 			return true
 		}
 
 		if lit.Kind != token.STRING {
-			fmt.Fprintf(os.Stderr, "Warning: NewPage call with non-string argument at %s\n", fset.Position(callExpr.Pos()))
+			slog.Warn("NewPage call with non-string argument", "position", fset.Position(callExpr.Pos()))
 			return true
 		}
 
 		path, err := strconv.Unquote(lit.Value)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to unquote string at %s: %v\n", fset.Position(lit.Pos()), err)
+			slog.Warn("failed to unquote string", "position", fset.Position(lit.Pos()), "error", err)
 			return true
 		}
 
