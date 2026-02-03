@@ -186,6 +186,7 @@ var contentTypes = map[string]string{
 	".woff2": "font/woff2",
 	".ttf":   "font/ttf",
 	".eot":   "application/vnd.ms-fontobject",
+	".ico":   "image/x-icon",
 }
 
 func getContentType(path string) string {
@@ -206,7 +207,7 @@ func publicFileExistsInFS(path string) bool {
 }
 
 func publicFileExistsInEmbed(assetsFS embed.FS, path string) bool {
-	embedPath := filepath.Join(PublicDir, path)
+	embedPath := filepath.Join(BifrostDir, PublicDir, path)
 	embedPath = filepath.ToSlash(embedPath)
 	_, err := assetsFS.ReadFile(embedPath)
 	return err == nil
@@ -237,7 +238,7 @@ func servePublicFromFS(w http.ResponseWriter, req *http.Request, path string) {
 }
 
 func servePublicFromEmbed(assetsFS embed.FS, w http.ResponseWriter, req *http.Request, path string) {
-	embedPath := filepath.Join(PublicDir, path)
+	embedPath := filepath.Join(BifrostDir, PublicDir, path)
 	embedPath = filepath.ToSlash(embedPath)
 
 	data, err := assetsFS.ReadFile(embedPath)
