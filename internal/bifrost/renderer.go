@@ -21,6 +21,26 @@ import (
 
 var activeBuildWatchers sync.Map
 
+type BifrostError struct {
+	Message string
+	Stack   string
+	Errors  []BifrostErrorDetail
+}
+
+func (e *BifrostError) Error() string {
+	return e.Message
+}
+
+type BifrostErrorDetail struct {
+	Message   string
+	File      string
+	Line      int
+	Column    int
+	LineText  string
+	Specifier string
+	Referrer  string
+}
+
 type Renderer struct {
 	cmd           *exec.Cmd
 	socket        string
@@ -80,6 +100,10 @@ type renderResponse struct {
 	Error *struct {
 		Message string `json:"message"`
 		Stack   string `json:"stack"`
+		Errors  []struct {
+			Message string `json:"message"`
+			Stack   string `json:"stack"`
+		} `json:"errors"`
 	} `json:"error"`
 }
 
@@ -105,11 +129,24 @@ func (r *Renderer) Render(componentPath string, props map[string]interface{}) (r
 	}
 
 	if result.Error != nil {
-		fullError := result.Error.Message
-		if result.Error.Stack != "" {
-			fullError = result.Error.Stack
+		var sb strings.Builder
+		sb.WriteString(result.Error.Message)
+
+		if len(result.Error.Errors) > 0 {
+			sb.WriteString("\n\nErrors:")
+			for i, err := range result.Error.Errors {
+				sb.WriteString(fmt.Sprintf("\n  %d. %s", i+1, err.Message))
+				if err.Stack != "" {
+					sb.WriteString(fmt.Sprintf("\n     Stack: %s", err.Stack))
+				}
+			}
 		}
-		return renderedPage{}, fmt.Errorf("%s", fullError)
+
+		if result.Error.Stack != "" {
+			sb.WriteString(fmt.Sprintf("\n\nStack:\n%s", result.Error.Stack))
+		}
+
+		return renderedPage{}, fmt.Errorf("%s", sb.String())
 	}
 
 	page := renderedPage{
@@ -142,10 +179,24 @@ func (r *Renderer) postJSON(endpoint string, body interface{}, result interface{
 	return json.NewDecoder(resp.Body).Decode(result)
 }
 
+type errorPosition struct {
+	LineText string `json:"lineText"`
+	File     string `json:"file"`
+	Line     int    `json:"line"`
+	Column   int    `json:"column"`
+}
+
 type buildResponse struct {
 	OK    bool `json:"ok"`
 	Error *struct {
 		Message string `json:"message"`
+		Stack   string `json:"stack"`
+		Errors  []struct {
+			Message   string        `json:"message"`
+			Position  errorPosition `json:"position"`
+			Specifier string        `json:"specifier"`
+			Referrer  string        `json:"referrer"`
+		} `json:"errors"`
 	} `json:"error"`
 }
 
@@ -169,11 +220,27 @@ func (r *Renderer) Build(entrypoints []string, outdir string) error {
 	}
 
 	if result.Error != nil {
-		return fmt.Errorf("build error: %s", result.Error.Message)
+		errors := make([]BifrostErrorDetail, len(result.Error.Errors))
+		for i, err := range result.Error.Errors {
+			errors[i] = BifrostErrorDetail{
+				Message:   err.Message,
+				File:      err.Position.File,
+				Line:      err.Position.Line,
+				Column:    err.Position.Column,
+				LineText:  err.Position.LineText,
+				Specifier: err.Specifier,
+				Referrer:  err.Referrer,
+			}
+		}
+		return &BifrostError{
+			Message: result.Error.Message,
+			Stack:   result.Error.Stack,
+			Errors:  errors,
+		}
 	}
 
 	if !result.OK {
-		return fmt.Errorf("build failed")
+		return fmt.Errorf("build failed for entrypoints %v -> %s", entrypoints, outdir)
 	}
 
 	return nil

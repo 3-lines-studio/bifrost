@@ -11,39 +11,59 @@ const componentCache = new Map<
   { Component: React.ComponentType; Head?: React.ComponentType }
 >();
 
-interface RenderResult {
-  html?: string;
-  head?: string;
-  error?: {
-    message: string;
-    stack?: string;
+interface ErrorDetail {
+  message: string;
+  position?: {
+    file?: string;
+    line: number;
+    column: number;
+    lineText?: string;
   };
+  specifier?: string;
+  referrer?: string;
 }
 
-interface BuildResult {
+interface Result {
   ok?: boolean;
   error?: {
     message: string;
     stack?: string;
+    errors?: ErrorDetail[];
   };
 }
 
-function createErrorResponse(message: string, stack?: string): Response {
-  const result: RenderResult = {
-    error: {
-      message,
-      stack,
-    },
-  };
-  return new Response(JSON.stringify(result) + "\n");
+function serializeError(error: unknown): {
+  message: string;
+  stack?: string;
+} {
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+  return { message: String(error) };
 }
 
-function createBuildErrorResponse(message: string): Response {
-  const result: BuildResult = {
+function createError(
+  message: string,
+  err?: { errors?: ErrorDetail[] } | Error,
+): Response {
+  const result: Result = {
     error: {
       message,
     },
   };
+
+  if (err) {
+    if ("errors" in err && Array.isArray(err.errors)) {
+      result.error!.errors = err.errors;
+    } else if (err instanceof Error) {
+      const serialized = serializeError(err);
+      result.error!.stack = serialized.stack;
+    }
+  }
+
   return new Response(JSON.stringify(result) + "\n");
 }
 
@@ -53,13 +73,13 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
     body = await req.json();
   } catch (err) {
     const message = err instanceof Error ? err.message : "Invalid JSON body";
-    return createErrorResponse(`Failed to parse request: ${message}`);
+    return createError(`Failed to parse request: ${message}`);
   }
 
   const { path, props } = body;
 
   if (!path) {
-    return createErrorResponse("Missing 'path' in request");
+    return createError("Missing 'path' in request");
   }
 
   const importPath = isDev ? `${path}?t=${Date.now()}` : path;
@@ -86,12 +106,11 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const stack = err instanceof Error ? err.stack : undefined;
-    return createErrorResponse(`Failed to import component: ${message}`, stack);
+    return createError(`Failed to import component: ${message}`, err);
   }
 
   if (!Component) {
-    return createErrorResponse(
+    return createError(
       `No component export found in ${path}. Expected default export, Page export, or a function export.`,
     );
   }
@@ -105,8 +124,7 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
   } catch (renderErr) {
     const message =
       renderErr instanceof Error ? renderErr.message : String(renderErr);
-    const stack = renderErr instanceof Error ? renderErr.stack : undefined;
-    return createErrorResponse(`Render error: ${message}`, stack);
+    return createError(`Render error: ${message}`, renderErr);
   }
 
   let head = "";
@@ -129,17 +147,17 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
     body = await req.json();
   } catch (err) {
     const message = err instanceof Error ? err.message : "Invalid JSON body";
-    return createBuildErrorResponse(`Failed to parse request: ${message}`);
+    return createError(`Failed to parse request: ${message}`, err);
   }
 
   const { entrypoints, outdir } = body;
 
   if (!Array.isArray(entrypoints) || entrypoints.length === 0) {
-    return createBuildErrorResponse("Missing entrypoints");
+    return createError("Missing entrypoints");
   }
 
   if (!outdir) {
-    return createBuildErrorResponse("Missing outdir");
+    return createError("Missing outdir");
   }
 
   const isProduction =
@@ -165,16 +183,27 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
     if (!result.success) {
       const errors = result.logs
         .filter((log) => log.level === "error")
-        .map((log) => log.message)
-        .join("\n");
-      return createBuildErrorResponse(`Build failed: ${errors}`);
+        .map((log) => ({
+          message: log.message,
+          position: log.position
+            ? {
+                file: log.file,
+                line: log.position.line,
+                column: log.position.column,
+                lineText: log.position.lineText,
+              }
+            : undefined,
+          specifier: log.data?.specifier,
+          referrer: log.data?.referrer,
+        }));
+
+      return createError("Build failed", { errors });
     }
 
-    const response: BuildResult = { ok: true };
+    const response: Result = { ok: true };
     return new Response(JSON.stringify(response) + "\n");
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return createBuildErrorResponse(`Build error: ${message}`);
+    return createError("Build failed", err);
   }
 }
 

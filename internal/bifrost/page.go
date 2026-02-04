@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"html"
-	"html/template"
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -124,41 +122,57 @@ func (p *Page) renderPage(w http.ResponseWriter, props map[string]interface{}, p
 	serveHTML(w, fullHTML)
 }
 
-func (p *Page) serveError(w http.ResponseWriter, err error) {
-	message := "Internal Server Error"
-	var stackTrace string
+type errorData struct {
+	Message    string
+	StackTrace string
+	Errors     []errorDetail
+	IsDev      bool
+}
 
-	if err != nil {
-		message, stackTrace = splitErrorAndStack(err)
+type errorDetail struct {
+	Message   string
+	File      string
+	Line      int
+	Column    int
+	LineText  string
+	Specifier string
+	Referrer  string
+}
+
+func (p *Page) serveError(w http.ResponseWriter, err error) {
+	data := errorData{
+		Message: "Internal Server Error",
+		IsDev:   p.isDev,
+	}
+
+	if bifrostErr, ok := err.(*BifrostError); ok {
+		data.Message = bifrostErr.Message
+		data.StackTrace = bifrostErr.Stack
+		data.Errors = make([]errorDetail, len(bifrostErr.Errors))
+		for i, e := range bifrostErr.Errors {
+			data.Errors[i] = errorDetail{
+				Message:   e.Message,
+				File:      e.File,
+				Line:      e.Line,
+				Column:    e.Column,
+				LineText:  e.LineText,
+				Specifier: e.Specifier,
+				Referrer:  e.Referrer,
+			}
+		}
+	} else if err != nil {
+		data.Message = err.Error()
 	}
 
 	var buf bytes.Buffer
-	if err := ErrorTemplate.Execute(&buf, map[string]interface{}{
-		"Message":    template.HTML(html.EscapeString(message)),
-		"StackTrace": template.HTML(html.EscapeString(stackTrace)),
-		"IsDev":      p.isDev,
-	}); err != nil {
+	if err := ErrorTemplate.Execute(&buf, data); err != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("<!doctype html><html><body><pre>" + html.EscapeString(message) + "</pre></body></html>"))
+		w.Write([]byte("<!doctype html><html><body><pre>" + html.EscapeString(data.Message) + "</pre></body></html>"))
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusInternalServerError)
 	w.Write(buf.Bytes())
-}
-
-func splitErrorAndStack(err error) (message string, stackTrace string) {
-	if err == nil {
-		return "Internal Server Error", ""
-	}
-
-	errStr := err.Error()
-
-	if idx := strings.Index(errStr, "\n"); idx != -1 {
-		return errStr[:idx], errStr[idx+1:]
-	}
-
-	return errStr, ""
 }

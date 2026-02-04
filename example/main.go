@@ -44,6 +44,7 @@ func main() {
 		return nil, fmt.Errorf("this is a test error to verify the error page works correctly")
 	})
 	renderErrorHandler := r.NewPage("./pages/error-render.tsx")
+	importErrorHandler := r.NewPage("./pages/error-import.tsx")
 
 	router := chi.NewRouter()
 
@@ -51,8 +52,9 @@ func main() {
 	router.Handle("/about", aboutHandler)
 	router.Handle("/nested", nestedHandler)
 	router.Handle("/message/{message}", messageHandler)
-	router.Handle("/error-test", errorHandler)
+	router.Handle("/error", errorHandler)
 	router.Handle("/error-render", renderErrorHandler)
+	router.Handle("/error-import", importErrorHandler)
 
 	assetRouter := chi.NewRouter()
 	bifrost.RegisterAssetRoutes(assetRouter, r, router)
