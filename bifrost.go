@@ -50,7 +50,6 @@ func RegisterAssetRoutes(r bifrost.Router, renderer *bifrost.Renderer, appRouter
 	if bifrost.IsDev() {
 		assets := bifrost.AssetHandler()
 		r.Handle("/dist/*", assets)
-		r.Handle("/__bifrost_reload", bifrost.DevHandler())
 		if renderer != nil {
 			r.Handle("/*", bifrost.PublicHandler(renderer.AssetsFS, appRouter))
 		} else {

@@ -6,14 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/fsnotify/fsnotify"
 )
 
 func waitForSocket(path string, timeout time.Duration) error {
@@ -273,65 +270,4 @@ func servePublicFromEmbed(assetsFS embed.FS, w http.ResponseWriter, req *http.Re
 	contentType := getContentType(path)
 	w.Header().Set("Content-Type", contentType)
 	w.Write(data)
-}
-
-func watchDirs(watcher *fsnotify.Watcher, root string) error {
-	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			slog.Error("error accessing path", "path", path, "error", err)
-			return nil
-		}
-
-		if !d.IsDir() {
-			return nil
-		}
-
-		if ShouldSkipDir(d.Name()) {
-			return filepath.SkipDir
-		}
-
-		return watcher.Add(path)
-	})
-}
-
-var skipDirs = map[string]struct{}{
-	".git":         {},
-	"node_modules": {},
-	".bifrost":     {},
-	"public":       {},
-}
-
-func ShouldSkipDir(name string) bool {
-	_, exists := skipDirs[name]
-	return exists
-}
-
-func isWatchEvent(op fsnotify.Op) bool {
-	return op&(fsnotify.Create|fsnotify.Write|fsnotify.Remove|fsnotify.Rename) != 0
-}
-
-func shouldAddWatchDir(event fsnotify.Event) bool {
-	if event.Op&fsnotify.Create == 0 {
-		return false
-	}
-
-	info, err := os.Stat(event.Name)
-	if err != nil {
-		return false
-	}
-
-	return info.IsDir() && !ShouldSkipDir(info.Name())
-}
-
-var rebuildExts = map[string]bool{
-	".ts":  true,
-	".tsx": true,
-	".js":  true,
-	".jsx": true,
-	".css": true,
-}
-
-func ShouldRebuildForPath(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	return rebuildExts[ext]
 }

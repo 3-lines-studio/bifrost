@@ -34,17 +34,6 @@ func EmbeddedAssetHandler(assetsFS embed.FS) http.Handler {
 	})
 }
 
-func DevHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path == "/__bifrost_reload" {
-			serveReloadSSE(w, req)
-			return
-		}
-
-		http.NotFound(w, req)
-	})
-}
-
 func PublicHandler(assetsFS embed.FS, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := strings.TrimPrefix(req.URL.Path, "/")

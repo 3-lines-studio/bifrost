@@ -130,14 +130,6 @@ func (p *Page) setupStaticPage() error {
 		return err
 	}
 
-	if p.opts.Watch {
-		watchDir := p.opts.WatchDir
-		if watchDir == "" {
-			watchDir = "."
-		}
-		p.renderer.startBuildWatcher(p.entryPath, p.outdir, watchDir)
-	}
-
 	return nil
 }
 
@@ -164,23 +156,10 @@ func (p *Page) handlePropsError(w http.ResponseWriter, req *http.Request, err er
 }
 
 func (p *Page) renderPage(w http.ResponseWriter, props map[string]interface{}, page renderedPage) {
-	finalScript := p.scriptSrc
-	finalCSS := p.cssHref
-
-	if p.opts.Watch {
-		stamp := fmt.Sprintf("%d", time.Now().UnixNano())
-		finalScript = addCacheBust(finalScript, stamp)
-		finalCSS = addCacheBust(finalCSS, stamp)
-	}
-
-	fullHTML, err := htmlShell(page.Body, props, finalScript, p.opts.Title, page.Head, finalCSS, p.chunks)
+	fullHTML, err := htmlShell(page.Body, props, p.scriptSrc, p.opts.Title, page.Head, p.cssHref, p.chunks)
 	if err != nil {
 		p.serveError(w, err)
 		return
-	}
-
-	if p.opts.Watch {
-		fullHTML = appendReloadScript(fullHTML)
 	}
 
 	serveHTML(w, fullHTML)

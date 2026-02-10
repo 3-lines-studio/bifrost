@@ -31,9 +31,6 @@ var (
 	errorTemplateSource string
 	ErrorTemplate       = template.Must(template.New("error").Parse(errorTemplateSource))
 
-	//go:embed reload.js
-	reloadScriptSource string
-
 	//go:embed bun_renderer.ts
 	BunRendererSource string
 )

@@ -18,8 +18,6 @@ type options struct {
 	Outdir             string
 	PublicDir          string
 	Title              string
-	Watch              bool
-	WatchDir           string
 	ErrorComponentPath string
 	Static             bool
 }

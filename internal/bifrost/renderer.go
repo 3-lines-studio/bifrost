@@ -13,13 +13,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
-
-	"github.com/fsnotify/fsnotify"
 )
-
-var activeBuildWatchers sync.Map
 
 type BifrostError struct {
 	Message string
@@ -303,11 +298,9 @@ func buildOptions(componentPath string, opts ...interface{}) options {
 		}
 	}
 
-	isDev := IsDev()
 	result := options{
 		ComponentPath: componentPath,
 		PropsLoader:   loader,
-		Watch:         isDev,
 	}
 
 	for _, opt := range pageOpts {
@@ -410,14 +403,6 @@ func (r *Renderer) setupPage(opts options, entryDir string, outdir string, entry
 		return err
 	}
 
-	if opts.Watch {
-		watchDir := opts.WatchDir
-		if watchDir == "" {
-			watchDir = "."
-		}
-		r.startBuildWatcher(entryPath, outdir, watchDir)
-	}
-
 	return nil
 }
 
@@ -428,76 +413,6 @@ func (r *Renderer) loadManifestFromEmbed(path string) (*buildManifest, error) {
 		return nil, err
 	}
 	return parseManifest(data)
-}
-
-type debouncer struct {
-	timer *time.Timer
-	delay time.Duration
-	fn    func()
-}
-
-func newDebouncer(delay time.Duration, fn func()) *debouncer {
-	return &debouncer{delay: delay, fn: fn}
-}
-
-func (d *debouncer) trigger() {
-	if d.timer != nil {
-		d.timer.Stop()
-	}
-	d.timer = time.AfterFunc(d.delay, d.fn)
-}
-
-func (r *Renderer) startBuildWatcher(entryPath string, outdir string, watchDir string) {
-	key := entryPath + "::" + outdir + "::" + watchDir
-	if _, loaded := activeBuildWatchers.LoadOrStore(key, struct{}{}); loaded {
-		return
-	}
-
-	go func() {
-		watcher, err := fsnotify.NewWatcher()
-		if err != nil {
-			return
-		}
-		defer watcher.Close()
-
-		if err := watchDirs(watcher, watchDir); err != nil {
-			return
-		}
-
-		debounce := newDebouncer(200*time.Millisecond, func() {
-			if err := r.Build([]string{entryPath}, outdir); err == nil {
-				r.ClearCache()
-				if events := GetReloadEvents(); events != nil {
-					events.notify()
-				}
-			}
-		})
-
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-
-				if !isWatchEvent(event.Op) {
-					continue
-				}
-
-				if shouldAddWatchDir(event) {
-					_ = watchDirs(watcher, event.Name)
-					continue
-				}
-
-				if !ShouldRebuildForPath(event.Name) {
-					continue
-				}
-
-				debounce.trigger()
-			case <-watcher.Errors:
-			}
-		}
-	}()
 }
 
 func (r *Renderer) SetAssetsFS(fs embed.FS) {
