@@ -293,6 +293,8 @@ func buildOptions(componentPath string, opts ...interface{}) options {
 		switch o := opt.(type) {
 		case propsLoader:
 			loader = o
+		case func(*http.Request) (map[string]interface{}, error):
+			loader = o
 		case PageOption:
 			pageOpts = append(pageOpts, o)
 		}
