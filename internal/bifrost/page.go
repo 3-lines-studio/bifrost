@@ -156,7 +156,7 @@ func (p *Page) handlePropsError(w http.ResponseWriter, req *http.Request, err er
 }
 
 func (p *Page) renderPage(w http.ResponseWriter, props map[string]interface{}, page renderedPage) {
-	fullHTML, err := htmlShell(page.Body, props, p.scriptSrc, p.opts.Title, page.Head, p.cssHref, p.chunks)
+	fullHTML, err := htmlShell(page.Body, props, p.scriptSrc, page.Head, p.cssHref, p.chunks)
 	if err != nil {
 		p.serveError(w, err)
 		return

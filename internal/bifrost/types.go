@@ -17,7 +17,6 @@ type options struct {
 	EntryDir           string
 	Outdir             string
 	PublicDir          string
-	Title              string
 	ErrorComponentPath string
 	Static             bool
 }
@@ -46,11 +45,5 @@ type Router interface {
 func WithStatic() PageOption {
 	return func(opts *options) {
 		opts.Static = true
-	}
-}
-
-func WithTitle(title string) PageOption {
-	return func(opts *options) {
-		opts.Title = title
 	}
 }

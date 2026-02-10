@@ -19,10 +19,6 @@ func WithStatic() PageOption {
 	return bifrost.WithStatic()
 }
 
-func WithTitle(title string) PageOption {
-	return bifrost.WithTitle(title)
-}
-
 func WithAssetsFS(fs embed.FS) Option {
 	return func(r *bifrost.Renderer) {
 		r.SetAssetsFS(fs)

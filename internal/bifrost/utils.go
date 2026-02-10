@@ -26,13 +26,17 @@ func waitForSocket(path string, timeout time.Duration) error {
 
 const scriptTagEndPattern = "</"
 
-func htmlShell(bodyHTML string, props map[string]interface{}, scriptSrc string, title string, headHTML string, cssHref string, chunks []string) (string, error) {
+func htmlShell(bodyHTML string, props map[string]interface{}, scriptSrc string, headHTML string, cssHref string, chunks []string) (string, error) {
 	if scriptSrc == "" {
 		return "", fmt.Errorf("missing script src")
 	}
 
-	if title == "" {
-		title = "Bifrost"
+	title := "Bifrost"
+	if headHTML != "" {
+		headHTMLLower := strings.ToLower(headHTML)
+		if strings.Contains(headHTMLLower, "<title") {
+			title = ""
+		}
 	}
 
 	if props == nil {
@@ -52,8 +56,7 @@ func htmlShell(bodyHTML string, props map[string]interface{}, scriptSrc string, 
 	}
 
 	head := "<meta charset=\"UTF-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />"
-	headHTMLLower := strings.ToLower(headHTML)
-	if !strings.Contains(headHTMLLower, "<title") {
+	if title != "" {
 		head += "<title>" + title + "</title>"
 	}
 	if headHTML != "" {

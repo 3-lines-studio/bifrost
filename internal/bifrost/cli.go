@@ -21,10 +21,10 @@ const (
 )
 
 const (
-	EmojiCheck   = "✓"
-	EmojiCross   = "✗"
-	EmojiWarning = "⚠"
-	EmojiInfo    = "ℹ"
+	EmojiCheck   = "✅"
+	EmojiCross   = "❌"
+	EmojiWarning = "⚠️"
+	EmojiInfo    = "ℹ️"
 	EmojiRocket  = "🚀"
 	EmojiFolder  = "📁"
 	EmojiFile    = "📝"
@@ -33,7 +33,7 @@ const (
 	EmojiPackage = "📦"
 	EmojiCopy    = "📂"
 	EmojiSparkle = "✨"
-	EmojiGear    = "⚙"
+	EmojiGear    = "⚙️"
 )
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}

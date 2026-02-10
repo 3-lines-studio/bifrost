@@ -1,0 +1,28 @@
+# Bifrost
+
+> Bifrost is a Go library for server-side rendering React components using Bun. It bridges Go backends with React frontends via Unix socket communication.
+
+Bifrost enables Go HTTP servers to render React components on the server, providing full SSR capabilities while maintaining a simple API. Static pages are pre-rendered at build time into HTML with client-side React hydration (MPA-style), requiring no Bun runtime to serve. Development hot reload is handled by Air with proxy configuration. Production deployment uses embedded assets for single binary distribution.
+
+Key features:
+- Server-side rendering of React components
+- Props loading from Go to React
+- MPA-style static pages with pre-rendered HTML + client hydration (no runtime Bun)
+- Hot reload via Air with proxy configuration
+- Single binary deployment with embedded assets
+
+## Docs
+
+- [API Reference](docs.md): Complete API documentation including Renderer, Page handlers, static generation, and configuration options
+- [Example Application](example/main.go): Working example with SSR pages, static pages, and dynamic routes
+- [Air Configuration](example/.air.toml): Hot reload proxy configuration for development
+- [Internal Renderer](internal/bifrost/renderer.go): Renderer implementation and build system
+- [Page Handler](internal/bifrost/page.go): HTTP handler logic for SSR and static pages
+- [Type Definitions](internal/bifrost/types.go): Core types including RedirectError and options
+
+## Optional
+
+- [Public API](bifrost.go): Main public API surface with exported functions and types
+- [Build System](internal/bifrost/build.go): Asset building and bundling logic
+- [Error Templates](internal/bifrost/lib.go): Error page templates and utilities
+- [Test Suite](bifrost_test.go): Integration tests demonstrating usage patterns
