@@ -23,6 +23,10 @@ var (
 	clientEntryTemplateSource string
 	ClientEntryTemplate       = template.Must(template.New("client-entry").Parse(clientEntryTemplateSource))
 
+	//go:embed static_client_entry.tsx
+	staticClientEntryTemplateSource string
+	StaticClientEntryTemplate       = template.Must(template.New("static-client-entry").Parse(staticClientEntryTemplateSource))
+
 	//go:embed error.html
 	errorTemplateSource string
 	ErrorTemplate       = template.Must(template.New("error").Parse(errorTemplateSource))
@@ -46,14 +50,19 @@ func IsDev() bool {
 	return watchEnv == "1" || watchEnv == "true" || watchEnv == "yes"
 }
 
-func extractComponentPaths(filename string) ([]string, error) {
+type pageConfig struct {
+	path   string
+	static bool
+}
+
+func extractPageConfigs(filename string) ([]pageConfig, error) {
 	fset := token.NewFileSet()
 	node, err := parser.ParseFile(fset, filename, nil, parser.ParseComments)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse file: %w", err)
 	}
 
-	var paths []string
+	var configs []pageConfig
 	seen := make(map[string]bool)
 
 	ast.Inspect(node, func(n ast.Node) bool {
@@ -102,18 +111,55 @@ func extractComponentPaths(filename string) ([]string, error) {
 			return true
 		}
 
+		static := hasWithStaticOption(callExpr.Args[argIndex:])
+
 		if !seen[path] {
 			seen[path] = true
-			paths = append(paths, path)
+			configs = append(configs, pageConfig{path: path, static: static})
 		}
 
 		return true
 	})
 
+	return configs, nil
+}
+
+func hasWithStaticOption(args []ast.Expr) bool {
+	for _, arg := range args {
+		callExpr, ok := arg.(*ast.CallExpr)
+		if !ok {
+			continue
+		}
+
+		var funcName string
+		switch fn := callExpr.Fun.(type) {
+		case *ast.SelectorExpr:
+			funcName = fn.Sel.Name
+		case *ast.Ident:
+			funcName = fn.Name
+		}
+
+		if funcName == "WithStatic" {
+			return true
+		}
+	}
+	return false
+}
+
+func extractComponentPaths(filename string) ([]string, error) {
+	configs, err := extractPageConfigs(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	paths := make([]string, len(configs))
+	for i, config := range configs {
+		paths[i] = config.path
+	}
 	return paths, nil
 }
 
-func generateManifest(outdir string, componentPaths []string) (*buildManifest, error) {
+func generateManifest(outdir string, componentPaths []string, staticFlags map[string]bool) (*buildManifest, error) {
 	entries := make(map[string]manifestEntry)
 	chunks := make(map[string]string)
 
@@ -165,10 +211,12 @@ func generateManifest(outdir string, componentPaths []string) (*buildManifest, e
 				css = dedupeCSSFile(outdir, css, cssFiles, cssHashToFile)
 			}
 
+			isStatic := staticFlags[entryName]
 			entries[entryName] = manifestEntry{
 				Script: script,
 				CSS:    css,
 				Chunks: entryChunks,
+				Static: isStatic,
 			}
 		}
 	}
@@ -218,4 +266,80 @@ func findEntryChunks(outdir string, entryScript string, allChunks map[string]str
 	}
 
 	return chunks
+}
+
+func generateStaticHTMLFiles(entryDir, outdir string, componentPaths []string, heads map[string]string, man *buildManifest) error {
+	pagesDir := filepath.Join(entryDir, "pages")
+	if err := os.MkdirAll(pagesDir, 0755); err != nil {
+		return fmt.Errorf("failed to create pages directory: %w", err)
+	}
+
+	for _, componentPath := range componentPaths {
+		entryName := EntryNameForPath(componentPath)
+		pageDir := filepath.Join(pagesDir, entryName)
+		if err := os.MkdirAll(pageDir, 0755); err != nil {
+			return fmt.Errorf("failed to create page directory %s: %w", pageDir, err)
+		}
+
+		scriptSrc, cssHref, chunks, _ := getAssetsFromManifest(man, entryName)
+		htmlPath := filepath.Join(pageDir, "index.html")
+
+		// Get the rendered head HTML for this page
+		headHTML := heads[componentPath]
+
+		if err := writeStaticHTML(htmlPath, scriptSrc, cssHref, chunks, headHTML, outdir); err != nil {
+			return fmt.Errorf("failed to write static HTML for %s: %w", componentPath, err)
+		}
+
+		fmt.Printf("  📄 %s\n", htmlPath)
+	}
+
+	return nil
+}
+
+func writeStaticHTML(htmlPath, scriptSrc, cssHref string, chunks []string, headHTML string, outdir string) error {
+	relScript := makeRelativeToPages(scriptSrc)
+	relChunks := make([]string, len(chunks))
+	for i, chunk := range chunks {
+		relChunks[i] = makeRelativeToPages(chunk)
+	}
+
+	var cssLink string
+	if cssHref != "" {
+		cssLink = fmt.Sprintf(`<link rel="stylesheet" href="%s" />`, makeRelativeToPages(cssHref))
+	}
+
+	head := `<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />`
+	if headHTML != "" {
+		head += headHTML
+	}
+	head += cssLink
+
+	var chunksHTML strings.Builder
+	for _, chunk := range relChunks {
+		chunksHTML.WriteString(fmt.Sprintf(`<script src="%s" type="module" defer></script>`, chunk))
+		chunksHTML.WriteString("\n")
+	}
+
+	html := fmt.Sprintf(`<!doctype html>
+<html lang="en">
+  <head>
+    %s
+  </head>
+  <body>
+    <div id="app"></div>
+%s    <script src="%s" type="module" defer></script>
+  </body>
+</html>
+`, head, chunksHTML.String(), relScript)
+
+	return os.WriteFile(htmlPath, []byte(html), 0644)
+}
+
+func makeRelativeToPages(path string) string {
+	path = strings.TrimPrefix(path, "/")
+	parts := strings.Split(path, "/")
+	depth := 2
+	prefix := strings.Repeat("../", depth)
+	return prefix + strings.Join(parts, "/")
 }

@@ -30,7 +30,7 @@ func main() {
 			"name": "Nested",
 		}, nil
 	})
-	aboutHandler := r.NewPage("./pages/about.tsx")
+	aboutHandler := r.NewPage("./pages/about.tsx", bifrost.WithStatic())
 	messageHandler := r.NewPage("./pages/home.tsx", func(req *http.Request) (map[string]interface{}, error) {
 		message := chi.URLParam(req, "message")
 		if message == "" {

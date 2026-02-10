@@ -103,6 +103,29 @@ func writeClientEntry(path string, componentImport string) error {
 	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
+func writeStaticClientEntry(path string, componentImport string) error {
+	if path == "" {
+		return fmt.Errorf("missing entry path")
+	}
+
+	if componentImport == "" {
+		return fmt.Errorf("missing component import")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+
+	var buf bytes.Buffer
+	if err := StaticClientEntryTemplate.Execute(&buf, map[string]string{
+		"ComponentImport": componentImport,
+	}); err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, buf.Bytes(), 0o644)
+}
+
 func serveHTML(w http.ResponseWriter, html string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -125,12 +148,12 @@ func parseManifest(data []byte) (*buildManifest, error) {
 	return &manifest, nil
 }
 
-func getAssetsFromManifest(man *buildManifest, entryName string) (scriptSrc, cssHref string, chunks []string) {
+func getAssetsFromManifest(man *buildManifest, entryName string) (scriptSrc, cssHref string, chunks []string, isStatic bool) {
 	if man != nil && man.Entries[entryName].Script != "" {
 		entry := man.Entries[entryName]
-		return entry.Script, entry.CSS, entry.Chunks
+		return entry.Script, entry.CSS, entry.Chunks, entry.Static
 	}
-	return "/dist/" + entryName + ".js", "/dist/" + entryName + ".css", nil
+	return "/dist/" + entryName + ".js", "/dist/" + entryName + ".css", nil, false
 }
 
 func EntryNameForPath(componentPath string) string {

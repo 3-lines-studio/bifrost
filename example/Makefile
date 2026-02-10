@@ -4,7 +4,7 @@ init:
 	go run ../cmd/init .
 
 dev:
-	BIFROST_DEV=1 air --build.exclude_dir "node_modules,.bifrost"
+	BIFROST_DEV=1 air -c .air.toml
 
 
 build:

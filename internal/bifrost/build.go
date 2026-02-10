@@ -46,20 +46,24 @@ func BuildCmd() {
 	}
 
 	PrintStep(EmojiSearch, "Scanning %s for components...", filepath.Base(mainFile))
-	componentPaths, err := extractComponentPaths(filepath.Base(mainFile))
+	pageConfigs, err := extractPageConfigs(filepath.Base(mainFile))
 	if err != nil {
 		PrintError("Failed to parse %s: %v", mainFile, err)
 		os.Exit(1)
 	}
 
-	if len(componentPaths) == 0 {
+	if len(pageConfigs) == 0 {
 		PrintError("No NewPage calls found in %s", mainFile)
 		os.Exit(1)
 	}
 
-	PrintSuccess("Found %d component(s)", len(componentPaths))
-	for _, path := range componentPaths {
-		PrintFile(path)
+	PrintSuccess("Found %d component(s)", len(pageConfigs))
+	for _, config := range pageConfigs {
+		mode := "SSR"
+		if config.static {
+			mode = "Static"
+		}
+		PrintFile(config.path + " [" + mode + "]")
 	}
 
 	entryDir := filepath.Join(originalCwd, BifrostDir)
@@ -78,6 +82,9 @@ func BuildCmd() {
 
 	PrintStep(EmojiFile, "Generating client entry files...")
 	var entryFiles []string
+	staticFlags := make(map[string]bool)
+	entryToConfig := make(map[string]pageConfig)
+
 	defer func() {
 		PrintStep(EmojiGear, "Cleaning up entry files...")
 		for _, entryFile := range entryFiles {
@@ -87,21 +94,30 @@ func BuildCmd() {
 		}
 	}()
 
-	for _, componentPath := range componentPaths {
-		entryName := EntryNameForPath(componentPath)
+	for _, config := range pageConfigs {
+		entryName := EntryNameForPath(config.path)
 		entryPath := filepath.Join(entryDir, entryName+".tsx")
+		staticFlags[entryName] = config.static
+		entryToConfig[entryPath] = config
 
-		absComponentPath := filepath.Join(originalCwd, componentPath)
+		absComponentPath := filepath.Join(originalCwd, config.path)
 
 		componentImport, err := ComponentImportPath(entryPath, absComponentPath)
 		if err != nil {
-			PrintError("Failed to get import path for %s: %v", componentPath, err)
+			PrintError("Failed to get import path for %s: %v", config.path, err)
 			os.Exit(1)
 		}
 
-		if err := writeClientEntry(entryPath, componentImport); err != nil {
-			PrintError("Failed to write entry file: %v", err)
-			os.Exit(1)
+		if config.static {
+			if err := writeStaticClientEntry(entryPath, componentImport); err != nil {
+				PrintError("Failed to write static entry file: %v", err)
+				os.Exit(1)
+			}
+		} else {
+			if err := writeClientEntry(entryPath, componentImport); err != nil {
+				PrintError("Failed to write entry file: %v", err)
+				os.Exit(1)
+			}
 		}
 		entryFiles = append(entryFiles, entryPath)
 		PrintFile(entryPath)
@@ -142,66 +158,131 @@ func BuildCmd() {
 	client := &http.Client{Transport: transport}
 
 	PrintStep(EmojiZap, "Building assets...")
-	buildSpinner := NewSpinner("Building client bundle")
-	buildSpinner.Start()
 
-	reqBody := map[string]interface{}{
-		"entrypoints": entryFiles,
-		"outdir":      outdir,
+	var successfulEntries []string
+	var failedEntries []struct {
+		entry  string
+		config pageConfig
+		error  string
 	}
 
-	jsonBody, err := json.Marshal(reqBody)
-	if err != nil {
+	for i, entryFile := range entryFiles {
+		config := entryToConfig[entryFile]
+		entryName := EntryNameForPath(config.path)
+
+		buildSpinner := NewSpinner(fmt.Sprintf("Building %s", entryName))
+		buildSpinner.Start()
+
+		reqBody := map[string]interface{}{
+			"entrypoints": []string{entryFile},
+			"outdir":      outdir,
+		}
+
+		jsonBody, err := json.Marshal(reqBody)
+		if err != nil {
+			buildSpinner.Stop()
+			failedEntries = append(failedEntries, struct {
+				entry  string
+				config pageConfig
+				error  string
+			}{entryFile, config, fmt.Sprintf("Failed to marshal request: %v", err)})
+			continue
+		}
+
+		req, err := http.NewRequest("POST", "http://localhost/build", bytes.NewReader(jsonBody))
+		if err != nil {
+			buildSpinner.Stop()
+			failedEntries = append(failedEntries, struct {
+				entry  string
+				config pageConfig
+				error  string
+			}{entryFile, config, fmt.Sprintf("Failed to create request: %v", err)})
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			buildSpinner.Stop()
+			failedEntries = append(failedEntries, struct {
+				entry  string
+				config pageConfig
+				error  string
+			}{entryFile, config, fmt.Sprintf("Build request failed: %v", err)})
+			continue
+		}
+
+		var result struct {
+			OK    bool `json:"ok"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			buildSpinner.Stop()
+			failedEntries = append(failedEntries, struct {
+				entry  string
+				config pageConfig
+				error  string
+			}{entryFile, config, fmt.Sprintf("Failed to decode response: %v", err)})
+			continue
+		}
+		resp.Body.Close()
+
 		buildSpinner.Stop()
-		PrintError("Failed to marshal request: %v", err)
+
+		if result.Error != nil {
+			failedEntries = append(failedEntries, struct {
+				entry  string
+				config pageConfig
+				error  string
+			}{entryFile, config, result.Error.Message})
+			PrintWarning("Failed to build %s: %s", entryName, result.Error.Message)
+		} else if !result.OK {
+			failedEntries = append(failedEntries, struct {
+				entry  string
+				config pageConfig
+				error  string
+			}{entryFile, config, "Build failed"})
+			PrintWarning("Failed to build %s", entryName)
+		} else {
+			successfulEntries = append(successfulEntries, entryFile)
+			fmt.Printf("  %s Built %s\n", EmojiCheck, entryName)
+		}
+
+		_ = i
+	}
+
+	if len(successfulEntries) == 0 {
+		PrintError("All builds failed")
+		for _, failed := range failedEntries {
+			PrintFile(fmt.Sprintf("%s: %s", failed.config.path, failed.error))
+		}
 		os.Exit(1)
 	}
 
-	req, err := http.NewRequest("POST", "http://localhost/build", bytes.NewReader(jsonBody))
-	if err != nil {
-		buildSpinner.Stop()
-		PrintError("Failed to create request: %v", err)
-		os.Exit(1)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		buildSpinner.Stop()
-		PrintError("Build request failed: %v", err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		OK    bool `json:"ok"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
+	if len(failedEntries) > 0 {
+		PrintWarning("%d of %d builds failed", len(failedEntries), len(entryFiles))
+		for _, failed := range failedEntries {
+			PrintFile(fmt.Sprintf("%s: %s", failed.config.path, failed.error))
+		}
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		buildSpinner.Stop()
-		PrintError("Failed to decode response: %v", err)
-		os.Exit(1)
+	PrintSuccess("Built %d of %d entries", len(successfulEntries), len(entryFiles))
+
+	componentPaths := make([]string, 0, len(successfulEntries))
+	successfulStaticFlags := make(map[string]bool)
+	for _, entryFile := range successfulEntries {
+		config := entryToConfig[entryFile]
+		componentPaths = append(componentPaths, config.path)
+		entryName := EntryNameForPath(config.path)
+		successfulStaticFlags[entryName] = config.static
 	}
-
-	buildSpinner.Stop()
-
-	if result.Error != nil {
-		PrintError("Build failed: %s", result.Error.Message)
-		os.Exit(1)
-	}
-
-	if !result.OK {
-		PrintError("Build failed")
-		os.Exit(1)
-	}
-
-	PrintSuccess("Build successful")
 
 	PrintStep(EmojiPackage, "Generating manifest...")
-	man, err := generateManifest(outdir, componentPaths)
+	man, err := generateManifest(outdir, componentPaths, successfulStaticFlags)
 	if err != nil {
 		PrintError("Failed to generate manifest: %v", err)
 		os.Exit(1)
@@ -220,6 +301,72 @@ func BuildCmd() {
 	}
 	PrintFile(manifestPath)
 	PrintSuccess("Manifest created")
+
+	staticPaths := []string{}
+	for _, config := range pageConfigs {
+		if config.static {
+			staticPaths = append(staticPaths, config.path)
+		}
+	}
+
+	if len(staticPaths) > 0 {
+		PrintStep(EmojiFile, "Generating static HTML files...")
+
+		// Render Head components for static pages
+		heads := make(map[string]string)
+		for _, componentPath := range staticPaths {
+			reqBody := map[string]interface{}{
+				"path":  componentPath,
+				"props": map[string]interface{}{},
+			}
+
+			jsonBody, err := json.Marshal(reqBody)
+			if err != nil {
+				PrintWarning("Failed to marshal render request for %s: %v", componentPath, err)
+				continue
+			}
+
+			req, err := http.NewRequest("POST", "http://localhost/render", bytes.NewReader(jsonBody))
+			if err != nil {
+				PrintWarning("Failed to create render request for %s: %v", componentPath, err)
+				continue
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, err := client.Do(req)
+			if err != nil {
+				PrintWarning("Failed to render head for %s: %v", componentPath, err)
+				continue
+			}
+
+			var result struct {
+				HTML  string `json:"html"`
+				Head  string `json:"head"`
+				Error *struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+				resp.Body.Close()
+				PrintWarning("Failed to decode render response for %s: %v", componentPath, err)
+				continue
+			}
+			resp.Body.Close()
+
+			if result.Error != nil {
+				PrintWarning("Failed to render head for %s: %s", componentPath, result.Error.Message)
+			} else {
+				heads[componentPath] = result.Head
+			}
+		}
+
+		if err := generateStaticHTMLFiles(entryDir, outdir, staticPaths, heads, man); err != nil {
+			PrintError("Failed to generate static HTML files: %v", err)
+			os.Exit(1)
+		}
+		PrintSuccess("Generated %d static HTML file(s)", len(staticPaths))
+	}
 
 	PrintStep(EmojiCopy, "Copying public assets...")
 	publicSrc := filepath.Join(originalCwd, PublicDir)

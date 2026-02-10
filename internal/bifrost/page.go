@@ -2,10 +2,12 @@ package bifrost
 
 import (
 	"bytes"
+	"embed"
 	"fmt"
 	"html"
 	"log/slog"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -26,9 +28,15 @@ type Page struct {
 	needsSetup  bool
 	setupErr    error
 	setupOnce   sync.Once
+	staticPath  string
 }
 
 func (p *Page) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if p.opts.Static && !p.isDev && p.staticPath != "" {
+		p.serveStaticFile(w, req)
+		return
+	}
+
 	if p.needsSetup {
 		if !p.handleSetup(w) {
 			return
@@ -36,7 +44,7 @@ func (p *Page) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	var loaderStart time.Time
-	if p.renderer.timingEnabled {
+	if p.renderer != nil && p.renderer.timingEnabled {
 		loaderStart = time.Now()
 	}
 
@@ -46,13 +54,13 @@ func (p *Page) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if p.renderer.timingEnabled {
+	if p.renderer != nil && p.renderer.timingEnabled {
 		loaderDuration := time.Since(loaderStart)
 		slog.Debug("data loader timing", "duration", loaderDuration)
 	}
 
 	var renderStart time.Time
-	if p.renderer.timingEnabled {
+	if p.renderer != nil && p.renderer.timingEnabled {
 		renderStart = time.Now()
 	}
 
@@ -62,7 +70,7 @@ func (p *Page) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if p.renderer.timingEnabled {
+	if p.renderer != nil && p.renderer.timingEnabled {
 		renderDuration := time.Since(renderStart)
 		slog.Debug("ssr render timing", "duration", renderDuration)
 	}
@@ -70,11 +78,67 @@ func (p *Page) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	p.renderPage(w, props, page)
 }
 
+func (p *Page) serveStaticFile(w http.ResponseWriter, req *http.Request) {
+	if p.renderer != nil && p.renderer.AssetsFS != (embed.FS{}) {
+		data, err := p.renderer.AssetsFS.ReadFile(p.staticPath)
+		if err != nil {
+			p.serveError(w, fmt.Errorf("failed to read static file: %w", err))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(data)
+		return
+	}
+
+	http.ServeFile(w, req, p.staticPath)
+}
+
 func (p *Page) handleSetup(w http.ResponseWriter) bool {
 	p.setupOnce.Do(func() {
-		p.setupErr = p.renderer.setupPage(p.opts, p.entryDir, p.outdir, p.entryPath)
+		if p.opts.Static {
+			p.setupErr = p.setupStaticPage()
+		} else {
+			p.setupErr = p.renderer.setupPage(p.opts, p.entryDir, p.outdir, p.entryPath)
+		}
 	})
 	return p.checkSetupError(w)
+}
+
+func (p *Page) setupStaticPage() error {
+	if p.renderer == nil {
+		return nil
+	}
+
+	componentImport, err := ComponentImportPath(p.entryPath, p.opts.ComponentPath)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(p.entryDir, 0o755); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(p.outdir, 0o755); err != nil {
+		return err
+	}
+
+	if err := writeStaticClientEntry(p.entryPath, componentImport); err != nil {
+		return err
+	}
+
+	if err := p.renderer.Build([]string{p.entryPath}, p.outdir); err != nil {
+		return err
+	}
+
+	if p.opts.Watch {
+		watchDir := p.opts.WatchDir
+		if watchDir == "" {
+			watchDir = "."
+		}
+		p.renderer.startBuildWatcher(p.entryPath, p.outdir, watchDir)
+	}
+
+	return nil
 }
 
 func (p *Page) checkSetupError(w http.ResponseWriter) bool {

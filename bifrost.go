@@ -13,6 +13,16 @@ type Page = bifrost.Page
 
 type Option func(*bifrost.Renderer)
 
+type PageOption = bifrost.PageOption
+
+func WithStatic() PageOption {
+	return bifrost.WithStatic()
+}
+
+func WithTitle(title string) PageOption {
+	return bifrost.WithTitle(title)
+}
+
 func WithAssetsFS(fs embed.FS) Option {
 	return func(r *bifrost.Renderer) {
 		r.SetAssetsFS(fs)
@@ -41,10 +51,16 @@ func RegisterAssetRoutes(r bifrost.Router, renderer *bifrost.Renderer, appRouter
 		assets := bifrost.AssetHandler()
 		r.Handle("/dist/*", assets)
 		r.Handle("/__bifrost_reload", bifrost.DevHandler())
-		r.Handle("/*", bifrost.PublicHandler(renderer.AssetsFS, appRouter))
-	} else if renderer.AssetsFS != (embed.FS{}) {
+		if renderer != nil {
+			r.Handle("/*", bifrost.PublicHandler(renderer.AssetsFS, appRouter))
+		} else {
+			r.Handle("/*", appRouter)
+		}
+	} else if renderer != nil && renderer.AssetsFS != (embed.FS{}) {
 		assets := bifrost.EmbeddedAssetHandler(renderer.AssetsFS)
 		r.Handle("/dist/*", assets)
 		r.Handle("/*", bifrost.PublicHandler(renderer.AssetsFS, appRouter))
+	} else {
+		r.Handle("/*", appRouter)
 	}
 }

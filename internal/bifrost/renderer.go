@@ -290,18 +290,31 @@ func (r *Renderer) loadManifestForMode(paths pagePaths, isDev bool) *buildManife
 	return man
 }
 
-func buildOptions(componentPath string, loaders ...propsLoader) options {
+func buildOptions(componentPath string, opts ...interface{}) options {
 	var loader propsLoader
-	if len(loaders) > 0 {
-		loader = loaders[0]
+	pageOpts := []PageOption{}
+
+	for _, opt := range opts {
+		switch o := opt.(type) {
+		case propsLoader:
+			loader = o
+		case PageOption:
+			pageOpts = append(pageOpts, o)
+		}
 	}
 
 	isDev := IsDev()
-	return options{
+	result := options{
 		ComponentPath: componentPath,
 		PropsLoader:   loader,
 		Watch:         isDev,
 	}
+
+	for _, opt := range pageOpts {
+		opt(&result)
+	}
+
+	return result
 }
 
 func defaultPropsLoader(loader propsLoader) propsLoader {
@@ -313,17 +326,38 @@ func defaultPropsLoader(loader propsLoader) propsLoader {
 	}
 }
 
-func (r *Renderer) NewPage(componentPath string, loaders ...propsLoader) *Page {
-	opts := buildOptions(componentPath, loaders...)
+func (r *Renderer) NewPage(componentPath string, opts ...interface{}) *Page {
+	return createPage(r, componentPath, opts...)
+}
+
+func createPage(r *Renderer, componentPath string, opts ...interface{}) *Page {
+	options := buildOptions(componentPath, opts...)
 	paths := calculatePagePaths(componentPath)
-	man := r.loadManifestForMode(paths, IsDev())
-	scriptSrc, cssHref, chunks := getAssetsFromManifest(man, paths.entryName)
+
+	var man *buildManifest
+	if r != nil {
+		man = r.loadManifestForMode(paths, IsDev())
+	}
+
+	scriptSrc, cssHref, chunks, isStaticFromManifest := getAssetsFromManifest(man, paths.entryName)
 	isDev := IsDev()
+
+	isStatic := options.Static || isStaticFromManifest
+
+	var staticPath string
+	if isStatic && !isDev {
+		staticPath = filepath.Join(BifrostDir, "pages", paths.entryName, "index.html")
+	}
+
+	needsSetup := (man == nil || isDev) && !isStatic
+	if isStatic && isDev && r != nil {
+		needsSetup = true
+	}
 
 	return &Page{
 		renderer:    r,
-		opts:        opts,
-		propsLoader: defaultPropsLoader(opts.PropsLoader),
+		opts:        options,
+		propsLoader: defaultPropsLoader(options.PropsLoader),
 		entryDir:    paths.entryDir,
 		outdir:      paths.outdir,
 		entryPath:   paths.entryPath,
@@ -333,7 +367,8 @@ func (r *Renderer) NewPage(componentPath string, loaders ...propsLoader) *Page {
 		chunks:      chunks,
 		manifest:    man,
 		isDev:       isDev,
-		needsSetup:  man == nil || isDev,
+		needsSetup:  needsSetup,
+		staticPath:  staticPath,
 	}
 }
 
