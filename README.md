@@ -14,58 +14,154 @@ Requires [Bun](https://bun.sh) to be installed.
 
 - **SSR** - Server-side render React components
 - **Hot Reload** - Auto-refresh in development
-- **Props Loading** - Pass data from Go to React
+- **Props Loading** - Pass data from Go to React via typed options
 - **File-based Routing** - Simple page organization
-- **Production Ready** - Embedded assets for deployment
+- **Production Ready** - Strict embedded assets for deployment
 - **Static Site Generation** - Build static sites without runtime Bun dependency
 
 ## Development vs Production
 
+Bifrost has two distinct modes with strict separation:
+
 **Development** (`BIFROST_DEV=1`):
 
 - Hot reload on file changes
-- Source maps enabled
+- Source TSX files rendered directly
 - Assets served from disk
+- No embedded assets required
 
-**Production**:
+**Production** (absence of `BIFROST_DEV`):
 
-- Embedded assets using `embed.FS`
-- Optimized builds
-- Cached renders
+- **Requires** embedded assets via `WithAssetsFS()`
+- **Requires** pre-built SSR bundles from `bifrost-build`
+- Manifest-driven asset resolution
+- Strict fail-fast on missing assets
 
 ## Quick Start
+
+### Initialize Project
+
+```bash
+# Create .bifrost directory for build artifacts
+go run github.com/3-lines-studio/bifrost/cmd/init@latest .
+```
 
 ### Development
 
 ```bash
-# From the project root
-make dev
+# Set development mode
+export BIFROST_DEV=1
 
-# Or from the example directory
-cd example
-make dev
+# Run your app
+go run main.go
 ```
-
-Then open <http://localhost:8080>
 
 ### Build for Production
 
 ```bash
-cd example
-make build
-./bifrost
+# Build assets and SSR bundles
+bifrost-build main.go
+
+# Build Go binary with embedded assets
+go build -o myapp main.go
+
+# Run in production (no BIFROST_DEV set)
+./myapp
 ```
+
+## API
+
+### Creating Pages
+
+```go
+package main
+
+import (
+    "embed"
+    "log"
+    "net/http"
+    
+    "github.com/3-lines-studio/bifrost"
+)
+
+//go:embed all:.bifrost
+var bifrostFS embed.FS
+
+func main() {
+    // Production: requires WithAssetsFS
+    // Development: works without it
+    r, err := bifrost.New(bifrost.WithAssetsFS(bifrostFS))
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer r.Stop()
+    
+    // SSR page with props loader
+    home := r.NewPage("./pages/home.tsx", 
+        bifrost.WithPropsLoader(func(req *http.Request) (map[string]any, error) {
+            return map[string]any{
+                "name": "World",
+            }, nil
+        }),
+    )
+    
+    // Static page (client-side only, no SSR)
+    about := r.NewPage("./pages/about.tsx", 
+        bifrost.WithClientOnly(),
+    )
+    
+    // Static prerender page (full HTML at build time + hydration)
+    blog := r.NewPage("./pages/blog.tsx",
+        bifrost.WithStaticPrerender(),
+    )
+    
+    // Setup routes
+    router := http.NewServeMux()
+    router.Handle("/", home)
+    router.Handle("/about", about)
+    
+    // Register asset routes
+    assetRouter := http.NewServeMux()
+    bifrost.RegisterAssetRoutes(assetRouter, r, router)
+    
+    log.Fatal(http.ListenAndServe(":8080", assetRouter))
+}
+```
+
+### Page Options
+
+- `WithPropsLoader(fn)` - Provide a function to load props from the HTTP request
+- `WithClientOnly()` - Create a static page with client-side hydration only (empty shell)
+- `WithStaticPrerender()` - Prerender full HTML at build time + client hydration
+
+### Mode Detection
+
+Bifrost determines mode by checking the `BIFROST_DEV` environment variable:
+
+- `BIFROST_DEV=1` → Development mode
+- Any other value or unset → Production mode
+
+In production mode:
+- `WithAssetsFS()` is **required** and validated at startup
+- SSR bundles are extracted from embedded assets
+- Source TSX files are **not** used
+- Missing assets cause immediate errors
 
 ## Static Site Generation
 
-Bifrost now supports building static sites that don't require Bun at runtime:
+Build static sites that don't require Bun at runtime:
 
 ```go
-// Static page (no SSR)
+// Client-only page (empty shell + client render)
 home := r.NewPage("./pages/home.tsx", bifrost.WithClientOnly())
 
-// SSR page (with server-side rendering)
-dynamic := r.NewPage("./pages/dynamic.tsx", propsLoader)
+// Static prerender page (full HTML at build time + hydration)
+blog := r.NewPage("./pages/blog.tsx", bifrost.WithStaticPrerender())
+
+// SSR page (server-side render on each request)
+dynamic := r.NewPage("./pages/dynamic.tsx", 
+    bifrost.WithPropsLoader(loader),
+)
 ```
 
 Build with:
@@ -76,25 +172,62 @@ bifrost-build main.go
 
 This generates:
 
-- Static HTML files for pages marked with `WithClientOnly()`
-- JS bundles for client-side hydration
-- SSR bundles for server-side rendering from embed.FS
-- Manifest for asset mapping
+- `.bifrost/dist/` - Client JS/CSS bundles
+- `.bifrost/ssr/` - Server bundles for SSR pages only
+- `.bifrost/pages/` - Static HTML files:
+  - Client-only: empty shell HTML
+  - Static prerender: full HTML with rendered body
+- `.bifrost/manifest.json` - Asset manifest with mode info
 
-Perfect for CLI tools with embedded web UIs!
+## Architecture
 
-### SSR Bundles
+Bifrost is organized into focused internal packages:
 
-For SSR pages, production builds include pre-built server bundles:
+- `internal/types` - Shared types and contracts
+- `internal/runtime` - Bun process management and IPC
+- `internal/page` - HTTP handler orchestration
+- `internal/assets` - Manifest resolution and embedded FS
+- `internal/build` - Build pipeline and AST discovery
+- `internal/cli` - Terminal output helpers
 
-- Located in `.bifrost/ssr/`
-- Used automatically when `embed.FS` is provided via `WithAssetsFS()`
-- Extracted to temp directory at runtime
-- Allows SSR without source TSX files
+## Error Handling
 
-```bash
-# Build includes both client and SSR bundles
-go run cmd/build/main.go main.go
+### Redirects
 
-# SSR bundles are extracted from embed.FS at runtime
+Return a redirect from props loader:
+
+```go
+page := r.NewPage("./pages/protected.tsx", 
+    bifrost.WithPropsLoader(func(req *http.Request) (map[string]any, error) {
+        if !isAuthenticated(req) {
+            return nil, &RedirectError{
+                URL:    "/login",
+                Status: http.StatusFound,
+            }
+        }
+        // ...
+    }),
+)
 ```
+
+Implement the `RedirectError` interface:
+
+```go
+type RedirectError interface {
+    RedirectURL() string
+    RedirectStatusCode() int
+}
+```
+
+### Production Errors
+
+Bifrost enforces strict production requirements:
+
+- `ErrAssetsFSRequiredInProd` - Returned when `WithAssetsFS()` is missing in production
+- `ErrManifestMissingInAssetsFS` - Returned when manifest.json is not found in embedded assets
+
+These errors are returned from `bifrost.New()` to fail fast at startup.
+
+## License
+
+MIT
