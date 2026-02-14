@@ -12,13 +12,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/3-lines-studio/bifrost/internal/assets"
 	"github.com/3-lines-studio/bifrost/internal/cli"
 	"github.com/3-lines-studio/bifrost/internal/page"
-	"github.com/3-lines-studio/bifrost/internal/runtime"
+	bifrost_runtime "github.com/3-lines-studio/bifrost/internal/runtime"
 	"github.com/3-lines-studio/bifrost/internal/types"
 )
 
@@ -30,11 +31,11 @@ const (
 )
 
 type Engine struct {
-	client *runtime.Client
+	client *bifrost_runtime.Client
 }
 
 func NewEngine() (*Engine, error) {
-	client, err := runtime.NewClient()
+	client, err := bifrost_runtime.NewClient()
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +146,7 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 	cmd.Env = append(os.Environ(), "BIFROST_SOCKET="+socket, "BIFROST_PROD=1")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Stdin = strings.NewReader(runtime.BunRendererDevSource)
+	cmd.Stdin = strings.NewReader(bifrost_runtime.BunRendererDevSource)
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start bun: %w", err)
@@ -593,6 +594,14 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 		return fmt.Errorf("failed to copy public dir: %w", err)
 	}
 	cli.PrintSuccess("Assets copied")
+
+	cli.PrintStep(cli.EmojiZap, "Compiling embedded Bun runtime...")
+	if err := compileEmbeddedRuntime(entryDir); err != nil {
+		cli.PrintWarning("Failed to compile embedded runtime: %v", err)
+		cli.PrintInfo("Applications will need Bun installed at runtime")
+	} else {
+		cli.PrintSuccess("Embedded runtime ready")
+	}
 
 	cli.PrintDone("Build complete! You can now compile your Go binary with embedded assets.")
 	return nil
@@ -1230,5 +1239,44 @@ func generateDynamicStaticHTMLFiles(entryDir, outdir string, componentPath strin
 		fmt.Printf("  📄 %s -> %s\n", entry.Path, htmlPath)
 	}
 
+	return nil
+}
+
+func compileEmbeddedRuntime(entryDir string) error {
+	runtimeDir := filepath.Join(entryDir, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+		return fmt.Errorf("failed to create runtime dir: %w", err)
+	}
+
+	tempSourcePath := filepath.Join(runtimeDir, "renderer.ts")
+	sourceContent := bifrost_runtime.BunRendererProdSource
+	if err := os.WriteFile(tempSourcePath, []byte(sourceContent), 0644); err != nil {
+		return fmt.Errorf("failed to write temp source: %w", err)
+	}
+
+	outfile := filepath.Join(runtimeDir, "bifrost-renderer")
+	if runtime.GOOS == "windows" {
+		outfile += ".exe"
+	}
+
+	cmd := exec.Command(
+		"bun",
+		"build",
+		"--compile",
+		"--outfile",
+		outfile,
+		"--no-compile-autoload-dotenv",
+		"--no-compile-autoload-bunfig",
+		tempSourcePath,
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		os.Remove(tempSourcePath)
+		return fmt.Errorf("bun compile failed: %w", err)
+	}
+
+	os.Remove(tempSourcePath)
 	return nil
 }

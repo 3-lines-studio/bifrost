@@ -331,6 +331,15 @@ if err != nil {
     if errors.Is(err, runtime.ErrManifestMissingInAssetsFS) {
         // Manifest not found in embedded assets
     }
+    if errors.Is(err, runtime.ErrEmbeddedRuntimeNotFound) {
+        // Run 'bifrost-build' to generate embedded Bun runtime
+    }
+    if errors.Is(err, runtime.ErrEmbeddedRuntimeExtraction) {
+        // Failed to extract embedded runtime from binary
+    }
+    if errors.Is(err, runtime.ErrEmbeddedRuntimeStart) {
+        // Embedded runtime failed to start
+    }
 }
 ```
 

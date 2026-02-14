@@ -71,13 +71,7 @@ func New(opts ...Option) (*Renderer, error) {
 		}, nil
 	}
 
-	client, err := runtime.NewClient()
-	if err != nil {
-		return nil, err
-	}
-
 	r := &Renderer{
-		client:      client,
 		isDev:       mode == runtime.ModeDev,
 		pageConfigs: make(map[string]*types.PageConfig),
 	}
@@ -89,16 +83,38 @@ func New(opts ...Option) (*Renderer, error) {
 	// Strict production validation
 	if mode == runtime.ModeProd {
 		if r.assetsFS == (embed.FS{}) {
-			client.Stop()
 			return nil, runtime.ErrAssetsFSRequiredInProd
 		}
 
 		man, err := assets.LoadManifestFromEmbed(r.assetsFS, ".bifrost/manifest.json")
 		if err != nil {
-			client.Stop()
 			return nil, fmt.Errorf("%w: %v", runtime.ErrManifestMissingInAssetsFS, err)
 		}
 		r.manifest = man
+
+		// In production, use embedded runtime helper
+		if !runtime.HasEmbeddedRuntime(r.assetsFS) {
+			return nil, runtime.ErrEmbeddedRuntimeNotFound
+		}
+
+		executablePath, cleanup, err := runtime.ExtractEmbeddedRuntime(r.assetsFS)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", runtime.ErrEmbeddedRuntimeExtraction, err)
+		}
+
+		client, err := runtime.NewClientFromExecutable(executablePath, cleanup)
+		if err != nil {
+			cleanup()
+			return nil, fmt.Errorf("%w: %v", runtime.ErrEmbeddedRuntimeStart, err)
+		}
+		r.client = client
+	} else {
+		// Development mode: use system Bun
+		client, err := runtime.NewClient()
+		if err != nil {
+			return nil, err
+		}
+		r.client = client
 	}
 
 	return r, nil

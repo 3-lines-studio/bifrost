@@ -8,7 +8,8 @@ Server-side rendering for React components in Go. Bridge your Go backend with Re
 go get github.com/3-lines-studio/bifrost
 ```
 
-Requires [Bun](https://bun.sh) to be installed.
+Requires [Bun](https://bun.sh) to be installed for development and building.
+Production binaries include the Bun runtime and do not require Bun to be installed on the target system.
 
 ## Features
 
@@ -17,6 +18,7 @@ Requires [Bun](https://bun.sh) to be installed.
 - **Props Loading** - Pass data from Go to React via typed options
 - **File-based Routing** - Simple page organization
 - **Production Ready** - Strict embedded assets for deployment
+- **Self-Contained** - Single binary with embedded Bun runtime in production
 - **Static Site Generation** - Build static sites without runtime Bun dependency
 
 ## Development vs Production
@@ -28,14 +30,15 @@ Bifrost has two distinct modes with strict separation:
 - Hot reload on file changes
 - Source TSX files rendered directly
 - Assets served from disk
-- No embedded assets required
+- Requires Bun installed on system
 
 **Production** (absence of `BIFROST_DEV`):
 
 - **Requires** embedded assets via `WithAssetsFS()`
-- **Requires** pre-built SSR bundles from `bifrost-build`
+- **Requires** pre-built artifacts from `bifrost-build`
 - Manifest-driven asset resolution
-- Strict fail-fast on missing assets
+- Uses embedded Bun runtime (no system Bun required)
+- Strict fail-fast on missing assets or runtime
 
 ## Quick Start
 
@@ -225,6 +228,9 @@ Bifrost enforces strict production requirements:
 
 - `ErrAssetsFSRequiredInProd` - Returned when `WithAssetsFS()` is missing in production
 - `ErrManifestMissingInAssetsFS` - Returned when manifest.json is not found in embedded assets
+- `ErrEmbeddedRuntimeNotFound` - Returned when embedded Bun runtime is missing (run `bifrost-build` to generate it)
+- `ErrEmbeddedRuntimeExtraction` - Returned when extracting embedded runtime fails
+- `ErrEmbeddedRuntimeStart` - Returned when embedded runtime fails to start
 
 These errors are returned from `bifrost.New()` to fail fast at startup.
 

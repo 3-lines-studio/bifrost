@@ -17,9 +17,10 @@ import (
 )
 
 type Client struct {
-	cmd    *exec.Cmd
-	socket string
-	client *http.Client
+	cmd     *exec.Cmd
+	socket  string
+	client  *http.Client
+	cleanup func()
 }
 
 func NewClient() (*Client, error) {
@@ -65,7 +66,11 @@ func NewClient() (*Client, error) {
 }
 
 func (c *Client) Stop() error {
-	return c.cmd.Process.Kill()
+	err := c.cmd.Process.Kill()
+	if c.cleanup != nil {
+		c.cleanup()
+	}
+	return err
 }
 
 func waitForSocket(path string, timeout time.Duration) error {
@@ -283,4 +288,35 @@ func (c *Client) postJSON(endpoint string, body interface{}, result interface{})
 	defer resp.Body.Close()
 
 	return json.NewDecoder(resp.Body).Decode(result)
+}
+
+func NewClientFromExecutable(executablePath string, cleanup func()) (*Client, error) {
+	socket := filepath.Join(os.TempDir(), fmt.Sprintf("bifrost-%d.sock", os.Getpid()))
+
+	cmd := exec.Command(executablePath)
+	cmd.Env = append(os.Environ(), "BIFROST_SOCKET="+socket)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start embedded runtime: %w", err)
+	}
+
+	if err := waitForSocket(socket, 5*time.Second); err != nil {
+		cmd.Process.Kill()
+		return nil, err
+	}
+
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return net.Dial("unix", socket)
+		},
+	}
+
+	return &Client{
+		cmd:     cmd,
+		socket:  socket,
+		client:  &http.Client{Transport: transport},
+		cleanup: cleanup,
+	}, nil
 }
