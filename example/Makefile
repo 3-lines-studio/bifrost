@@ -17,3 +17,13 @@ dev-static:
 build-static:
 	go run ../cmd/build ./cmd/static/main.go
 	go build -o bifrost ./cmd/static/main.go
+
+dev-desktop:
+	BIFROST_DEV=1 air -c .air.toml --build.cmd "go build -o ./tmp/main ./cmd/desktop/main.go"
+
+build-desktop:
+	go run ../cmd/build ./cmd/desktop/main.go
+	go build -o bifrost-desktop ./cmd/desktop/main.go
+
+start-desktop: build-desktop
+	./bifrost-desktop
