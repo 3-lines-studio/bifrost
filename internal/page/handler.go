@@ -145,6 +145,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
+	// Dev mode: ClientOnly pages don't need SSR - serve empty shell directly
+	if h.isDev && h.config.Mode == types.ModeClientOnly {
+		h.renderClientOnlyDevShell(w)
+		return
+	}
+
 	// Dev mode: Handle StaticPrerender with StaticDataLoader
 	if h.isDev && h.config.Mode == types.ModeStaticPrerender && h.config.StaticDataLoader != nil {
 		requestPath := normalizePath(req.URL.Path)
@@ -341,6 +347,18 @@ func (h *Handler) getRenderPath() (string, error) {
 
 func (h *Handler) renderPage(w http.ResponseWriter, props map[string]any, page types.RenderedPage) {
 	fullHTML, err := RenderHTMLShell(page.Body, props, h.scriptSrc, page.Head, h.cssHref, h.chunks)
+	if err != nil {
+		h.serveError(w, err)
+		return
+	}
+
+	serveHTML(w, fullHTML)
+}
+
+// renderClientOnlyDevShell renders an empty shell for ClientOnly pages in dev mode.
+// This avoids SSR rendering which can fail for browser-only code (e.g., routers using location).
+func (h *Handler) renderClientOnlyDevShell(w http.ResponseWriter) {
+	fullHTML, err := RenderHTMLShell("", map[string]any{}, h.scriptSrc, "", h.cssHref, h.chunks)
 	if err != nil {
 		h.serveError(w, err)
 		return
