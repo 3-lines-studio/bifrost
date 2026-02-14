@@ -14,6 +14,11 @@ go get github.com/3-lines-studio/bifrost
 
 Requires [Bun](https://bun.sh) to be installed.
 
+**Runtime Requirements:**
+- **Development**: Always requires Bun
+- **Production with SSR**: Bun runtime is embedded automatically (no system Bun required)
+- **Production static-only**: No Bun runtime included
+
 ## Architecture
 
 Bifrost is organized into focused internal packages:
@@ -113,8 +118,18 @@ go build -o myapp main.go
 Requirements:
 - `WithAssetsFS()` is **mandatory** - fails fast at startup if missing
 - `.bifrost/manifest.json` must exist in embedded assets
-- SSR bundles extracted from `.bifrost/ssr/` in embed.FS
+- SSR bundles extracted from `.bifrost/ssr/` in embed.FS (SSR pages only)
+- Embedded Bun runtime included only for SSR pages
 - Source TSX files are **never** used
+
+**Static-only apps** (ClientOnly or StaticPrerender only):
+- No Bun runtime embedded
+- Smaller binary size
+- Cannot serve SSR pages
+
+**SSR apps** (with at least one SSR page):
+- Bun runtime automatically embedded
+- Required for server-side rendering
 
 Strict validation errors:
 - `ErrAssetsFSRequiredInProd` - Missing `WithAssetsFS()` in production
@@ -331,6 +346,7 @@ if err != nil {
     if errors.Is(err, runtime.ErrManifestMissingInAssetsFS) {
         // Manifest not found in embedded assets
     }
+    // The following errors only occur for apps with SSR pages:
     if errors.Is(err, runtime.ErrEmbeddedRuntimeNotFound) {
         // Run 'bifrost-build' to generate embedded Bun runtime
     }
@@ -342,6 +358,8 @@ if err != nil {
     }
 }
 ```
+
+**Note:** Runtime-related errors only occur when the app has SSR pages. Static-only apps don't include or require the Bun runtime.
 
 ## Build System
 

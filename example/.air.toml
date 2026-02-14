@@ -5,7 +5,6 @@ tmp_dir = "tmp"
 [build]
   args_bin = []
   bin = "./tmp/main"
-  cmd = "go build -o ./tmp/main main.go"
   delay = 0
   exclude_dir = ["node_modules", ".bifrost", "tmp"]
   exclude_file = []

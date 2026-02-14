@@ -9,7 +9,8 @@ go get github.com/3-lines-studio/bifrost
 ```
 
 Requires [Bun](https://bun.sh) to be installed for development and building.
-Production binaries include the Bun runtime and do not require Bun to be installed on the target system.
+Production binaries with SSR pages include the Bun runtime and do not require Bun to be installed on the target system.
+Static-only apps (no SSR) do not include the Bun runtime.
 
 ## Features
 
@@ -18,7 +19,7 @@ Production binaries include the Bun runtime and do not require Bun to be install
 - **Props Loading** - Pass data from Go to React via typed options
 - **File-based Routing** - Simple page organization
 - **Production Ready** - Strict embedded assets for deployment
-- **Self-Contained** - Single binary with embedded Bun runtime in production
+- **Self-Contained** - Single binary with embedded Bun runtime only when SSR pages are used
 - **Static Site Generation** - Build static sites without runtime Bun dependency
 
 ## Development vs Production
@@ -37,8 +38,9 @@ Bifrost has two distinct modes with strict separation:
 - **Requires** embedded assets via `WithAssetsFS()`
 - **Requires** pre-built artifacts from `bifrost-build`
 - Manifest-driven asset resolution
-- Uses embedded Bun runtime (no system Bun required)
-- Strict fail-fast on missing assets or runtime
+- Uses embedded Bun runtime for SSR pages (no system Bun required)
+- Static-only apps do not include the Bun runtime
+- Strict fail-fast on missing assets or runtime for SSR pages
 
 ## Quick Start
 

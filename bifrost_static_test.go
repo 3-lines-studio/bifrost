@@ -41,60 +41,6 @@ func TestWithStaticDataLoader(t *testing.T) {
 	}
 }
 
-func TestExportStaticBuildData(t *testing.T) {
-	t.Setenv("BIFROST_EXPORT_STATIC", "1")
-
-	r, err := New()
-	if err != nil {
-		t.Fatalf("Failed to create renderer: %v", err)
-	}
-
-	loaderCalled := false
-	loader := func(ctx context.Context) ([]StaticPathData, error) {
-		loaderCalled = true
-		return []StaticPathData{
-			{Path: "/blog/hello", Props: map[string]any{"slug": "hello"}},
-			{Path: "/blog/world", Props: map[string]any{"slug": "world"}},
-		}, nil
-	}
-
-	r.NewPage("./pages/blog.tsx",
-		WithStaticPrerender(),
-		WithStaticDataLoader(loader),
-	)
-
-	handled, err := ExportStaticBuildData(r)
-	if err != nil {
-		t.Fatalf("Export failed: %v", err)
-	}
-	if !handled {
-		t.Error("Expected handled to be true")
-	}
-
-	if !loaderCalled {
-		t.Error("Loader was not called")
-	}
-}
-
-func TestExportStaticBuildDataNotInExportMode(t *testing.T) {
-	t.Setenv("BIFROST_EXPORT_STATIC", "")
-	t.Setenv("BIFROST_DEV", "1")
-
-	r, err := New()
-	if err != nil {
-		t.Skipf("Skipping test: %v (is bun installed?)", err)
-	}
-	defer r.Stop()
-
-	handled, err := ExportStaticBuildData(r)
-	if err != nil {
-		t.Fatalf("Export check failed: %v", err)
-	}
-	if handled {
-		t.Error("Expected handled to be false when not in export mode")
-	}
-}
-
 func TestStaticPathDataStructure(t *testing.T) {
 	data := StaticPathData{
 		Path: "/blog/test",

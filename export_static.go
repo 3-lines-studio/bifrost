@@ -26,51 +26,9 @@ type StaticPathExport struct {
 	Props map[string]any `json:"props"`
 }
 
-// ExportStaticBuildData executes static data loaders and outputs the result as JSON.
+// exportStaticBuildData executes static data loaders and outputs the result as JSON.
 // This is called during the build process to collect dynamic static paths.
-//
-// Returns true if export mode was handled (app should exit), false otherwise.
-//
-// Usage in main.go:
-//
-//	r, err := bifrost.New(bifrost.WithAssetsFS(bifrostFS))
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	defer r.Stop()
-//
-//	// Register your pages...
-//	home := r.NewPage("./pages/home.tsx")
-//	blog := r.NewPage("./pages/blog.tsx",
-//	    bifrost.WithStaticPrerender(),
-//	    bifrost.WithStaticDataLoader(func(ctx context.Context) ([]bifrost.StaticPathData, error) {
-//	        posts, _ := db.ListPosts()
-//	        paths := make([]bifrost.StaticPathData, len(posts))
-//	        for i, p := range posts {
-//	            paths[i] = bifrost.StaticPathData{
-//	                Path: "/blog/" + p.Slug,
-//	                Props: map[string]any{"slug": p.Slug, "title": p.Title},
-//	            }
-//	        }
-//	        return paths, nil
-//	    }),
-//	)
-//
-//	// Handle export mode (for build process)
-//	handled, err := bifrost.ExportStaticBuildData(r)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	if handled {
-//	    return // Exit after exporting
-//	}
-//
-//	// Normal server startup...
-func ExportStaticBuildData(r *Renderer) (bool, error) {
-	if os.Getenv("BIFROST_EXPORT_STATIC") != "1" {
-		return false, nil
-	}
-
+func exportStaticBuildData(r *Renderer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -87,7 +45,7 @@ func ExportStaticBuildData(r *Renderer) (bool, error) {
 
 		entries, err := config.StaticDataLoader(ctx)
 		if err != nil {
-			return true, fmt.Errorf("failed to load static data for %s: %w", componentPath, err)
+			return fmt.Errorf("failed to load static data for %s: %w", componentPath, err)
 		}
 
 		pageExport := StaticPageExport{
@@ -108,8 +66,8 @@ func ExportStaticBuildData(r *Renderer) (bool, error) {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(export); err != nil {
-		return true, fmt.Errorf("failed to encode export data: %w", err)
+		return fmt.Errorf("failed to encode export data: %w", err)
 	}
 
-	return true, nil
+	return nil
 }

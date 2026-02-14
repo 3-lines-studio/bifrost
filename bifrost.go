@@ -12,6 +12,21 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/types"
 )
 
+const exportStaticArg = "__bifrost_export_static__"
+
+var isExportMode bool
+
+func init() {
+	args := os.Args
+	for i, arg := range args {
+		if arg == exportStaticArg {
+			isExportMode = true
+			os.Args = append(args[:i], args[i+1:]...)
+			break
+		}
+	}
+}
+
 type RedirectError = types.RedirectError
 
 type PageOption = types.PageOption
@@ -63,8 +78,7 @@ func WithAssetsFS(fs embed.FS) Option {
 func New(opts ...Option) (*Renderer, error) {
 	mode := runtime.GetMode()
 
-	// Check for export mode (build-time static data export)
-	if os.Getenv("BIFROST_EXPORT_STATIC") == "1" {
+	if isExportMode {
 		return &Renderer{
 			isDev:       false,
 			pageConfigs: make(map[string]*types.PageConfig),
@@ -92,22 +106,28 @@ func New(opts ...Option) (*Renderer, error) {
 		}
 		r.manifest = man
 
-		// In production, use embedded runtime helper
-		if !runtime.HasEmbeddedRuntime(r.assetsFS) {
-			return nil, runtime.ErrEmbeddedRuntimeNotFound
-		}
+		// Check if we need the embedded runtime (SSR pages require it)
+		needsRuntime := assets.HasSSREntries(man)
 
-		executablePath, cleanup, err := runtime.ExtractEmbeddedRuntime(r.assetsFS)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", runtime.ErrEmbeddedRuntimeExtraction, err)
-		}
+		if needsRuntime {
+			// In production with SSR pages, use embedded runtime helper
+			if !runtime.HasEmbeddedRuntime(r.assetsFS) {
+				return nil, runtime.ErrEmbeddedRuntimeNotFound
+			}
 
-		client, err := runtime.NewClientFromExecutable(executablePath, cleanup)
-		if err != nil {
-			cleanup()
-			return nil, fmt.Errorf("%w: %v", runtime.ErrEmbeddedRuntimeStart, err)
+			executablePath, cleanup, err := runtime.ExtractEmbeddedRuntime(r.assetsFS)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", runtime.ErrEmbeddedRuntimeExtraction, err)
+			}
+
+			client, err := runtime.NewClientFromExecutable(executablePath, cleanup)
+			if err != nil {
+				cleanup()
+				return nil, fmt.Errorf("%w: %v", runtime.ErrEmbeddedRuntimeStart, err)
+			}
+			r.client = client
 		}
-		r.client = client
+		// Static-only apps don't need the runtime
 	} else {
 		// Development mode: use system Bun
 		client, err := runtime.NewClient()
@@ -152,6 +172,14 @@ type Router interface {
 }
 
 func RegisterAssetRoutes(r Router, renderer *Renderer, appRouter http.Handler) {
+	if isExportMode && renderer != nil {
+		if err := exportStaticBuildData(renderer); err != nil {
+			fmt.Fprintf(os.Stderr, "export failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	isDev := runtime.GetMode() == runtime.ModeDev
 
 	if isDev {

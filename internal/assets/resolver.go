@@ -59,6 +59,24 @@ func GetAssets(man *Manifest, entryName string) (scriptSrc, cssHref string, chun
 	return "/dist/" + entryName + ".js", "/dist/" + entryName + ".css", nil, false, ""
 }
 
+// HasSSREntries returns true if the manifest contains any SSR pages.
+// It checks both the Mode field (primary) and falls back to the SSR field for legacy manifests.
+func HasSSREntries(man *Manifest) bool {
+	if man == nil {
+		return false
+	}
+	for _, entry := range man.Entries {
+		if entry.Mode == "ssr" {
+			return true
+		}
+		// Legacy fallback: check SSR bundle path for older manifests
+		if entry.SSR != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func EntryNameForPath(componentPath string) string {
 	name := strings.TrimPrefix(componentPath, "./")
 	name = strings.TrimPrefix(name, "/")

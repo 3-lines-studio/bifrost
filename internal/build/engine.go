@@ -431,7 +431,7 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 	if len(staticPrerenderWithLoader) > 0 {
 		cli.PrintStep(cli.EmojiFile, "Exporting static data for dynamic paths...")
 
-		exportData, err := runStaticExport(mainFile, originalCwd)
+		exportData, err := runStaticExport(originalCwd)
 		if err != nil {
 			return fmt.Errorf("failed to export static data: %w", err)
 		}
@@ -485,7 +485,7 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 			}
 
 			// Generate HTML for each path
-			if err := generateDynamicStaticHTMLFiles(entryDir, outdir, pageInfo.Path, entries, man, client); err != nil {
+			if err := generateDynamicStaticHTMLFiles(entryDir, outdir, pageInfo.Path, entries, man, client, originalCwd); err != nil {
 				return fmt.Errorf("failed to generate dynamic static pages for %s: %w", pageInfo.Path, err)
 			}
 
@@ -506,8 +506,10 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 
 		heads := make(map[string]string)
 		for _, componentPath := range clientOnlyPaths {
+			// Use absolute path so Bun can resolve from cmd/full working directory
+			absComponentPath := filepath.Join(originalCwd, componentPath)
 			reqBody := map[string]interface{}{
-				"path":  componentPath,
+				"path":  absComponentPath,
 				"props": map[string]interface{}{},
 			}
 
@@ -562,7 +564,7 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 	if len(staticPrerenderSimple) > 0 {
 		cli.PrintStep(cli.EmojiFile, "Prerendering static pages...")
 
-		if err := generatePrerenderedHTMLFiles(entryDir, outdir, staticPrerenderSimple, man, client); err != nil {
+		if err := generatePrerenderedHTMLFiles(entryDir, outdir, staticPrerenderSimple, man, client, originalCwd); err != nil {
 			return fmt.Errorf("failed to generate prerendered HTML files: %w", err)
 		}
 		cli.PrintSuccess("Generated %d prerendered HTML file(s)", len(staticPrerenderSimple))
@@ -595,12 +597,33 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 	}
 	cli.PrintSuccess("Assets copied")
 
-	cli.PrintStep(cli.EmojiZap, "Compiling embedded Bun runtime...")
-	if err := compileEmbeddedRuntime(entryDir); err != nil {
-		cli.PrintWarning("Failed to compile embedded runtime: %v", err)
-		cli.PrintInfo("Applications will need Bun installed at runtime")
+	// Check if any pages need SSR (require embedded runtime)
+	hasSSR := false
+	for _, config := range pageConfigs {
+		if config.Mode == types.ModeSSR {
+			hasSSR = true
+			break
+		}
+	}
+
+	if hasSSR {
+		cli.PrintStep(cli.EmojiZap, "Compiling embedded Bun runtime...")
+		if err := compileEmbeddedRuntime(entryDir); err != nil {
+			cli.PrintWarning("Failed to compile embedded runtime: %v", err)
+			cli.PrintInfo("Applications will need Bun installed at runtime")
+		} else {
+			cli.PrintSuccess("Embedded runtime ready")
+		}
 	} else {
-		cli.PrintSuccess("Embedded runtime ready")
+		// No SSR pages - remove runtime dir if it exists to prevent stale runtime
+		runtimeDir := filepath.Join(entryDir, "runtime")
+		if _, err := os.Stat(runtimeDir); err == nil {
+			cli.PrintStep(cli.EmojiGear, "Cleaning up runtime directory (no SSR pages)...")
+			if err := os.RemoveAll(runtimeDir); err != nil {
+				cli.PrintWarning("Failed to remove runtime directory: %v", err)
+			}
+		}
+		cli.PrintInfo("No SSR pages - embedded runtime not needed")
 	}
 
 	cli.PrintDone("Build complete! You can now compile your Go binary with embedded assets.")
@@ -899,7 +922,7 @@ func writeStaticHTML(htmlPath, scriptSrc, cssHref string, chunks []string, headH
 	return os.WriteFile(htmlPath, []byte(html), 0644)
 }
 
-func generatePrerenderedHTMLFiles(entryDir, outdir string, componentPaths []string, man *assets.Manifest, client *http.Client) error {
+func generatePrerenderedHTMLFiles(entryDir, outdir string, componentPaths []string, man *assets.Manifest, client *http.Client, originalCwd string) error {
 	pagesDir := filepath.Join(entryDir, "pages")
 	if err := os.MkdirAll(pagesDir, 0755); err != nil {
 		return fmt.Errorf("failed to create pages directory: %w", err)
@@ -915,9 +938,10 @@ func generatePrerenderedHTMLFiles(entryDir, outdir string, componentPaths []stri
 		scriptSrc, cssHref, chunks, _, _ := assets.GetAssets(man, entryName)
 		htmlPath := filepath.Join(pageDir, "index.html")
 
-		// Render the component at build time
+		// Render the component at build time (use absolute path so Bun can resolve from any cwd)
+		absComponentPath := filepath.Join(originalCwd, componentPath)
 		reqBody := map[string]interface{}{
-			"path":  componentPath,
+			"path":  absComponentPath,
 			"props": map[string]interface{}{},
 		}
 
@@ -1095,22 +1119,21 @@ type StaticBuildExport struct {
 }
 
 // runStaticExport runs the Go app in export mode and returns the static data
-func runStaticExport(mainFile string, originalCwd string) (*StaticBuildExport, error) {
-	mainDir := filepath.Dir(mainFile)
-	if mainDir == "" {
-		mainDir = "."
-	}
+// Note: This function assumes it's called from the main file's directory
+// (already chdir'd there by BuildProject)
+func runStaticExport(originalCwd string) (*StaticBuildExport, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
 
-	mainBase := filepath.Base(mainFile)
-
-	cmd := exec.Command("go", "run", mainBase)
-	cmd.Dir = mainDir
-	cmd.Env = append(os.Environ(), "BIFROST_EXPORT_STATIC=1")
+	cmd := exec.CommandContext(ctx, "go", "run", ".", "__bifrost_export_static__")
 
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("export failed: %s", string(exitErr.Stderr))
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("export timed out after 90s; ensure RegisterAssetRoutes is called after all NewPage registrations")
 		}
 		return nil, fmt.Errorf("failed to run export: %w", err)
 	}
@@ -1167,9 +1190,12 @@ func validateRoutePath(path string) error {
 }
 
 // generateDynamicStaticHTMLFiles generates multiple HTML files for dynamic static paths
-func generateDynamicStaticHTMLFiles(entryDir, outdir string, componentPath string, entries []StaticPathExport, man *assets.Manifest, client *http.Client) error {
+func generateDynamicStaticHTMLFiles(entryDir, outdir string, componentPath string, entries []StaticPathExport, man *assets.Manifest, client *http.Client, originalCwd string) error {
 	entryName := assets.EntryNameForPath(componentPath)
 	scriptSrc, cssHref, chunks, _, _ := assets.GetAssets(man, entryName)
+
+	// Use absolute path for component so Bun can resolve it from any cwd
+	absComponentPath := filepath.Join(originalCwd, componentPath)
 
 	pagesDir := filepath.Join(entryDir, "pages")
 
@@ -1191,9 +1217,9 @@ func generateDynamicStaticHTMLFiles(entryDir, outdir string, componentPath strin
 
 		htmlPath := filepath.Join(pageDir, "index.html")
 
-		// Render the component with props
+		// Render the component with props (use absolute path so Bun can resolve from any cwd)
 		reqBody := map[string]interface{}{
-			"path":  componentPath,
+			"path":  absComponentPath,
 			"props": entry.Props,
 		}
 

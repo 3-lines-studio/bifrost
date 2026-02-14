@@ -2,17 +2,14 @@ package main
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"log"
 	"net/http"
 
 	"github.com/3-lines-studio/bifrost"
+	"github.com/3-lines-studio/bifrost/example"
 	"github.com/go-chi/chi/v5"
 )
-
-//go:embed all:.bifrost
-var bifrostFS embed.FS
 
 // Mock database for demonstration
 type Post struct {
@@ -27,7 +24,7 @@ var posts = []Post{
 }
 
 func main() {
-	r, err := bifrost.New(bifrost.WithAssetsFS(bifrostFS))
+	r, err := bifrost.New(bifrost.WithAssetsFS(example.BifrostFS))
 	if err != nil {
 		log.Fatalf("Failed to start renderer: %v", err)
 	}
@@ -90,15 +87,6 @@ func main() {
 	router.Handle("/error", errorHandler)
 	router.Handle("/error-render", renderErrorHandler)
 	router.Handle("/error-import", importErrorHandler)
-
-	// Handle export mode for build process
-	handled, err := bifrost.ExportStaticBuildData(r)
-	if err != nil {
-		log.Fatalf("Export failed: %v", err)
-	}
-	if handled {
-		return // Exit after exporting
-	}
 
 	assetRouter := chi.NewRouter()
 	bifrost.RegisterAssetRoutes(assetRouter, r, router)

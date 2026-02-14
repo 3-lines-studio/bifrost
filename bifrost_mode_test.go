@@ -136,6 +136,79 @@ func TestPageOptions(t *testing.T) {
 	})
 }
 
+func TestPageModeTypes(t *testing.T) {
+	t.Run("SSR page has correct mode", func(t *testing.T) {
+		t.Setenv("BIFROST_DEV", "1")
+
+		r, err := New()
+		if err != nil {
+			t.Skipf("Skipping test: %v (is bun installed?)", err)
+		}
+		defer r.Stop()
+
+		handler := r.NewPage("./test.tsx", WithPropsLoader(func(*http.Request) (map[string]any, error) {
+			return map[string]any{}, nil
+		}))
+		if handler == nil {
+			t.Fatal("Handler is nil")
+		}
+
+		config := r.pageConfigs["./test.tsx"]
+		if config == nil {
+			t.Fatal("Config not stored")
+		}
+		if config.Mode != ModeSSR {
+			t.Errorf("Expected ModeSSR, got %v", config.Mode)
+		}
+	})
+
+	t.Run("ClientOnly page has correct mode", func(t *testing.T) {
+		t.Setenv("BIFROST_DEV", "1")
+
+		r, err := New()
+		if err != nil {
+			t.Skipf("Skipping test: %v (is bun installed?)", err)
+		}
+		defer r.Stop()
+
+		handler := r.NewPage("./test.tsx", WithClientOnly())
+		if handler == nil {
+			t.Fatal("Handler is nil")
+		}
+
+		config := r.pageConfigs["./test.tsx"]
+		if config == nil {
+			t.Fatal("Config not stored")
+		}
+		if config.Mode != ModeClientOnly {
+			t.Errorf("Expected ModeClientOnly, got %v", config.Mode)
+		}
+	})
+
+	t.Run("StaticPrerender page has correct mode", func(t *testing.T) {
+		t.Setenv("BIFROST_DEV", "1")
+
+		r, err := New()
+		if err != nil {
+			t.Skipf("Skipping test: %v (is bun installed?)", err)
+		}
+		defer r.Stop()
+
+		handler := r.NewPage("./test.tsx", WithStaticPrerender())
+		if handler == nil {
+			t.Fatal("Handler is nil")
+		}
+
+		config := r.pageConfigs["./test.tsx"]
+		if config == nil {
+			t.Fatal("Config not stored")
+		}
+		if config.Mode != ModeStaticPrerender {
+			t.Errorf("Expected ModeStaticPrerender, got %v", config.Mode)
+		}
+	})
+}
+
 func TestRedirectErrorInterface(t *testing.T) {
 	tests := []struct {
 		name         string

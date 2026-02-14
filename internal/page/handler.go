@@ -158,6 +158,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		// Render with the matched props
+		if h.renderer == nil {
+			h.serveError(w, fmt.Errorf("renderer not available for %s; static prerender requires a runtime in dev mode", h.config.ComponentPath))
+			return
+		}
+
 		renderPath := h.config.ComponentPath
 		page, err := h.renderer.Render(renderPath, props)
 		if err != nil {
@@ -184,6 +189,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	renderPath, err := h.getRenderPath()
 	if err != nil {
 		h.serveError(w, err)
+		return
+	}
+
+	if h.renderer == nil {
+		h.serveError(w, fmt.Errorf("renderer not available for %s; SSR pages require a runtime", h.config.ComponentPath))
 		return
 	}
 
