@@ -8,12 +8,9 @@ dev:
 
 
 build:
-	rm -rf .bifrost/*
-	rm -f bifrost
 	go run ../cmd/build main.go
 	go build -o bifrost main.go
 
 start: build
-	rm -rf .bifrost/*
 	./bifrost
 

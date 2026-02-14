@@ -46,7 +46,7 @@ cd example
 make dev
 ```
 
-Then open http://localhost:8080
+Then open <http://localhost:8080>
 
 ### Build for Production
 
@@ -62,20 +62,39 @@ Bifrost now supports building static sites that don't require Bun at runtime:
 
 ```go
 // Static page (no SSR)
-home := r.NewPage("./pages/home.tsx", bifrost.WithStatic())
+home := r.NewPage("./pages/home.tsx", bifrost.WithClientOnly())
 
 // SSR page (with server-side rendering)
 dynamic := r.NewPage("./pages/dynamic.tsx", propsLoader)
 ```
 
 Build with:
+
 ```bash
 bifrost-build main.go
 ```
 
 This generates:
-- Static HTML files for pages marked with `WithStatic()`
+
+- Static HTML files for pages marked with `WithClientOnly()`
 - JS bundles for client-side hydration
+- SSR bundles for server-side rendering from embed.FS
 - Manifest for asset mapping
 
 Perfect for CLI tools with embedded web UIs!
+
+### SSR Bundles
+
+For SSR pages, production builds include pre-built server bundles:
+
+- Located in `.bifrost/ssr/`
+- Used automatically when `embed.FS` is provided via `WithAssetsFS()`
+- Extracted to temp directory at runtime
+- Allows SSR without source TSX files
+
+```bash
+# Build includes both client and SSR bundles
+go run cmd/build/main.go main.go
+
+# SSR bundles are extracted from embed.FS at runtime
+```

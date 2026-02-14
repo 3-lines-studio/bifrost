@@ -1,15 +1,6 @@
-import { renderToString } from "react-dom/server";
-import React from "react";
-import tailwind from "bun-plugin-tailwind";
-
 const socket = process.env.BIFROST_SOCKET;
 const isDev =
   process.env.BIFROST_DEV === "1" || process.env.BIFROST_DEV === "true";
-
-const componentCache = new Map<
-  string,
-  { Component: React.ComponentType; Head?: React.ComponentType }
->();
 
 interface ErrorDetail {
   message: string;
@@ -30,6 +21,11 @@ interface Result {
     stack?: string;
     errors?: ErrorDetail[];
   };
+}
+
+interface RenderResult {
+  html: string;
+  head?: string;
 }
 
 function serializeError(error: unknown): {
@@ -67,6 +63,12 @@ function createError(
   return new Response(JSON.stringify(result) + "\n");
 }
 
+// Component cache for dev mode (when not using SSR bundles)
+const componentCache = new Map<
+  string,
+  { Component: any; Head?: any }
+>();
+
 async function handleRender(req: Bun.BunRequest): Promise<Response> {
   let body: { path?: string; props?: Record<string, unknown> };
   try {
@@ -84,65 +86,78 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
 
   const importPath = isDev ? `${path}?t=${Date.now()}` : path;
 
-  let Component: React.ComponentType;
-  let Head: React.ComponentType | undefined;
-
   try {
+    const mod = await import(importPath);
+
+    // Check if this is an SSR bundle with a render function
+    if (typeof mod.render === "function") {
+      // SSR bundle path - render function handles everything internally
+      const result: RenderResult = await mod.render(props || {});
+      return new Response(JSON.stringify(result) + "\n");
+    }
+
+    // Legacy path - component export (for dev mode)
     const cached = componentCache.get(path);
+    let Component: any;
+    let Head: any | undefined;
+
     if (!isDev && cached) {
       Component = cached.Component;
       Head = cached.Head;
     } else {
-      const mod = await import(importPath);
       Component =
         mod.default ||
         mod.Page ||
-        Object.values(mod).find((x) => typeof x === "function");
+        Object.values(mod).find((x: any) => typeof x === "function");
       Head = mod.Head;
 
       if (!isDev && Component) {
         componentCache.set(path, { Component, Head });
       }
     }
+
+    if (!Component) {
+      return createError(
+        `No component export found in ${path}. Expected default export, Page export, or a function export.`,
+      );
+    }
+
+    // Dynamically import React for rendering
+    const React = await import("react");
+    const { renderToString } = await import("react-dom/server");
+
+    const componentProps = props || {};
+
+    let html: string;
+    try {
+      const el = React.createElement(Component, componentProps);
+      html = renderToString(el);
+    } catch (renderErr) {
+      const message =
+        renderErr instanceof Error ? renderErr.message : String(renderErr);
+      return createError(`Render error: ${message}`, renderErr);
+    }
+
+    let head = "";
+    if (Head) {
+      try {
+        const headEl = React.createElement(Head, componentProps);
+        head = renderToString(headEl);
+      } catch (headErr) {
+        console.error("Error rendering head:", headErr);
+      }
+    }
+
+    const result: RenderResult = { html, head };
+    return new Response(JSON.stringify(result) + "\n");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return createError(`Failed to import component: ${message}`, err);
   }
-
-  if (!Component) {
-    return createError(
-      `No component export found in ${path}. Expected default export, Page export, or a function export.`,
-    );
-  }
-
-  const componentProps = props || {};
-
-  let html: string;
-  try {
-    const el = React.createElement(Component, componentProps);
-    html = renderToString(el);
-  } catch (renderErr) {
-    const message =
-      renderErr instanceof Error ? renderErr.message : String(renderErr);
-    return createError(`Render error: ${message}`, renderErr);
-  }
-
-  let head = "";
-  if (Head) {
-    try {
-      const headEl = React.createElement(Head, componentProps);
-      head = renderToString(headEl);
-    } catch (headErr) {
-      console.error("Error rendering head:", headErr);
-    }
-  }
-
-  const result: RenderResult = { html, head };
-  return new Response(JSON.stringify(result) + "\n");
 }
 
 async function handleBuild(req: Bun.BunRequest): Promise<Response> {
-  let body: { entrypoints?: string[]; outdir?: string };
+  let body: { entrypoints?: string[]; outdir?: string; target?: string };
   try {
     body = await req.json();
   } catch (err) {
@@ -150,7 +165,7 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
     return createError(`Failed to parse request: ${message}`, err);
   }
 
-  const { entrypoints, outdir } = body;
+  const { entrypoints, outdir, target } = body;
 
   if (!Array.isArray(entrypoints) || entrypoints.length === 0) {
     return createError("Missing entrypoints");
@@ -163,13 +178,19 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
   const isProduction =
     process.env.BIFROST_PROD === "1" || process.env.BIFROST_PROD === "true";
 
+  const buildTarget = target === "bun" ? "bun" : "browser";
+  const isSSR = buildTarget === "bun";
+
   try {
+    // Dynamically import tailwind only for browser builds
+    const plugins = isSSR ? [] : [(await import("bun-plugin-tailwind")).default];
+
     const result = await Bun.build({
       entrypoints,
       outdir,
-      target: "browser",
-      minify: true,
-      splitting: true,
+      target: buildTarget,
+      minify: !isSSR,
+      splitting: !isSSR,
       naming: isProduction
         ? {
             entry: "[name]-[hash].[ext]",
@@ -177,7 +198,7 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
             asset: "[name]-[hash].[ext]",
           }
         : undefined,
-      plugins: [tailwind],
+      plugins,
     });
 
     if (!result.success) {

@@ -52,7 +52,7 @@ func main() {
         }, nil
     })
     
-    about := r.NewPage("./pages/about.tsx", bifrost.WithStatic())
+    about := r.NewPage("./pages/about.tsx", bifrost.WithClientOnly())
     
     // Setup routes
     router := http.NewServeMux()
@@ -109,7 +109,7 @@ A function that receives the HTTP request and returns props to pass to the React
 
 | Option | Description |
 |--------|-------------|
-| `WithStatic()` | Static site generation (no SSR at runtime) |
+| `WithClientOnly()` | Clien only js (no SSR at runtime) |
 
 ### Registering Routes
 
@@ -145,7 +145,7 @@ Pre-rendered at build time with client-side JavaScript hydration. Static pages b
 
 ```go
 // Create a static page
-page := r.NewPage("./pages/about.tsx", bifrost.WithStatic())
+page := r.NewPage("./pages/about.tsx", bifrost.WithClientOnly())
 ```
 
 **Key characteristics:**
@@ -293,15 +293,31 @@ Development features:
 - Assets embedded via `embed.FS`
 - Optimized builds
 - Render caching
+- SSR bundles for production rendering
 - Minimal error details
 
 ```bash
-# Build
+# Build (generates both client and SSR bundles)
 bifrost-build main.go
 
 # Run
 ./myapp
 ```
+
+**SSR Bundles:**
+
+For SSR pages, `bifrost-build` generates server-side bundles in `.bifrost/ssr/`:
+
+- Pre-built for Bun runtime target
+- Automatically extracted from `embed.FS` at runtime
+- Used instead of source TSX files in production
+- Allows single-binary deployment with embedded SSR
+
+When `WithAssetsFS()` is provided:
+
+1. SSR bundles are extracted to temp directory on first render
+2. Subsequent renders use the cached temp files
+3. Temp directory cleaned up on `renderer.Stop()`
 
 ## Project Structure
 
@@ -314,6 +330,10 @@ myapp/
 ├── components/       # Shared React components
 ├── public/           # Static assets
 ├── .bifrost/         # Build output (gitignore)
+│   ├── dist/         # Client bundles
+│   ├── ssr/          # SSR bundles (production)
+│   ├── pages/        # Static HTML files
+│   └── manifest.json # Asset manifest
 └── go.mod
 ```
 
@@ -329,7 +349,7 @@ See the [example/](../example/) directory for a working implementation with:
 ## Best Practices
 
 1. **Always defer Stop()**: `defer r.Stop()` after creating the renderer
-2. **Use WithStatic() for marketing pages**: No runtime Bun dependency
+2. **Use WithClientOnly() for marketing pages**: No runtime Bun dependency
 3. **Keep props minimal**: Pass only necessary data to React
 4. **Handle errors in props loaders**: Return proper errors or redirects
 5. **Use embed.FS in production**: Ensures single binary deployment

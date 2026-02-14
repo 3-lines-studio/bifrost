@@ -44,6 +44,7 @@ type Renderer struct {
 	AssetsFS      embed.FS
 	timingEnabled bool
 	logger        *slog.Logger
+	ssrTempDir    string
 }
 
 func NewRenderer() (*Renderer, error) {
@@ -54,12 +55,17 @@ func NewRenderer() (*Renderer, error) {
 		return nil, fmt.Errorf("failed to get working directory: %w", err)
 	}
 
+	rendererSource := BunRendererProdSource
+	if IsDev() {
+		rendererSource = BunRendererDevSource
+	}
+
 	cmd := exec.Command("bun", "run", "--smol", "-")
 	cmd.Dir = cwd
 	cmd.Env = append(os.Environ(), "BIFROST_SOCKET="+socket)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Stdin = strings.NewReader(BunRendererSource)
+	cmd.Stdin = strings.NewReader(rendererSource)
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start bun: %w", err)
@@ -242,6 +248,9 @@ func (r *Renderer) Build(entrypoints []string, outdir string) error {
 }
 
 func (r *Renderer) Stop() error {
+	if r.ssrTempDir != "" {
+		os.RemoveAll(r.ssrTempDir)
+	}
 	return r.cmd.Process.Kill()
 }
 
@@ -334,7 +343,7 @@ func createPage(r *Renderer, componentPath string, opts ...interface{}) *Page {
 		man = r.loadManifestForMode(paths, IsDev())
 	}
 
-	scriptSrc, cssHref, chunks, isStaticFromManifest := getAssetsFromManifest(man, paths.entryName)
+	scriptSrc, cssHref, chunks, isStaticFromManifest, ssrPath := getAssetsFromManifest(man, paths.entryName)
 	isDev := IsDev()
 
 	isStatic := options.Static || isStaticFromManifest
@@ -364,6 +373,7 @@ func createPage(r *Renderer, componentPath string, opts ...interface{}) *Page {
 		isDev:       isDev,
 		needsSetup:  needsSetup,
 		staticPath:  staticPath,
+		ssrPath:     ssrPath,
 	}
 }
 
@@ -419,4 +429,58 @@ func (r *Renderer) loadManifestFromEmbed(path string) (*buildManifest, error) {
 
 func (r *Renderer) SetAssetsFS(fs embed.FS) {
 	r.AssetsFS = fs
+}
+
+func (r *Renderer) extractSSRBundles() (string, error) {
+	if r.ssrTempDir != "" {
+		return r.ssrTempDir, nil
+	}
+
+	tempDir, err := os.MkdirTemp("", "bifrost-ssr-*")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp dir for SSR bundles: %w", err)
+	}
+
+	ssrDir := filepath.Join(".bifrost", "ssr")
+	entries, err := r.AssetsFS.ReadDir(ssrDir)
+	if err != nil {
+		return tempDir, nil
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		data, err := r.AssetsFS.ReadFile(filepath.Join(ssrDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+
+		if err := os.WriteFile(filepath.Join(tempDir, entry.Name()), data, 0644); err != nil {
+			os.RemoveAll(tempDir)
+			return "", fmt.Errorf("failed to write SSR bundle %s: %w", entry.Name(), err)
+		}
+	}
+
+	r.ssrTempDir = tempDir
+	return tempDir, nil
+}
+
+func (r *Renderer) getSSRBundlePath(ssrManifestPath string) string {
+	if ssrManifestPath == "" {
+		return ""
+	}
+
+	if r.AssetsFS == (embed.FS{}) {
+		return filepath.Join(".bifrost", ssrManifestPath)
+	}
+
+	tempDir, err := r.extractSSRBundles()
+	if err != nil {
+		return ""
+	}
+
+	bundleName := filepath.Base(ssrManifestPath)
+	return filepath.Join(tempDir, bundleName)
 }

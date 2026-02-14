@@ -31,6 +31,7 @@ type manifestEntry struct {
 	CSS    string   `json:"css,omitempty"`
 	Chunks []string `json:"chunks,omitempty"`
 	Static bool     `json:"static,omitempty"`
+	SSR    string   `json:"ssr,omitempty"`
 }
 
 type buildManifest struct {
@@ -42,7 +43,7 @@ type Router interface {
 	Handle(pattern string, handler http.Handler)
 }
 
-func WithStatic() PageOption {
+func WithClientOnly() PageOption {
 	return func(opts *options) {
 		opts.Static = true
 	}

@@ -15,8 +15,8 @@ type Option func(*bifrost.Renderer)
 
 type PageOption = bifrost.PageOption
 
-func WithStatic() PageOption {
-	return bifrost.WithStatic()
+func WithClientOnly() PageOption {
+	return bifrost.WithClientOnly()
 }
 
 func WithAssetsFS(fs embed.FS) Option {

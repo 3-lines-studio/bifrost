@@ -68,6 +68,7 @@ func BuildCmd() {
 
 	entryDir := filepath.Join(originalCwd, BifrostDir)
 	outdir := filepath.Join(entryDir, DistDir)
+	ssrDir := filepath.Join(entryDir, "ssr")
 
 	PrintStep(EmojiFolder, "Creating output directories...")
 	if err := os.MkdirAll(entryDir, 0755); err != nil {
@@ -76,6 +77,10 @@ func BuildCmd() {
 	}
 	if err := os.MkdirAll(outdir, 0755); err != nil {
 		PrintError("Failed to create outdir: %v", err)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll(ssrDir, 0755); err != nil {
+		PrintError("Failed to create ssr dir: %v", err)
 		os.Exit(1)
 	}
 	PrintSuccess("Directories ready")
@@ -132,7 +137,7 @@ func BuildCmd() {
 	cmd.Env = append(os.Environ(), "BIFROST_SOCKET="+socket, "BIFROST_PROD=1")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Stdin = strings.NewReader(BunRendererSource)
+	cmd.Stdin = strings.NewReader(BunRendererDevSource)
 
 	if err := cmd.Start(); err != nil {
 		PrintError("Failed to start bun: %v", err)
@@ -272,6 +277,120 @@ func BuildCmd() {
 
 	PrintSuccess("Built %d of %d entries", len(successfulEntries), len(entryFiles))
 
+	// Build SSR bundles for non-static pages
+	var ssrEntryFiles []string
+	var ssrEntryToConfig = make(map[string]pageConfig)
+
+	for _, entryFile := range successfulEntries {
+		config := entryToConfig[entryFile]
+		if config.static {
+			continue
+		}
+
+		entryName := EntryNameForPath(config.path)
+		ssrEntryPath := filepath.Join(entryDir, entryName+"-ssr.tsx")
+		ssrEntryToConfig[ssrEntryPath] = config
+
+		absComponentPath := filepath.Join(originalCwd, config.path)
+		componentImport, err := ComponentImportPath(ssrEntryPath, absComponentPath)
+		if err != nil {
+			PrintWarning("Failed to get import path for SSR %s: %v", config.path, err)
+			continue
+		}
+
+		if err := writeServerEntry(ssrEntryPath, componentImport); err != nil {
+			PrintWarning("Failed to write SSR entry file for %s: %v", config.path, err)
+			continue
+		}
+
+		ssrEntryFiles = append(ssrEntryFiles, ssrEntryPath)
+	}
+
+	if len(ssrEntryFiles) > 0 {
+		PrintStep(EmojiZap, "Building SSR bundles...")
+
+		for _, ssrEntryFile := range ssrEntryFiles {
+			config := ssrEntryToConfig[ssrEntryFile]
+			entryName := EntryNameForPath(config.path)
+
+			buildSpinner := NewSpinner(fmt.Sprintf("Building SSR %s", entryName))
+			buildSpinner.Start()
+
+			reqBody := map[string]interface{}{
+				"entrypoints": []string{ssrEntryFile},
+				"outdir":      ssrDir,
+				"target":      "bun",
+			}
+
+			jsonBody, err := json.Marshal(reqBody)
+			if err != nil {
+				buildSpinner.Stop()
+				PrintWarning("Failed to marshal SSR request for %s: %v", entryName, err)
+				continue
+			}
+
+			req, err := http.NewRequest("POST", "http://localhost/build", bytes.NewReader(jsonBody))
+			if err != nil {
+				buildSpinner.Stop()
+				PrintWarning("Failed to create SSR request for %s: %v", entryName, err)
+				continue
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, err := client.Do(req)
+			if err != nil {
+				buildSpinner.Stop()
+				PrintWarning("SSR build request failed for %s: %v", entryName, err)
+				continue
+			}
+
+			var result struct {
+				OK    bool `json:"ok"`
+				Error *struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+				resp.Body.Close()
+				buildSpinner.Stop()
+				PrintWarning("Failed to decode SSR response for %s: %v", entryName, err)
+				continue
+			}
+			resp.Body.Close()
+
+			buildSpinner.Stop()
+
+			if result.Error != nil {
+				PrintWarning("Failed to build SSR %s: %s", entryName, result.Error.Message)
+			} else if !result.OK {
+				PrintWarning("Failed to build SSR %s", entryName)
+			} else {
+				fmt.Printf("  %s Built SSR %s\n", EmojiCheck, entryName)
+			}
+		}
+
+		PrintStep(EmojiGear, "Cleaning up SSR entry files...")
+		for _, ssrEntryFile := range ssrEntryFiles {
+			if err := os.Remove(ssrEntryFile); err != nil {
+				PrintWarning("Failed to remove SSR entry file %s: %v", ssrEntryFile, err)
+			}
+		}
+
+		PrintStep(EmojiZap, "Removing unused CSS files from SSR directory...")
+		ssrFiles, err := os.ReadDir(ssrDir)
+		if err == nil {
+			for _, file := range ssrFiles {
+				if !file.IsDir() && strings.HasSuffix(file.Name(), ".css") {
+					cssPath := filepath.Join(ssrDir, file.Name())
+					if err := os.Remove(cssPath); err != nil {
+						PrintWarning("Failed to remove CSS file %s: %v", cssPath, err)
+					}
+				}
+			}
+		}
+	}
+
 	componentPaths := make([]string, 0, len(successfulEntries))
 	successfulStaticFlags := make(map[string]bool)
 	for _, entryFile := range successfulEntries {
@@ -282,7 +401,7 @@ func BuildCmd() {
 	}
 
 	PrintStep(EmojiPackage, "Generating manifest...")
-	man, err := generateManifest(outdir, componentPaths, successfulStaticFlags)
+	man, err := generateManifest(outdir, ssrDir, componentPaths, successfulStaticFlags)
 	if err != nil {
 		PrintError("Failed to generate manifest: %v", err)
 		os.Exit(1)

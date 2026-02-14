@@ -27,12 +27,19 @@ var (
 	staticClientEntryTemplateSource string
 	StaticClientEntryTemplate       = template.Must(template.New("static-client-entry").Parse(staticClientEntryTemplateSource))
 
+	//go:embed server-entry.tsx
+	serverEntryTemplateSource string
+	ServerEntryTemplate       = template.Must(template.New("server-entry").Parse(serverEntryTemplateSource))
+
 	//go:embed error.html
 	errorTemplateSource string
 	ErrorTemplate       = template.Must(template.New("error").Parse(errorTemplateSource))
 
-	//go:embed bun_renderer.ts
-	BunRendererSource string
+	//go:embed bun_renderer_dev.ts
+	BunRendererDevSource string
+
+	//go:embed bun_renderer_prod.ts
+	BunRendererProdSource string
 )
 
 const (
@@ -108,7 +115,7 @@ func extractPageConfigs(filename string) ([]pageConfig, error) {
 			return true
 		}
 
-		static := hasWithStaticOption(callExpr.Args[argIndex:])
+		static := hasWithClientOnlyOption(callExpr.Args[argIndex:])
 
 		if !seen[path] {
 			seen[path] = true
@@ -121,7 +128,7 @@ func extractPageConfigs(filename string) ([]pageConfig, error) {
 	return configs, nil
 }
 
-func hasWithStaticOption(args []ast.Expr) bool {
+func hasWithClientOnlyOption(args []ast.Expr) bool {
 	for _, arg := range args {
 		callExpr, ok := arg.(*ast.CallExpr)
 		if !ok {
@@ -136,7 +143,7 @@ func hasWithStaticOption(args []ast.Expr) bool {
 			funcName = fn.Name
 		}
 
-		if funcName == "WithStatic" {
+		if funcName == "WithClientOnly" {
 			return true
 		}
 	}
@@ -156,7 +163,7 @@ func extractComponentPaths(filename string) ([]string, error) {
 	return paths, nil
 }
 
-func generateManifest(outdir string, componentPaths []string, staticFlags map[string]bool) (*buildManifest, error) {
+func generateManifest(outdir string, ssrDir string, componentPaths []string, staticFlags map[string]bool) (*buildManifest, error) {
 	entries := make(map[string]manifestEntry)
 	chunks := make(map[string]string)
 
@@ -209,16 +216,40 @@ func generateManifest(outdir string, componentPaths []string, staticFlags map[st
 			}
 
 			isStatic := staticFlags[entryName]
+			ssrPath := findSSRPath(ssrDir, entryName)
 			entries[entryName] = manifestEntry{
 				Script: script,
 				CSS:    css,
 				Chunks: entryChunks,
 				Static: isStatic,
+				SSR:    ssrPath,
 			}
 		}
 	}
 
 	return &buildManifest{Entries: entries, Chunks: chunks}, nil
+}
+
+func findSSRPath(ssrDir string, entryName string) string {
+	if ssrDir == "" {
+		return ""
+	}
+	files, err := os.ReadDir(ssrDir)
+	if err != nil {
+		return ""
+	}
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+		name := file.Name()
+		if strings.HasPrefix(name, entryName+"-") || strings.HasPrefix(name, entryName+".") {
+			if strings.HasSuffix(name, ".js") {
+				return "/ssr/" + name
+			}
+		}
+	}
+	return ""
 }
 
 func dedupeCSSFile(outdir string, cssPath string, cssFiles map[string]string, cssHashToFile map[string]string) string {
@@ -278,7 +309,7 @@ func generateStaticHTMLFiles(entryDir, outdir string, componentPaths []string, h
 			return fmt.Errorf("failed to create page directory %s: %w", pageDir, err)
 		}
 
-		scriptSrc, cssHref, chunks, _ := getAssetsFromManifest(man, entryName)
+		scriptSrc, cssHref, chunks, _, _ := getAssetsFromManifest(man, entryName)
 		htmlPath := filepath.Join(pageDir, "index.html")
 
 		// Get the rendered head HTML for this page

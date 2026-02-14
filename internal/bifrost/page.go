@@ -29,6 +29,7 @@ type Page struct {
 	setupErr    error
 	setupOnce   sync.Once
 	staticPath  string
+	ssrPath     string
 }
 
 func (p *Page) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -64,7 +65,8 @@ func (p *Page) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		renderStart = time.Now()
 	}
 
-	page, err := p.renderer.Render(p.opts.ComponentPath, props)
+	renderPath := p.getRenderPath()
+	page, err := p.renderer.Render(renderPath, props)
 	if err != nil {
 		p.serveError(w, err)
 		return
@@ -153,6 +155,18 @@ func (p *Page) handlePropsError(w http.ResponseWriter, req *http.Request, err er
 		status = http.StatusFound
 	}
 	http.Redirect(w, req, redirectErr.RedirectURL(), status)
+}
+
+func (p *Page) getRenderPath() string {
+	if p.isDev || p.ssrPath == "" {
+		return p.opts.ComponentPath
+	}
+
+	if p.renderer != nil {
+		return p.renderer.getSSRBundlePath(p.ssrPath)
+	}
+
+	return p.opts.ComponentPath
 }
 
 func (p *Page) renderPage(w http.ResponseWriter, props map[string]interface{}, page renderedPage) {
