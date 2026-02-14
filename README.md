@@ -46,32 +46,42 @@ Bifrost has two distinct modes with strict separation:
 
 ### Initialize Project
 
+Scaffold a new project with `bifrost init`:
+
 ```bash
-# Create .bifrost directory for build artifacts
-go run github.com/3-lines-studio/bifrost/cmd/init@latest .
+# Static site (client-only rendering, default)
+go run github.com/3-lines-studio/bifrost/cmd/init@latest my-app
+
+# Full-stack app (SSR, static prerender, props loading)
+go run github.com/3-lines-studio/bifrost/cmd/init@latest my-app --template=full
+
+# Desktop app (webview + systray)
+go run github.com/3-lines-studio/bifrost/cmd/init@latest my-app --template=desktop
+```
+
+This scaffolds a complete project with pages, components, layout, styles, and a `Makefile`. You can also specify a Go module name:
+
+```bash
+go run github.com/3-lines-studio/bifrost/cmd/init@latest my-app --template=full --module=github.com/user/my-app
 ```
 
 ### Development
 
 ```bash
-# Set development mode
-export BIFROST_DEV=1
+cd my-app
 
-# Run your app
-go run main.go
+# Start dev server with hot reload (uses air)
+make dev
 ```
 
 ### Build for Production
 
 ```bash
-# Build assets and SSR bundles
-bifrost-build main.go
-
-# Build Go binary with embedded assets
-go build -o myapp main.go
+# Build assets + Go binary
+make build
 
 # Run in production (no BIFROST_DEV set)
-./myapp
+make start
 ```
 
 ## API
