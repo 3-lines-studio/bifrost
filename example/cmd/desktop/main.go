@@ -7,9 +7,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/3-lines-studio/bifrost"
 	"github.com/3-lines-studio/bifrost/example"
+	"github.com/getlantern/systray"
 	"github.com/go-chi/chi/v5"
 	webview "github.com/webview/webview_go"
 )
@@ -57,7 +59,34 @@ func main() {
 	w.SetSize(1024, 768, webview.HintNone)
 	w.Navigate(localURL)
 
-	w.Run()
+	var quitOnce sync.Once
+	quit := make(chan struct{})
+
+	systray.Run(func() {
+		systray.SetTitle("Bifrost")
+		systray.SetTooltip("Bifrost Desktop App")
+		systray.SetIcon(example.IconPNG)
+
+		mQuit := systray.AddMenuItem("Quit", "Quit Bifrost")
+
+		go func() {
+			<-mQuit.ClickedCh
+			quitOnce.Do(func() {
+				w.Terminate()
+				close(quit)
+			})
+		}()
+	}, func() {})
+
+	go func() {
+		w.Run()
+		quitOnce.Do(func() {
+			systray.Quit()
+			close(quit)
+		})
+	}()
+
+	<-quit
 
 	if err := server.Shutdown(context.Background()); err != nil {
 		log.Printf("Server shutdown error: %v", err)
