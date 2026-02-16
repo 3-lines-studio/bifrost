@@ -90,6 +90,11 @@ func Run(projectDir string, templateName string) error {
 		return err
 	}
 
+	if err := ensureBifrostDir(projectDir); err != nil {
+		return err
+	}
+	createdCount++
+
 	cli.PrintDone("Created %d files using '%s' template", createdCount, templateName)
 
 	fmt.Println()
@@ -109,6 +114,16 @@ func Run(projectDir string, templateName string) error {
 func RepairBifrostDir(projectDir string) error {
 	cli.PrintHeader("Bifrost Doctor")
 
+	if err := ensureBifrostDir(projectDir); err != nil {
+		return err
+	}
+
+	cli.PrintDone("Repair complete!")
+
+	return nil
+}
+
+func ensureBifrostDir(projectDir string) error {
 	bifrostDir := filepath.Join(projectDir, ".bifrost")
 	gitkeepPath := filepath.Join(bifrostDir, ".gitkeep")
 
@@ -121,11 +136,7 @@ func RepairBifrostDir(projectDir string) error {
 			return fmt.Errorf("failed to create .gitkeep: %w", err)
 		}
 		cli.PrintSuccess("Created %s", gitkeepPath)
-	} else {
-		cli.PrintSuccess("Already exists: %s", gitkeepPath)
 	}
-
-	cli.PrintDone("Repair complete!")
 
 	return nil
 }

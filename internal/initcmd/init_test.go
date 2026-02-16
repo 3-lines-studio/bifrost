@@ -26,6 +26,7 @@ func TestRun_Minimal(t *testing.T) {
 		"pages/home.tsx",
 		"Makefile",
 		".air.toml",
+		"Dockerfile",
 	}
 
 	for _, file := range expectedFiles {
@@ -44,6 +45,10 @@ func TestRun_Minimal(t *testing.T) {
 	expectedModule := "module myapp"
 	if string(goModContent)[:len(expectedModule)] != expectedModule {
 		t.Errorf("go.mod doesn't contain expected module. Got:\n%s", string(goModContent))
+	}
+
+	if strings.Contains(string(goModContent), "github.com/3-lines-studio/bifrost v0.0.0") {
+		t.Errorf("go.mod contains hardcoded bifrost v0.0.0 which is invalid; go mod tidy should resolve the correct version")
 	}
 
 	makefilePath := filepath.Join(projectDir, "Makefile")
@@ -143,6 +148,7 @@ func TestRun_Spa(t *testing.T) {
 		"pages/home.tsx",
 		"Makefile",
 		".air.toml",
+		"Dockerfile",
 	}
 
 	for _, file := range expectedFiles {
@@ -160,6 +166,16 @@ func TestRun_Spa(t *testing.T) {
 
 	if !strings.Contains(string(mainGoContent), "WithClientOnly()") {
 		t.Errorf("main.go should contain WithClientOnly() for SPA template")
+	}
+
+	goModPath := filepath.Join(projectDir, "go.mod")
+	goModContent, err := os.ReadFile(goModPath)
+	if err != nil {
+		t.Fatalf("Failed to read go.mod: %v", err)
+	}
+
+	if strings.Contains(string(goModContent), "github.com/3-lines-studio/bifrost v0.0.0") {
+		t.Errorf("go.mod contains hardcoded bifrost v0.0.0 which is invalid; go mod tidy should resolve the correct version")
 	}
 }
 
@@ -204,6 +220,21 @@ func TestRun_Desktop(t *testing.T) {
 
 	if !strings.Contains(string(mainGoContent), "webview") {
 		t.Errorf("main.go should contain webview for desktop template")
+	}
+
+	goModPath := filepath.Join(projectDir, "go.mod")
+	goModContent, err := os.ReadFile(goModPath)
+	if err != nil {
+		t.Fatalf("Failed to read go.mod: %v", err)
+	}
+
+	if strings.Contains(string(goModContent), "github.com/3-lines-studio/bifrost v0.0.0") {
+		t.Errorf("go.mod contains hardcoded bifrost v0.0.0 which is invalid; go mod tidy should resolve the correct version")
+	}
+
+	dockerfilePath := filepath.Join(projectDir, "Dockerfile")
+	if _, err := os.Stat(dockerfilePath); !os.IsNotExist(err) {
+		t.Errorf("desktop template should not have Dockerfile, but it exists")
 	}
 }
 
