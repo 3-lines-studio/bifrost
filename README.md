@@ -44,22 +44,17 @@ Bifrost has two distinct modes with strict separation:
 
 ## Quick Start
 
-### Initialize Project
+Copy and paste this command to create a new project:
 
 ```bash
-# Create .bifrost directory for build artifacts
-go run github.com/3-lines-studio/bifrost/cmd/init@latest .
+go run github.com/3-lines-studio/bifrost/cmd/init@latest myapp
 ```
 
-### Development
+This creates a complete Bifrost project with a working SSR page and starts the dev server on http://localhost:8080.
 
-```bash
-# Set development mode
-export BIFROST_DEV=1
-
-# Run your app
-go run main.go
-```
+Use another template:
+- `go run github.com/3-lines-studio/bifrost/cmd/init@latest --template spa myapp`
+- `go run github.com/3-lines-studio/bifrost/cmd/init@latest --template desktop myapp`
 
 ### Build for Production
 
@@ -73,6 +68,16 @@ go build -o myapp main.go
 # Run in production (no BIFROST_DEV set)
 ./myapp
 ```
+
+### Repair Existing Project
+
+If your `.bifrost` directory is missing or corrupted:
+
+```bash
+go run github.com/3-lines-studio/bifrost/cmd/doctor@latest .
+```
+
+`doctor` only repairs the `.bifrost` directory (does not scaffold missing app files).
 
 ## API
 

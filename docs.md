@@ -191,7 +191,9 @@ A function that receives the HTTP request and returns props to pass to the React
 func RegisterAssetRoutes(r Router, renderer *Renderer, appRouter http.Handler)
 ```
 
-Sets up asset serving for `/dist/*` and public files.
+Sets up asset and app routes. Pattern style depends on router type:
+- `http.ServeMux` (Go 1.22+): `/dist/` and `/{path...}`
+- Other routers: `/dist/*` and `/*`
 
 ## Page Types
 
@@ -365,11 +367,30 @@ if err != nil {
 
 ### Initialize Project
 
+Create a new project with one command:
+
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/init@latest .
+go run github.com/3-lines-studio/bifrost/cmd/init@latest myapp
 ```
 
-Creates `.bifrost/` directory with `.gitkeep` for go:embed compatibility.
+This scaffolds a complete working project with all required files.
+
+Options:
+- `--template <name>`: Choose from `minimal` (default), `spa`, `desktop`
+
+Examples:
+```bash
+go run github.com/3-lines-studio/bifrost/cmd/init@latest myapp
+go run github.com/3-lines-studio/bifrost/cmd/init@latest --template spa myspa
+```
+
+### Repair .bifrost Directory
+
+If the `.bifrost` directory is missing:
+
+```bash
+go run github.com/3-lines-studio/bifrost/cmd/doctor@latest .
+```
 
 ### Build for Production
 

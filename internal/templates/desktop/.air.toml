@@ -1,0 +1,14 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/main main.go"
+  bin = "./tmp/main"
+  include_ext = ["go", "tsx", "ts", "css"]
+  exclude_dir = ["node_modules", ".bifrost", "tmp"]
+  exclude_regex = ["_test.go"]
+
+[proxy]
+  enabled = true
+  app_port = 8080
+  proxy_port = 3000

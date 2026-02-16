@@ -182,19 +182,33 @@ func RegisterAssetRoutes(r Router, renderer *Renderer, appRouter http.Handler) {
 
 	isDev := runtime.GetMode() == runtime.ModeDev
 
+	_, isServeMux := r.(*http.ServeMux)
+
+	var assetsPattern, appPattern string
+	if isServeMux {
+		// Go 1.22+ ServeMux uses new pattern syntax
+		// "/dist/" matches "/dist/" and everything under it
+		// "/{path...}" matches all paths including root
+		assetsPattern = "/dist/"
+		appPattern = "/{path...}"
+	} else {
+		assetsPattern = "/dist/*"
+		appPattern = "/*"
+	}
+
 	if isDev {
 		assetsHandler := assets.AssetHandler()
-		r.Handle("/dist/*", assetsHandler)
+		r.Handle(assetsPattern, assetsHandler)
 		if renderer != nil {
-			r.Handle("/*", assets.PublicHandler(renderer.assetsFS, appRouter, isDev))
+			r.Handle(appPattern, assets.PublicHandler(renderer.assetsFS, appRouter, isDev))
 		} else {
-			r.Handle("/*", appRouter)
+			r.Handle(appPattern, appRouter)
 		}
 	} else if renderer != nil && renderer.assetsFS != (embed.FS{}) {
 		assetsHandler := assets.EmbeddedAssetHandler(renderer.assetsFS)
-		r.Handle("/dist/*", assetsHandler)
-		r.Handle("/*", assets.PublicHandler(renderer.assetsFS, appRouter, isDev))
+		r.Handle(assetsPattern, assetsHandler)
+		r.Handle(appPattern, assets.PublicHandler(renderer.assetsFS, appRouter, isDev))
 	} else {
-		r.Handle("/*", appRouter)
+		r.Handle(appPattern, appRouter)
 	}
 }

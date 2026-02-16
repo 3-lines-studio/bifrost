@@ -4,25 +4,46 @@
 
 Bifrost enables Go HTTP servers to render React components on the server, providing full SSR capabilities while maintaining a simple API. Static pages are pre-rendered at build time into HTML with client-side React hydration (MPA-style), requiring no Bun runtime to serve. Development hot reload is handled by Air with proxy configuration. Production deployment uses embedded assets for single binary distribution.
 
-Key features:
+## Features
+
 - Server-side rendering of React components
 - Props loading from Go to React
 - MPA-style static pages with pre-rendered HTML + client hydration (no runtime Bun)
 - Hot reload via Air with proxy configuration
 - Single binary deployment with embedded assets
+- Project scaffolding with templates (`minimal`, `spa`, `desktop`)
 
 ## Docs
 
 - [API Reference](docs.md): Complete API documentation including Renderer, Page handlers, static generation, and configuration options
 - [Example Application](example/main.go): Working example with SSR pages, static pages, and dynamic routes
 - [Air Configuration](example/.air.toml): Hot reload proxy configuration for development
-- [Internal Renderer](internal/bifrost/renderer.go): Renderer implementation and build system
-- [Page Handler](internal/bifrost/page.go): HTTP handler logic for SSR and static pages
-- [Type Definitions](internal/bifrost/types.go): Core types including RedirectError and options
 
-## Optional
+### Internal Implementation
 
-- [Public API](bifrost.go): Main public API surface with exported functions and types
-- [Build System](internal/bifrost/build.go): Asset building and bundling logic
-- [Error Templates](internal/bifrost/lib.go): Error page templates and utilities
-- [Test Suite](bifrost_test.go): Integration tests demonstrating usage patterns
+- [Types](internal/types/types.go): Core types including `PropsLoader`, `PageConfig`, and `RedirectError`
+- [Runtime](internal/runtime/client.go): Bun process management and IPC protocol
+- [Page Handler](internal/page/handler.go): HTTP handler logic for SSR and static pages
+- [Build System](internal/build/engine.go): Asset building and bundling logic
+- [Asset Resolution](internal/assets/resolver.go): Manifest-driven embedded FS handling
+- [CLI Helpers](internal/cli/output.go): Terminal output utilities
+
+### CLI Commands
+
+- [Init Command](cmd/init/main.go): Project scaffolding with templates
+- [Doctor Command](cmd/doctor/main.go): Repair `.bifrost` directory
+- [Init Logic](internal/initcmd/init.go): Template processing and project creation
+- [Templates](internal/templates/embed.go): Embedded template filesystem
+
+## Template Options
+
+When creating a new project, choose from:
+- `minimal` (default): Basic SSR setup with props loading
+- `spa`: Client-only single page application with `WithClientOnly()`
+- `desktop`: Desktop app with webview and system tray support
+
+## Routing Behavior
+
+`RegisterAssetRoutes` adapts pattern syntax to the router type:
+- `http.ServeMux` (Go 1.22+): Uses `/dist/` and `/{path...}` patterns
+- Other routers: Uses `/dist/*` and `/*` patterns

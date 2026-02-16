@@ -1,0 +1,40 @@
+package main
+
+import (
+	"embed"
+	"log"
+	"net/http"
+
+	"github.com/3-lines-studio/bifrost"
+)
+
+//go:embed all:.bifrost
+var bifrostFS embed.FS
+
+func main() {
+	r, err := bifrost.New(bifrost.WithAssetsFS(bifrostFS))
+	if err != nil {
+		log.Fatalf("Failed to create renderer: %v", err)
+	}
+	defer r.Stop()
+
+	home := r.NewPage("./pages/home.tsx",
+		bifrost.WithPropsLoader(func(req *http.Request) (map[string]any, error) {
+			return map[string]any{
+				"message": "Hello from Bifrost!",
+			}, nil
+		}),
+	)
+
+	router := http.NewServeMux()
+	router.Handle("/", home)
+
+	assetRouter := http.NewServeMux()
+	bifrost.RegisterAssetRoutes(assetRouter, r, router)
+
+	addr := ":8080"
+	log.Printf("Server running on http://localhost%s", addr)
+	if err := http.ListenAndServe(addr, assetRouter); err != nil {
+		log.Fatal(err)
+	}
+}

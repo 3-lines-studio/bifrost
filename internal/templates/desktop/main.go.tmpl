@@ -1,0 +1,99 @@
+package main
+
+import (
+	"context"
+	"embed"
+	"fmt"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"sync"
+
+	"github.com/3-lines-studio/bifrost"
+	"github.com/getlantern/systray"
+	webview "github.com/webview/webview_go"
+)
+
+//go:embed all:.bifrost
+var bifrostFS embed.FS
+
+//go:embed public/icon.png
+var iconPNG []byte
+
+func main() {
+	r, err := bifrost.New(bifrost.WithAssetsFS(bifrostFS))
+	if err != nil {
+		log.Fatalf("Failed to start renderer: %v", err)
+	}
+	defer r.Stop()
+
+	app := r.NewPage("./pages/home.tsx", bifrost.WithClientOnly())
+
+	router := http.NewServeMux()
+	router.Handle("/", app)
+
+	assetRouter := http.NewServeMux()
+	bifrost.RegisterAssetRoutes(assetRouter, r, router)
+
+	server := &http.Server{
+		Handler: assetRouter,
+		Addr:    "127.0.0.1:0",
+	}
+
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		log.Fatalf("Failed to create listener: %v", err)
+	}
+	defer listener.Close()
+
+	localURL := fmt.Sprintf("http://%s", listener.Addr().String())
+
+	go func() {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			log.Printf("Server error: %v", err)
+		}
+	}()
+
+	debug := os.Getenv("BIFROST_DEV") == "1"
+
+	w := webview.New(debug)
+	defer w.Destroy()
+
+	w.SetTitle("{{.Module}}")
+	w.SetSize(1024, 768, webview.HintNone)
+	w.Navigate(localURL)
+
+	var quitOnce sync.Once
+	quit := make(chan struct{})
+
+	systray.Run(func() {
+		systray.SetTitle("{{.Module}}")
+		systray.SetTooltip("{{.Module}} Desktop App")
+		systray.SetIcon(iconPNG)
+
+		mQuit := systray.AddMenuItem("Quit", "Quit {{.Module}}")
+
+		go func() {
+			<-mQuit.ClickedCh
+			quitOnce.Do(func() {
+				w.Terminate()
+				close(quit)
+			})
+		}()
+	}, func() {})
+
+	go func() {
+		w.Run()
+		quitOnce.Do(func() {
+			systray.Quit()
+			close(quit)
+		})
+	}()
+
+	<-quit
+
+	if err := server.Shutdown(context.Background()); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
+}
