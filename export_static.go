@@ -8,37 +8,31 @@ import (
 	"time"
 )
 
-// StaticBuildExport represents the export format for static build data
-type StaticBuildExport struct {
+type staticBuildExport struct {
 	Version int                `json:"version"`
-	Pages   []StaticPageExport `json:"pages"`
+	Pages   []staticPageExport `json:"pages"`
 }
 
-// StaticPageExport represents a single page's static paths
-type StaticPageExport struct {
+type staticPageExport struct {
 	ComponentPath string             `json:"componentPath"`
-	Entries       []StaticPathExport `json:"entries"`
+	Entries       []staticPathExport `json:"entries"`
 }
 
-// StaticPathExport represents a single path entry
-type StaticPathExport struct {
+type staticPathExport struct {
 	Path  string         `json:"path"`
 	Props map[string]any `json:"props"`
 }
 
-// exportStaticBuildData executes static data loaders and outputs the result as JSON.
-// This is called during the build process to collect dynamic static paths.
-func exportStaticBuildData(r *Renderer) error {
+func exportStaticBuildData(app *App) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	export := StaticBuildExport{
+	export := staticBuildExport{
 		Version: 1,
-		Pages:   make([]StaticPageExport, 0),
+		Pages:   make([]staticPageExport, 0),
 	}
 
-	for componentPath, config := range r.pageConfigs {
-		// Only export pages with static data loaders
+	for componentPath, config := range app.pageConfigs {
 		if config.StaticDataLoader == nil {
 			continue
 		}
@@ -48,13 +42,13 @@ func exportStaticBuildData(r *Renderer) error {
 			return fmt.Errorf("failed to load static data for %s: %w", componentPath, err)
 		}
 
-		pageExport := StaticPageExport{
+		pageExport := staticPageExport{
 			ComponentPath: componentPath,
-			Entries:       make([]StaticPathExport, len(entries)),
+			Entries:       make([]staticPathExport, len(entries)),
 		}
 
 		for i, entry := range entries {
-			pageExport.Entries[i] = StaticPathExport{
+			pageExport.Entries[i] = staticPathExport{
 				Path:  entry.Path,
 				Props: entry.Props,
 			}

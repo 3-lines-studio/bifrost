@@ -10,16 +10,6 @@ import (
 	"strings"
 )
 
-var (
-	PageTemplate  *template.Template
-	ErrorTemplate *template.Template
-)
-
-func SetTemplates(page, errorTpl string) {
-	PageTemplate = template.Must(template.New("page").Parse(page))
-	ErrorTemplate = template.Must(template.New("error").Parse(errorTpl))
-}
-
 func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, headHTML string, cssHref string, chunks []string) (string, error) {
 	if scriptSrc == "" {
 		return "", fmt.Errorf("missing script src")

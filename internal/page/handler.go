@@ -81,11 +81,10 @@ func NewHandler(renderer Renderer, config types.PageConfig, assetsFS embed.FS, i
 }
 
 type pagePaths struct {
-	entryDir     string
-	outdir       string
-	entryName    string
-	entryPath    string
-	manifestPath string
+	entryDir  string
+	outdir    string
+	entryName string
+	entryPath string
 }
 
 func calculatePaths(componentPath string) pagePaths {
@@ -93,19 +92,16 @@ func calculatePaths(componentPath string) pagePaths {
 	outdir := filepath.Join(entryDir, "dist")
 	entryName := assets.EntryNameForPath(componentPath)
 	entryPath := filepath.Join(entryDir, entryName+".tsx")
-	manifestPath := filepath.Join(entryDir, "manifest.json")
 
 	return pagePaths{
-		entryDir:     entryDir,
-		outdir:       outdir,
-		entryName:    entryName,
-		entryPath:    entryPath,
-		manifestPath: manifestPath,
+		entryDir:  entryDir,
+		outdir:    outdir,
+		entryName: entryName,
+		entryPath: entryPath,
 	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	// Production: Serve pre-built HTML for static modes
 	if !h.isDev {
 		switch h.config.Mode {
 		case types.ModeClientOnly:
@@ -114,23 +110,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				return
 			}
 		case types.ModeStaticPrerender:
-			// Check for dynamic static routes
 			if h.manifest != nil {
 				entry := h.manifest.Entries[h.entryName]
 				if entry.StaticRoutes != nil {
-					// Normalize request path
 					requestPath := normalizePath(req.URL.Path)
-					// Look up in route map
 					if htmlPath, ok := entry.StaticRoutes[requestPath]; ok {
 						h.serveRouteFile(w, req, htmlPath)
 						return
 					}
-					// Path not found in static routes - return 404
 					http.NotFound(w, req)
 					return
 				}
 			}
-			// Fallback to simple static file serving
 			if h.staticPath != "" {
 				h.serveStaticFile(w, req)
 				return
@@ -138,20 +129,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	// Setup for dev mode (build bundles if needed)
 	if h.needsSetup {
 		if !h.handleSetup(w) {
 			return
 		}
 	}
 
-	// Dev mode: ClientOnly pages don't need SSR - serve empty shell directly
 	if h.isDev && h.config.Mode == types.ModeClientOnly {
 		h.renderClientOnlyDevShell(w)
 		return
 	}
 
-	// Dev mode: Handle StaticPrerender with StaticDataLoader
 	if h.isDev && h.config.Mode == types.ModeStaticPrerender && h.config.StaticDataLoader != nil {
 		requestPath := normalizePath(req.URL.Path)
 		props, found, err := h.loadStaticDataForPath(requestPath)
@@ -163,7 +151,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			http.NotFound(w, req)
 			return
 		}
-		// Render with the matched props
 		if h.renderer == nil {
 			h.serveError(w, fmt.Errorf("renderer not available for %s; static prerender requires a runtime in dev mode", h.config.ComponentPath))
 			return
@@ -323,18 +310,16 @@ func (h *Handler) handlePropsError(w http.ResponseWriter, req *http.Request, err
 }
 
 func (h *Handler) getRenderPath() (string, error) {
-	// Dev mode: allow source TSX rendering
 	if h.isDev {
 		return h.config.ComponentPath, nil
 	}
 
-	// Production mode: require SSR bundle from manifest
 	if h.ssrPath == "" {
 		return "", fmt.Errorf("SSR bundle not found in manifest for %s; ensure you ran 'bifrost-build' and embedded the .bifrost directory", h.config.ComponentPath)
 	}
 
 	if h.assetsFS != (embed.FS{}) {
-		resolver := assets.NewResolver(h.assetsFS, h.manifest, h.isDev)
+		resolver := assets.NewResolver(h.assetsFS)
 		bundlePath := resolver.GetSSRBundlePath(h.ssrPath)
 		if bundlePath == "" {
 			return "", fmt.Errorf("failed to extract SSR bundle for %s from embedded assets", h.config.ComponentPath)
@@ -355,8 +340,6 @@ func (h *Handler) renderPage(w http.ResponseWriter, props map[string]any, page t
 	serveHTML(w, fullHTML)
 }
 
-// renderClientOnlyDevShell renders an empty shell for ClientOnly pages in dev mode.
-// This avoids SSR rendering which can fail for browser-only code (e.g., routers using location).
 func (h *Handler) renderClientOnlyDevShell(w http.ResponseWriter) {
 	fullHTML, err := RenderHTMLShell("", map[string]any{}, h.scriptSrc, "", h.cssHref, h.chunks)
 	if err != nil {
@@ -428,20 +411,16 @@ func (h *Handler) serveError(w http.ResponseWriter, err error) {
 	w.Write(buf.Bytes())
 }
 
-// normalizePath normalizes a URL path for route matching
 func normalizePath(path string) string {
-	// Ensure leading slash
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
-	// Remove trailing slash (except for root)
 	if path != "/" && strings.HasSuffix(path, "/") {
 		path = strings.TrimSuffix(path, "/")
 	}
 	return path
 }
 
-// loadStaticDataForPath calls the StaticDataLoader and finds matching props for the request path
 func (h *Handler) loadStaticDataForPath(requestPath string) (map[string]any, bool, error) {
 	if h.config.StaticDataLoader == nil {
 		return nil, false, nil
@@ -461,11 +440,8 @@ func (h *Handler) loadStaticDataForPath(requestPath string) (map[string]any, boo
 	return nil, false, nil
 }
 
-// serveRouteFile serves a specific route file from embedded assets
 func (h *Handler) serveRouteFile(w http.ResponseWriter, req *http.Request, htmlPath string) {
 	if h.assetsFS != (embed.FS{}) {
-		// htmlPath is like "/pages/routes/blog/hello/index.html"
-		// We need ".bifrost/pages/routes/blog/hello/index.html" for embed.FS
 		embedPath := ".bifrost" + htmlPath
 		embedPath = strings.TrimPrefix(embedPath, "/")
 		embedPath = filepath.ToSlash(embedPath)
@@ -479,7 +455,6 @@ func (h *Handler) serveRouteFile(w http.ResponseWriter, req *http.Request, htmlP
 		return
 	}
 
-	// Fallback to filesystem
 	fullPath := filepath.Join(".bifrost", htmlPath)
 	http.ServeFile(w, req, fullPath)
 }

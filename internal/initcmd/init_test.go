@@ -164,8 +164,8 @@ func TestRun_Spa(t *testing.T) {
 		t.Fatalf("Failed to read main.go: %v", err)
 	}
 
-	if !strings.Contains(string(mainGoContent), "WithClientOnly()") {
-		t.Errorf("main.go should contain WithClientOnly() for SPA template")
+	if !strings.Contains(string(mainGoContent), "WithClient()") {
+		t.Errorf("main.go should contain WithClient() for SPA template")
 	}
 
 	goModPath := filepath.Join(projectDir, "go.mod")

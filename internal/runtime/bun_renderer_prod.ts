@@ -79,14 +79,12 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
   try {
     const mod = await import(path);
 
-    // Prod mode: SSR bundles ONLY - must have render function
     if (typeof mod.render !== "function") {
       return createError(
         `SSR bundle missing render function. Ensure the page was built with 'bifrost-build' and has an SSR bundle in .bifrost/ssr/. Path: ${path}`
       );
     }
 
-    // SSR bundle path - render function handles everything internally
     const result: RenderResult = await mod.render(props || {});
     return new Response(JSON.stringify(result) + "\n");
   } catch (err) {

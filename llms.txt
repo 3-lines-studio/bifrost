@@ -15,8 +15,8 @@ Bifrost enables Go HTTP servers to render React components on the server, provid
 
 ## Docs
 
-- [API Reference](docs.md): Complete API documentation including Renderer, Page handlers, static generation, and configuration options
-- [Example Application](example/main.go): Working example with SSR pages, static pages, and dynamic routes
+- [API Reference](docs.md): Complete API documentation including App, Page, static generation, and configuration options
+- [Example Application](example/cmd/full/main.go): Working example with SSR pages, static pages, and dynamic routes
 - [Air Configuration](example/.air.toml): Hot reload proxy configuration for development
 
 ### Internal Implementation
@@ -39,11 +39,20 @@ Bifrost enables Go HTTP servers to render React components on the server, provid
 
 When creating a new project, choose from:
 - `minimal` (default): Basic SSR setup with props loading
-- `spa`: Client-only single page application with `WithClientOnly()`
+- `spa`: Client-only single page application with `WithClient()`
 - `desktop`: Desktop app with webview and system tray support
 
-## Routing Behavior
+## New API
 
-`RegisterAssetRoutes` adapts pattern syntax to the router type:
-- `http.ServeMux` (Go 1.22+): Uses `/dist/` and `/{path...}` patterns
-- Other routers: Uses `/dist/*` and `/*` patterns
+```go
+app := bifrost.New(
+    bifrostFS,
+    bifrost.Page("/", "./pages/home.tsx", bifrost.WithLoader(loadProps)),
+    bifrost.Page("/about", "./pages/about.tsx", bifrost.WithClient()),
+    bifrost.Page("/blog", "./pages/blog.tsx", bifrost.WithStatic()),
+)
+defer app.Stop()
+
+api := chi.NewRouter()
+http.ListenAndServe(":8080", app.Wrap(api))
+```

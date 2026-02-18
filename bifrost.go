@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/3-lines-studio/bifrost/internal/assets"
 	"github.com/3-lines-studio/bifrost/internal/page"
@@ -12,110 +13,187 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/types"
 )
 
-const exportStaticArg = "__bifrost_export_static__"
+const exportMarkerPath = ".bifrost/.export-mode"
 
-var isExportMode bool
+var (
+	exportModeOnce sync.Once
+	exportMode     bool
+)
 
-func init() {
-	args := os.Args
-	for i, arg := range args {
-		if arg == exportStaticArg {
-			isExportMode = true
-			os.Args = append(args[:i], args[i+1:]...)
-			break
-		}
-	}
+func isExportMode() bool {
+	exportModeOnce.Do(func() {
+		_, err := os.Stat(exportMarkerPath)
+		exportMode = err == nil
+	})
+	return exportMode
 }
 
 type RedirectError = types.RedirectError
 
+type StaticPathData = types.StaticPathData
+
 type PageOption = types.PageOption
 
-type PageMode = types.PageMode
-
-const (
-	ModeSSR             = types.ModeSSR
-	ModeClientOnly      = types.ModeClientOnly
-	ModeStaticPrerender = types.ModeStaticPrerender
-)
-
-func WithPropsLoader(loader types.PropsLoader) PageOption {
-	return types.WithPropsLoader(loader)
+type Route struct {
+	Pattern       string
+	ComponentPath string
+	Options       []PageOption
 }
 
-func WithClientOnly() PageOption {
-	return types.WithClientOnly()
-}
-
-func WithStaticPrerender() PageOption {
-	return types.WithStaticPrerender()
-}
-
-func WithStaticDataLoader(loader types.StaticDataLoader) PageOption {
-	return types.WithStaticDataLoader(loader)
-}
-
-// Export types for use with WithStaticDataLoader
-type StaticPathData = types.StaticPathData
-type StaticDataLoader = types.StaticDataLoader
-
-type Renderer struct {
-	client      *runtime.Client
+type App struct {
+	renderer    *renderer
+	routes      []Route
 	assetsFS    embed.FS
 	isDev       bool
 	manifest    *assets.Manifest
-	pageConfigs map[string]*types.PageConfig // ComponentPath -> Config
+	pageConfigs map[string]*types.PageConfig
 }
 
-type Option func(*Renderer)
-
-func WithAssetsFS(fs embed.FS) Option {
-	return func(r *Renderer) {
-		r.assetsFS = fs
-	}
+type router interface {
+	http.Handler
+	Handle(pattern string, handler http.Handler)
 }
 
-func New(opts ...Option) (*Renderer, error) {
+func New(assetsFS embed.FS, routes ...Route) *App {
 	mode := runtime.GetMode()
 
-	if isExportMode {
-		return &Renderer{
-			isDev:       false,
-			pageConfigs: make(map[string]*types.PageConfig),
-		}, nil
-	}
-
-	r := &Renderer{
+	app := &App{
+		assetsFS:    assetsFS,
 		isDev:       mode == runtime.ModeDev,
+		routes:      routes,
 		pageConfigs: make(map[string]*types.PageConfig),
 	}
 
-	for _, opt := range opts {
-		opt(r)
+	if isExportMode() {
+		for _, route := range routes {
+			config := types.PageConfig{
+				ComponentPath: route.ComponentPath,
+				Mode:          types.ModeSSR,
+			}
+			for _, opt := range route.Options {
+				opt(&config)
+			}
+			app.pageConfigs[route.ComponentPath] = &config
+		}
+		return app
 	}
 
-	// Strict production validation
+	r, err := newRenderer(assetsFS, mode)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create bifrost renderer: %v", err))
+	}
+	app.renderer = r
+
+	for _, route := range routes {
+		config := types.PageConfig{
+			ComponentPath: route.ComponentPath,
+			Mode:          types.ModeSSR,
+		}
+		for _, opt := range route.Options {
+			opt(&config)
+		}
+		app.pageConfigs[route.ComponentPath] = &config
+	}
+
+	return app
+}
+
+func (a *App) Wrap(api router) http.Handler {
+	if isExportMode() {
+		if err := exportStaticBuildData(a); err != nil {
+			fmt.Fprintf(os.Stderr, "export failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	if api == nil {
+		panic("bifrost: nil router passed to Wrap; use app.Handler()")
+	}
+
+	for _, route := range a.routes {
+		config := types.PageConfig{
+			ComponentPath: route.ComponentPath,
+			Mode:          types.ModeSSR,
+		}
+		for _, opt := range route.Options {
+			opt(&config)
+		}
+
+		handler := page.NewHandler(a.renderer.client, config, a.assetsFS, a.isDev, a.manifest)
+		api.Handle(route.Pattern, handler)
+	}
+
+	return createAssetHandler(api, a)
+}
+
+func (a *App) Handler() http.Handler {
+	return a.Wrap(http.NewServeMux())
+}
+
+func (a *App) Stop() error {
+	if a.renderer != nil {
+		return a.renderer.stop()
+	}
+	return nil
+}
+
+func Page(pattern string, componentPath string, opts ...PageOption) Route {
+	return Route{
+		Pattern:       pattern,
+		ComponentPath: componentPath,
+		Options:       opts,
+	}
+}
+
+func WithLoader(loader types.PropsLoader) PageOption {
+	return types.WithLoader(loader)
+}
+
+func WithClient() PageOption {
+	return types.WithClient()
+}
+
+func WithStatic() PageOption {
+	return types.WithStatic()
+}
+
+func WithStaticData(loader types.StaticDataLoader) PageOption {
+	return types.WithStaticData(loader)
+}
+
+type renderer struct {
+	client   *runtime.Client
+	assetsFS embed.FS
+	isDev    bool
+	manifest *assets.Manifest
+}
+
+func newRenderer(assetsFS embed.FS, mode runtime.Mode) (*renderer, error) {
+	r := &renderer{
+		isDev:    mode == runtime.ModeDev,
+		assetsFS: assetsFS,
+	}
+
 	if mode == runtime.ModeProd {
-		if r.assetsFS == (embed.FS{}) {
+		if assetsFS == (embed.FS{}) {
 			return nil, runtime.ErrAssetsFSRequiredInProd
 		}
 
-		man, err := assets.LoadManifestFromEmbed(r.assetsFS, ".bifrost/manifest.json")
+		man, err := assets.LoadManifestFromEmbed(assetsFS, ".bifrost/manifest.json")
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", runtime.ErrManifestMissingInAssetsFS, err)
 		}
 		r.manifest = man
 
-		// Check if we need the embedded runtime (SSR pages require it)
 		needsRuntime := assets.HasSSREntries(man)
 
 		if needsRuntime {
-			// In production with SSR pages, use embedded runtime helper
-			if !runtime.HasEmbeddedRuntime(r.assetsFS) {
+			if !runtime.HasEmbeddedRuntime(assetsFS) {
 				return nil, runtime.ErrEmbeddedRuntimeNotFound
 			}
 
-			executablePath, cleanup, err := runtime.ExtractEmbeddedRuntime(r.assetsFS)
+			executablePath, cleanup, err := runtime.ExtractEmbeddedRuntime(assetsFS)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %v", runtime.ErrEmbeddedRuntimeExtraction, err)
 			}
@@ -127,9 +205,7 @@ func New(opts ...Option) (*Renderer, error) {
 			}
 			r.client = client
 		}
-		// Static-only apps don't need the runtime
 	} else {
-		// Development mode: use system Bun
 		client, err := runtime.NewClient()
 		if err != nil {
 			return nil, err
@@ -140,75 +216,28 @@ func New(opts ...Option) (*Renderer, error) {
 	return r, nil
 }
 
-func (r *Renderer) Stop() error {
+func (r *renderer) stop() error {
 	if r.client != nil {
 		return r.client.Stop()
 	}
 	return nil
 }
 
-func (r *Renderer) Render(componentPath string, props map[string]any) (types.RenderedPage, error) {
-	return r.client.Render(componentPath, props)
-}
+func createAssetHandler(router router, app *App) http.Handler {
+	isDev := app.isDev
 
-func (r *Renderer) NewPage(componentPath string, opts ...PageOption) http.Handler {
-	config := types.PageConfig{
-		ComponentPath: componentPath,
-		Mode:          types.ModeSSR,
-	}
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		path := req.URL.Path
 
-	for _, opt := range opts {
-		opt(&config)
-	}
-
-	// Store config for export mode
-	r.pageConfigs[componentPath] = &config
-
-	return page.NewHandler(r.client, config, r.assetsFS, r.isDev, r.manifest)
-}
-
-type Router interface {
-	Handle(pattern string, handler http.Handler)
-}
-
-func RegisterAssetRoutes(r Router, renderer *Renderer, appRouter http.Handler) {
-	if isExportMode && renderer != nil {
-		if err := exportStaticBuildData(renderer); err != nil {
-			fmt.Fprintf(os.Stderr, "export failed: %v\n", err)
-			os.Exit(1)
+		if len(path) >= 6 && path[:6] == "/dist/" {
+			if isDev {
+				assets.AssetHandler().ServeHTTP(w, req)
+			} else if app.assetsFS != (embed.FS{}) {
+				assets.EmbeddedAssetHandler(app.assetsFS).ServeHTTP(w, req)
+			}
+			return
 		}
-		os.Exit(0)
-	}
 
-	isDev := runtime.GetMode() == runtime.ModeDev
-
-	_, isServeMux := r.(*http.ServeMux)
-
-	var assetsPattern, appPattern string
-	if isServeMux {
-		// Go 1.22+ ServeMux uses new pattern syntax
-		// "/dist/" matches "/dist/" and everything under it
-		// "/{path...}" matches all paths including root
-		assetsPattern = "/dist/"
-		appPattern = "/{path...}"
-	} else {
-		assetsPattern = "/dist/*"
-		appPattern = "/*"
-	}
-
-	if isDev {
-		assetsHandler := assets.AssetHandler()
-		r.Handle(assetsPattern, assetsHandler)
-		if renderer != nil {
-			r.Handle(appPattern, assets.PublicHandler(renderer.assetsFS, appRouter, isDev))
-		} else {
-			r.Handle(appPattern, appRouter)
-		}
-	} else if renderer != nil && renderer.assetsFS != (embed.FS{}) {
-		assetsHandler := assets.EmbeddedAssetHandler(renderer.assetsFS)
-		r.Handle(assetsPattern, assetsHandler)
-		r.Handle(appPattern, assets.PublicHandler(renderer.assetsFS, appRouter, isDev))
-	} else {
-		r.Handle(appPattern, appRouter)
-	}
+		router.ServeHTTP(w, req)
+	})
 }

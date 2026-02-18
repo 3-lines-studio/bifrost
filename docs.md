@@ -23,7 +23,7 @@ Requires [Bun](https://bun.sh) to be installed.
 
 Bifrost is organized into focused internal packages:
 
-- `internal/types` - Shared types (PropsLoader, PageOption, RedirectError)
+- `internal/types` - Shared types (PropsLoader, PageConfig, RedirectError)
 - `internal/runtime` - Bun process management and IPC protocol
 - `internal/page` - HTTP handler orchestration
 - `internal/assets` - Manifest resolution and embedded FS handling
@@ -47,36 +47,25 @@ import (
 var bifrostFS embed.FS
 
 func main() {
-    // Create renderer
-    // Production: requires WithAssetsFS
-    // Development: works without it
-    r, err := bifrost.New(bifrost.WithAssetsFS(bifrostFS))
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer r.Stop()
-    
-    // Create page handlers with typed options
-    home := r.NewPage("./pages/home.tsx", 
-        bifrost.WithPropsLoader(func(req *http.Request) (map[string]any, error) {
-            return map[string]any{
-                "name": "World",
-            }, nil
-        }),
+    // Create Bifrost app
+    app := bifrost.New(
+        bifrostFS,
+        bifrost.Page("/", "./pages/home.tsx", 
+            bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+                return map[string]any{
+                    "name": "World",
+                }, nil
+            }),
+        ),
+        bifrost.Page("/about", "./pages/about.tsx", bifrost.WithClient()),
     )
+    defer app.Stop()
     
-    about := r.NewPage("./pages/about.tsx", bifrost.WithClientOnly())
+    // Setup API routes
+    api := http.NewServeMux()
     
-    // Setup routes
-    router := http.NewServeMux()
-    router.Handle("/", home)
-    router.Handle("/about", about)
-    
-    // Register asset routes
-    assetRouter := http.NewServeMux()
-    bifrost.RegisterAssetRoutes(assetRouter, r, router)
-    
-    log.Fatal(http.ListenAndServe(":8080", assetRouter))
+    // Start server
+    log.Fatal(http.ListenAndServe(":8080", app.Wrap(api)))
 }
 ```
 
@@ -116,13 +105,13 @@ go build -o myapp main.go
 ```
 
 Requirements:
-- `WithAssetsFS()` is **mandatory** - fails fast at startup if missing
+- `embed.FS` is **mandatory** - panics at startup if missing
 - `.bifrost/manifest.json` must exist in embedded assets
 - SSR bundles extracted from `.bifrost/ssr/` in embed.FS (SSR pages only)
 - Embedded Bun runtime included only for SSR pages
 - Source TSX files are **never** used
 
-**Static-only apps** (ClientOnly or StaticPrerender only):
+**Static-only apps** (WithClient or WithStatic only):
 - No Bun runtime embedded
 - Smaller binary size
 - Cannot serve SSR pages
@@ -131,50 +120,53 @@ Requirements:
 - Bun runtime automatically embedded
 - Required for server-side rendering
 
-Strict validation errors:
-- `ErrAssetsFSRequiredInProd` - Missing `WithAssetsFS()` in production
-- `ErrManifestMissingInAssetsFS` - Manifest not found in embedded assets
+Strict validation causes panic on:
+- Missing `embed.FS` in production
+- Missing manifest.json in embedded assets
 
 ## API Reference
 
-### Creating a Renderer
+### Creating an App
 
 ```go
-func New(opts ...Option) (*Renderer, error)
+func New(assetsFS embed.FS, pages ...Route) *App
 ```
 
-Creates a new Bifrost renderer. Must be stopped with `renderer.Stop()` when done.
+Creates a new Bifrost application. Must be stopped with `app.Stop()` when done.
 
-**Options:**
+**Parameters:**
 
-| Option | Description |
-|--------|-------------|
-| `WithAssetsFS(fs embed.FS)` | Embed built assets (required in production) |
+- `assetsFS` - Embedded assets (required in production)
+- `pages` - Route configurations
 
 ### Creating Pages
 
 ```go
-func (r *Renderer) NewPage(componentPath string, opts ...PageOption) http.Handler
+func Page(pattern string, componentPath string, opts ...PageOption) Route
 ```
 
-Creates an HTTP handler for a React component. Returns `http.Handler` interface.
+Creates a route configuration for a React component.
 
 **Parameters:**
 
-- `componentPath` - Path to the .tsx file (e.g., `./pages/home.tsx`)
+- `pattern` - URL pattern (e.g., "/", "/about", "/blog/*")
+- `componentPath` - Path to the .tsx file (e.g., "./pages/home.tsx")
 - `opts` - Page options (variadic, typed)
 
 **Page Options:**
 
 ```go
 // Props loader - function to load data from request
-func WithPropsLoader(loader PropsLoader) PageOption
+func WithLoader(loader PropsLoader) PageOption
 
 // Client-only mode - static page with empty shell + client render
-func WithClientOnly() PageOption
+func WithClient() PageOption
 
 // Static prerender mode - full HTML at build time + hydration
-func WithStaticPrerender() PageOption
+func WithStatic() PageOption
+
+// Static prerender with dynamic paths
+func WithStaticData(loader StaticDataLoader) PageOption
 ```
 
 **Props Loader:**
@@ -187,13 +179,35 @@ A function that receives the HTTP request and returns props to pass to the React
 
 ### Registering Routes
 
+Bifrost provides two methods to get an http.Handler:
+
+**With API router:**
+
 ```go
-func RegisterAssetRoutes(r Router, renderer *Renderer, appRouter http.Handler)
+func (app *App) Wrap(api Router) http.Handler
 ```
 
-Sets up asset and app routes. Pattern style depends on router type:
-- `http.ServeMux` (Go 1.22+): `/dist/` and `/{path...}`
-- Other routers: `/dist/*` and `/*`
+Registers all Bifrost routes into your existing router and returns a wrapped http.Handler that serves assets and delegates to your router. Panics if router is nil.
+
+```go
+api := chi.NewRouter()
+// ... add API routes
+
+handler := app.Wrap(api)
+http.ListenAndServe(":8080", handler)
+```
+
+**Without API router:**
+
+```go
+func (app *App) Handler() http.Handler
+```
+
+Returns an http.Handler that serves only Bifrost pages and assets (no custom API routes).
+
+```go
+http.ListenAndServe(":8080", app.Handler())
+```
 
 ## Page Types
 
@@ -202,8 +216,8 @@ Sets up asset and app routes. Pattern style depends on router type:
 Render React components on each request with dynamic data:
 
 ```go
-page := r.NewPage("./pages/user.tsx", 
-    bifrost.WithPropsLoader(func(req *http.Request) (map[string]any, error) {
+bifrost.Page("/user/{id}", "./pages/user.tsx", 
+    bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
         userID := chi.URLParam(req, "id")
         user, err := db.GetUser(userID)
         if err != nil {
@@ -221,12 +235,12 @@ page := r.NewPage("./pages/user.tsx",
 
 There are two static page modes:
 
-#### Client-Only (`WithClientOnly`)
+#### Client-Only (`WithClient`)
 
 Empty HTML shell with client-side JavaScript rendering:
 
 ```go
-page := r.NewPage("./pages/about.tsx", bifrost.WithClientOnly())
+bifrost.Page("/admin", "./pages/admin.tsx", bifrost.WithClient())
 ```
 
 Characteristics:
@@ -240,12 +254,12 @@ Characteristics:
 - Interactive apps without SEO needs
 - Pages with heavy client-side interactivity
 
-#### Static Prerender (`WithStaticPrerender`)
+#### Static Prerender (`WithStatic`)
 
 Full HTML prerendered at build time with hydration:
 
 ```go
-page := r.NewPage("./pages/blog.tsx", bifrost.WithStaticPrerender())
+bifrost.Page("/about", "./pages/about.tsx", bifrost.WithStatic())
 ```
 
 Characteristics:
@@ -282,8 +296,8 @@ Go passes data to React components via the props loader:
 
 ```go
 // Go
-home := r.NewPage("./pages/home.tsx", 
-    bifrost.WithPropsLoader(func(req *http.Request) (map[string]any, error) {
+bifrost.Page("/", "./pages/home.tsx", 
+    bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
         return map[string]any{
             "message": "Hello from Go!",
             "count":   42,
@@ -311,10 +325,10 @@ export default function Home({ message, count }) {
 Return a redirect from props loader:
 
 ```go
-page := r.NewPage("./pages/protected.tsx", 
-    bifrost.WithPropsLoader(func(req *http.Request) (map[string]any, error) {
+bifrost.Page("/protected", "./pages/protected.tsx", 
+    bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
         if !isAuthenticated(req) {
-            return nil, &RedirectError{
+            return nil, &bifrost.RedirectError{
                 URL:    "/login",
                 Status: http.StatusFound,
             }
@@ -335,31 +349,13 @@ type RedirectError interface {
 
 ### Production Errors
 
-Bifrost provides specific errors for production misconfiguration:
+Bifrost **panics** on initialization errors in production:
 
-```go
-import "github.com/3-lines-studio/bifrost/internal/runtime"
+- Missing `embed.FS` in production
+- Missing manifest.json in embedded assets
+- Missing embedded Bun runtime (for SSR pages)
 
-r, err := bifrost.New()
-if err != nil {
-    if errors.Is(err, runtime.ErrAssetsFSRequiredInProd) {
-        // Missing WithAssetsFS() in production
-    }
-    if errors.Is(err, runtime.ErrManifestMissingInAssetsFS) {
-        // Manifest not found in embedded assets
-    }
-    // The following errors only occur for apps with SSR pages:
-    if errors.Is(err, runtime.ErrEmbeddedRuntimeNotFound) {
-        // Run 'bifrost-build' to generate embedded Bun runtime
-    }
-    if errors.Is(err, runtime.ErrEmbeddedRuntimeExtraction) {
-        // Failed to extract embedded runtime from binary
-    }
-    if errors.Is(err, runtime.ErrEmbeddedRuntimeStart) {
-        // Embedded runtime failed to start
-    }
-}
-```
+This ensures fast failure at startup rather than runtime errors.
 
 **Note:** Runtime-related errors only occur when the app has SSR pages. Static-only apps don't include or require the Bun runtime.
 
@@ -400,8 +396,8 @@ bifrost-build main.go
 
 **Build Pipeline:**
 
-1. AST scan discovers all `NewPage()` calls
-2. Detects `WithClientOnly()` for mode classification
+1. AST scan discovers all `Page()` calls
+2. Detects `WithClient()` for mode classification
 3. Generates client entry files for each page
 4. Builds client bundles (JS/CSS) to `.bifrost/dist/`
 5. Builds SSR bundles to `.bifrost/ssr/` (for SSR pages)
@@ -438,10 +434,10 @@ myapp/
 
 ## Best Practices
 
-1. **Always defer Stop()**: `defer r.Stop()` after creating the renderer
-2. **Use typed options**: `WithPropsLoader()` and `WithClientOnly()`
+1. **Always defer Stop()**: `defer app.Stop()` after creating the app
+2. **Use typed options**: `WithLoader()`, `WithClient()`, `WithStatic()`
 3. **Test mode behavior**: Set `BIFROST_DEV=1` explicitly in tests that render TSX
-4. **Strict production**: Always use `WithAssetsFS()` and run `bifrost-build`
+4. **Strict production**: Always embed `.bifrost` and run `bifrost-build`
 5. **Handle errors in props loaders**: Return proper errors or redirects
 6. **Keep props minimal**: Pass only necessary data to React
 

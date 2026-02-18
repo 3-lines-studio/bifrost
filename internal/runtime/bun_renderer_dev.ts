@@ -63,7 +63,6 @@ function createError(
   return new Response(JSON.stringify(result) + "\n");
 }
 
-// Component cache for dev mode (when not using SSR bundles)
 const componentCache = new Map<
   string,
   { Component: any; Head?: any }
@@ -89,14 +88,11 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
   try {
     const mod = await import(importPath);
 
-    // Check if this is an SSR bundle with a render function
     if (typeof mod.render === "function") {
-      // SSR bundle path - render function handles everything internally
       const result: RenderResult = await mod.render(props || {});
       return new Response(JSON.stringify(result) + "\n");
     }
 
-    // Legacy path - component export (for dev mode)
     const cached = componentCache.get(path);
     let Component: any;
     let Head: any | undefined;
@@ -122,7 +118,6 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
       );
     }
 
-    // Dynamically import React for rendering
     const React = await import("react");
     const { renderToString } = await import("react-dom/server");
 
@@ -182,7 +177,6 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
   const isSSR = buildTarget === "bun";
 
   try {
-    // Dynamically import tailwind only for browser builds
     const plugins = isSSR ? [] : [(await import("bun-plugin-tailwind")).default];
 
     const result = await Bun.build({

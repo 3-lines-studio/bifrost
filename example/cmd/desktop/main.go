@@ -12,27 +12,18 @@ import (
 	"github.com/3-lines-studio/bifrost"
 	"github.com/3-lines-studio/bifrost/example"
 	"github.com/getlantern/systray"
-	"github.com/go-chi/chi/v5"
 	webview "github.com/webview/webview_go"
 )
 
 func main() {
-	r, err := bifrost.New(bifrost.WithAssetsFS(example.BifrostFS))
-	if err != nil {
-		log.Fatalf("Failed to start renderer: %v", err)
-	}
-	defer r.Stop()
-
-	homeHandler := r.NewPage("./pages/about.tsx", bifrost.WithClientOnly())
-
-	router := chi.NewRouter()
-	router.Handle("/", homeHandler)
-
-	assetRouter := chi.NewRouter()
-	bifrost.RegisterAssetRoutes(assetRouter, r, router)
+	app := bifrost.New(
+		example.BifrostFS,
+		bifrost.Page("/", "./pages/about.tsx", bifrost.WithClient()),
+	)
+	defer app.Stop()
 
 	server := &http.Server{
-		Handler: assetRouter,
+		Handler: app.Handler(),
 		Addr:    "127.0.0.1:0",
 	}
 

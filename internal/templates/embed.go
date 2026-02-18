@@ -17,8 +17,6 @@ var spaFS embed.FS
 //go:embed all:desktop
 var desktopFS embed.FS
 
-var validTemplates = []string{"minimal", "spa", "desktop"}
-
 var ErrInvalidTemplate = errors.New("invalid template name")
 
 func GetTemplate(name string) (fs.FS, error) {
@@ -32,10 +30,6 @@ func GetTemplate(name string) (fs.FS, error) {
 	default:
 		return nil, ErrInvalidTemplate
 	}
-}
-
-func GetMinimalTemplate() (fs.FS, error) {
-	return GetTemplate("minimal")
 }
 
 type TemplateData struct {

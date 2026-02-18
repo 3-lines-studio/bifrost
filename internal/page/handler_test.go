@@ -14,14 +14,14 @@ import (
 func TestHandlerNilRenderer(t *testing.T) {
 	t.Run("SSR page with nil renderer returns 500", func(t *testing.T) {
 		handler := NewHandler(
-			nil, // nil renderer
+			nil,
 			types.PageConfig{
 				ComponentPath: "./test.tsx",
 				Mode:          types.ModeSSR,
 			},
 			embed.FS{},
-			true, // isDev
-			nil,  // manifest
+			true,
+			nil,
 		)
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -47,15 +47,15 @@ func TestHandlerNilRenderer(t *testing.T) {
 		}
 
 		handler := NewHandler(
-			nil, // nil renderer
+			nil,
 			types.PageConfig{
 				ComponentPath:    "./test.tsx",
 				Mode:             types.ModeStaticPrerender,
 				StaticDataLoader: loader,
 			},
 			embed.FS{},
-			true, // isDev
-			nil,  // manifest
+			true,
+			nil,
 		)
 
 		req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -74,30 +74,24 @@ func TestHandlerNilRenderer(t *testing.T) {
 	})
 
 	t.Run("ClientOnly page with nil renderer still works (no runtime needed)", func(t *testing.T) {
-		// Note: ClientOnly pages may fail for other reasons (missing bundles)
-		// but they shouldn't fail due to nil renderer specifically
 		handler := NewHandler(
-			nil, // nil renderer
+			nil,
 			types.PageConfig{
 				ComponentPath: "./test.tsx",
 				Mode:          types.ModeClientOnly,
 			},
 			embed.FS{},
-			true, // isDev
-			nil,  // manifest
+			true,
+			nil,
 		)
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, req)
-
-		// ClientOnly doesn't require renderer, so we just verify it doesn't panic
-		// It might return 500 for other reasons (missing bundles) which is fine
 	})
 }
 
-// MockRenderer is a mock renderer for testing
 type MockRenderer struct {
 	shouldError bool
 }
@@ -127,8 +121,8 @@ func TestHandlerWithRenderer(t *testing.T) {
 				Mode:          types.ModeSSR,
 			},
 			embed.FS{},
-			true, // isDev
-			nil,  // manifest
+			true,
+			nil,
 		)
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -147,7 +141,6 @@ func TestHandlerClientOnlyDevMode(t *testing.T) {
 		renderCalled := false
 		mockRenderer := &MockRenderer{}
 
-		// Wrap the mock to track if Render was called
 		trackingRenderer := &TrackingRenderer{
 			MockRenderer: mockRenderer,
 			renderCalled: &renderCalled,
@@ -160,21 +153,19 @@ func TestHandlerClientOnlyDevMode(t *testing.T) {
 				Mode:          types.ModeClientOnly,
 			},
 			embed.FS{},
-			true, // isDev
-			nil,  // manifest
+			true,
+			nil,
 		)
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
 
-		// Suppress panic from missing bundles - we're testing that Render is not called
 		defer func() {
 			recover()
 		}()
 
 		handler.ServeHTTP(rec, req)
 
-		// ClientOnly in dev should not call Render - it serves shell directly
 		if renderCalled {
 			t.Error("ClientOnly in dev mode should not call renderer.Render()")
 		}
@@ -190,25 +181,21 @@ func TestHandlerClientOnlyDevMode(t *testing.T) {
 				Mode:          types.ModeClientOnly,
 			},
 			embed.FS{},
-			true, // isDev
-			nil,  // manifest
+			true,
+			nil,
 		)
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
 
-		// Suppress panic from missing bundles
 		defer func() {
 			recover()
 		}()
 
 		handler.ServeHTTP(rec, req)
 
-		// Should return HTML even if bundles are missing (we're testing the render path)
-		// The actual response code depends on whether setup succeeds
 		body := rec.Body.String()
 		if body != "" {
-			// If we got a response, it should be HTML
 			contentType := rec.Header().Get("Content-Type")
 			if contentType != "" && contentType != "text/html; charset=utf-8" {
 				t.Errorf("Expected HTML content type, got %s", contentType)
@@ -217,7 +204,6 @@ func TestHandlerClientOnlyDevMode(t *testing.T) {
 	})
 }
 
-// TrackingRenderer wraps a renderer to track method calls
 type TrackingRenderer struct {
 	*MockRenderer
 	renderCalled *bool
