@@ -38,7 +38,7 @@ func scanPages(filename string) ([]PageInfo, error) {
 		switch fn := callExpr.Fun.(type) {
 		case *ast.SelectorExpr:
 			funcName = fn.Sel.Name
-			argIndex = 0
+			argIndex = 1
 		case *ast.Ident:
 			funcName = fn.Name
 			argIndex = 1
@@ -46,7 +46,7 @@ func scanPages(filename string) ([]PageInfo, error) {
 			return true
 		}
 
-		if funcName != "NewPage" {
+		if funcName != "Page" {
 			return true
 		}
 
@@ -57,12 +57,12 @@ func scanPages(filename string) ([]PageInfo, error) {
 		firstArg := callExpr.Args[argIndex]
 		lit, ok := firstArg.(*ast.BasicLit)
 		if !ok {
-			slog.Warn("NewPage call with non-string argument", "position", fset.Position(callExpr.Pos()))
+			slog.Warn("Page call with non-string argument", "position", fset.Position(callExpr.Pos()))
 			return true
 		}
 
 		if lit.Kind != token.STRING {
-			slog.Warn("NewPage call with non-string argument", "position", fset.Position(callExpr.Pos()))
+			slog.Warn("Page call with non-string argument", "position", fset.Position(callExpr.Pos()))
 			return true
 		}
 
@@ -109,26 +109,19 @@ func detectPageOptions(args []ast.Expr) (types.PageMode, bool) {
 		}
 
 		switch funcName {
-		case "WithClientOnly":
+		case "WithClient":
 			hasClientOnly = true
-		case "WithStaticPrerender":
+		case "WithStatic":
 			hasStaticPrerender = true
-		case "WithStaticDataLoader":
+		case "WithStaticData":
+			hasStaticPrerender = true
 			hasStaticDataLoader = true
 		}
 	}
 
-	// Check for conflicting options
 	if hasClientOnly && hasStaticPrerender {
-		// Build-time validation will catch this
-		slog.Warn("Both WithClientOnly and WithStaticPrerender detected, defaulting to SSR")
+		slog.Warn("Both WithClient and WithStatic detected, defaulting to SSR")
 		return types.ModeSSR, hasStaticDataLoader
-	}
-
-	// Static data loader requires static prerender mode
-	if hasStaticDataLoader && !hasStaticPrerender {
-		// Build will validate this - for now just note it
-		slog.Warn("WithStaticDataLoader requires WithStaticPrerender")
 	}
 
 	if hasStaticPrerender {
@@ -140,17 +133,4 @@ func detectPageOptions(args []ast.Expr) (types.PageMode, bool) {
 	}
 
 	return types.ModeSSR, hasStaticDataLoader
-}
-
-func extractComponentPaths(filename string) ([]string, error) {
-	configs, err := scanPages(filename)
-	if err != nil {
-		return nil, err
-	}
-
-	paths := make([]string, len(configs))
-	for i, config := range configs {
-		paths[i] = config.Path
-	}
-	return paths, nil
 }

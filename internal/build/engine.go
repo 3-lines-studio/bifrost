@@ -64,7 +64,7 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 	}
 
 	if len(pageConfigs) == 0 {
-		return fmt.Errorf("no NewPage calls found in %s", mainFile)
+		return fmt.Errorf("no Page() calls found in %s", mainFile)
 	}
 
 	cli.PrintSuccess("Found %d component(s)", len(pageConfigs))
@@ -97,7 +97,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 
 	cli.PrintStep(cli.EmojiFile, "Generating client entry files...")
 	var entryFiles []string
-	staticFlags := make(map[string]bool)
 	entryToConfig := make(map[string]PageInfo)
 
 	defer func() {
@@ -112,7 +111,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 	for _, config := range pageConfigs {
 		entryName := assets.EntryNameForPath(config.Path)
 		entryPath := filepath.Join(entryDir, entryName+".tsx")
-		staticFlags[entryName] = config.Mode == types.ModeClientOnly || config.Mode == types.ModeStaticPrerender
 		entryToConfig[entryPath] = config
 
 		absComponentPath := filepath.Join(originalCwd, config.Path)
@@ -122,8 +120,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 			return fmt.Errorf("failed to get import path for %s: %w", config.Path, err)
 		}
 
-		// ModeClientOnly uses static entry (no hydration)
-		// ModeSSR and ModeStaticPrerender use hydration entry
 		if config.Mode == types.ModeClientOnly {
 			if err := page.WriteStaticClientEntry(entryPath, componentImport); err != nil {
 				return fmt.Errorf("failed to write static entry file: %w", err)
@@ -151,7 +147,7 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start bun: %w", err)
 	}
-	defer cmd.Process.Kill()
+	defer func() { _ = cmd.Process.Kill() }()
 
 	spinner := cli.NewSpinner("Waiting for renderer")
 	spinner.Start()
@@ -232,7 +228,7 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 		}
 
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			buildSpinner.Stop()
 			failedEntries = append(failedEntries, struct {
 				entry string
@@ -241,7 +237,7 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 			}{entryFile, info, fmt.Sprintf("Failed to decode response: %v", err)})
 			continue
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		buildSpinner.Stop()
 
@@ -283,7 +279,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 
 	for _, entryFile := range successfulEntries {
 		info := entryToConfig[entryFile]
-		// Skip SSR bundles for ClientOnly and StaticPrerender modes
 		if info.Mode == types.ModeClientOnly || info.Mode == types.ModeStaticPrerender {
 			continue
 		}
@@ -353,12 +348,12 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 			}
 
 			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				buildSpinner.Stop()
 				cli.PrintWarning("Failed to decode SSR response for %s: %v", entryName, err)
 				continue
 			}
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			buildSpinner.Stop()
 
@@ -392,7 +387,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 		}
 	}
 
-	// Collect static prerender paths that need data loader export
 	staticPrerenderWithLoader := []PageInfo{}
 	staticPrerenderSimple := []string{}
 
@@ -406,8 +400,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 		}
 	}
 
-	// Generate a temporary manifest to get asset info for HTML generation
-	// We'll regenerate it with static routes after all HTML is generated
 	componentPaths := make([]string, 0, len(successfulEntries))
 	successfulModes := make(map[string]types.PageMode)
 	for _, entryFile := range successfulEntries {
@@ -417,15 +409,12 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 		successfulModes[entryName] = info.Mode
 	}
 
-	// Create temporary manifest without static routes for HTML generation
 	tempStaticRoutes := make(staticRoutesMap)
 	man, err := generateManifest(outdir, ssrDir, componentPaths, successfulModes, tempStaticRoutes)
 	if err != nil {
 		return fmt.Errorf("failed to generate temporary manifest: %w", err)
 	}
 
-	// Handle StaticPrerender pages with data loaders - run export and generate multiple pages
-	// Build up staticRoutes map for final manifest
 	staticRoutes := make(staticRoutesMap)
 
 	if len(staticPrerenderWithLoader) > 0 {
@@ -436,7 +425,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 			return fmt.Errorf("failed to export static data: %w", err)
 		}
 
-		// Build a map from component path to export entries
 		exportMap := make(map[string][]StaticPathExport)
 		for _, page := range exportData.Pages {
 			exportMap[page.ComponentPath] = page.Entries
@@ -444,8 +432,7 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 
 		cli.PrintStep(cli.EmojiFile, "Prerendering dynamic static pages...")
 
-		// Validate and generate pages for each component
-		allPaths := make(map[string]string) // normalized path -> component
+		allPaths := make(map[string]string)
 
 		for _, pageInfo := range staticPrerenderWithLoader {
 			entries, ok := exportMap[pageInfo.Path]
@@ -456,7 +443,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 			entryName := assets.EntryNameForPath(pageInfo.Path)
 			staticRoutes[entryName] = make(map[string]string)
 
-			// Validate paths and check for duplicates
 			for _, entry := range entries {
 				normalizedPath := normalizeRoutePath(entry.Path)
 
@@ -470,7 +456,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 				allPaths[normalizedPath] = pageInfo.Path
 			}
 
-			// Generate HTML for each path and populate staticRoutes
 			for _, entry := range entries {
 				normalizedPath := normalizeRoutePath(entry.Path)
 				routeParts := strings.Split(strings.TrimPrefix(normalizedPath, "/"), "/")
@@ -484,7 +469,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 				staticRoutes[entryName][normalizedPath] = "/" + filepath.ToSlash(pageDir) + "/index.html"
 			}
 
-			// Generate HTML for each path
 			if err := generateDynamicStaticHTMLFiles(entryDir, outdir, pageInfo.Path, entries, man, client, originalCwd); err != nil {
 				return fmt.Errorf("failed to generate dynamic static pages for %s: %w", pageInfo.Path, err)
 			}
@@ -493,7 +477,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 		}
 	}
 
-	// Handle ClientOnly pages - generate static HTML shells
 	clientOnlyPaths := []string{}
 	for _, config := range pageConfigs {
 		if config.Mode == types.ModeClientOnly {
@@ -506,7 +489,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 
 		heads := make(map[string]string)
 		for _, componentPath := range clientOnlyPaths {
-			// Use absolute path so Bun can resolve from cmd/full working directory
 			absComponentPath := filepath.Join(originalCwd, componentPath)
 			reqBody := map[string]interface{}{
 				"path":  absComponentPath,
@@ -541,11 +523,11 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 			}
 
 			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				cli.PrintWarning("Failed to decode render response for %s: %v", componentPath, err)
 				continue
 			}
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			if result.Error != nil {
 				cli.PrintWarning("Failed to render head for %s: %s", componentPath, result.Error.Message)
@@ -560,7 +542,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 		cli.PrintSuccess("Generated %d static HTML file(s)", len(clientOnlyPaths))
 	}
 
-	// Handle simple StaticPrerender pages (no data loader)
 	if len(staticPrerenderSimple) > 0 {
 		cli.PrintStep(cli.EmojiFile, "Prerendering static pages...")
 
@@ -570,7 +551,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 		cli.PrintSuccess("Generated %d prerendered HTML file(s)", len(staticPrerenderSimple))
 	}
 
-	// Generate final manifest with static routes
 	cli.PrintStep(cli.EmojiPackage, "Generating manifest...")
 	man, err = generateManifest(outdir, ssrDir, componentPaths, successfulModes, staticRoutes)
 	if err != nil {
@@ -597,7 +577,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 	}
 	cli.PrintSuccess("Assets copied")
 
-	// Check if any pages need SSR (require embedded runtime)
 	hasSSR := false
 	for _, config := range pageConfigs {
 		if config.Mode == types.ModeSSR {
@@ -615,7 +594,6 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 			cli.PrintSuccess("Embedded runtime ready")
 		}
 	} else {
-		// No SSR pages - remove runtime dir if it exists to prevent stale runtime
 		runtimeDir := filepath.Join(entryDir, "runtime")
 		if _, err := os.Stat(runtimeDir); err == nil {
 			cli.PrintStep(cli.EmojiGear, "Cleaning up runtime directory (no SSR pages)...")
@@ -698,7 +676,6 @@ func writeServerEntry(path string, componentImport string) error {
 	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
-// staticRoutesMap maps entryName -> map[route]htmlPath for dynamic static pages
 type staticRoutesMap map[string]map[string]string
 
 func generateManifest(outdir string, ssrDir string, componentPaths []string, modes map[string]types.PageMode, staticRoutes staticRoutesMap) (*assets.Manifest, error) {
@@ -722,7 +699,6 @@ func generateManifest(outdir string, ssrDir string, componentPaths []string, mod
 		}
 	}
 
-	cssFiles := make(map[string]string)
 	cssHashToFile := make(map[string]string)
 
 	for _, componentPath := range componentPaths {
@@ -750,7 +726,7 @@ func generateManifest(outdir string, ssrDir string, componentPaths []string, mod
 			entryChunks = findEntryChunks(outdir, script, chunks)
 
 			if css != "" {
-				css = dedupeCSSFile(outdir, css, cssFiles, cssHashToFile)
+				css = dedupeCSSFile(outdir, css, cssHashToFile)
 			}
 
 			if css == "" && len(cssHashToFile) > 0 {
@@ -763,7 +739,6 @@ func generateManifest(outdir string, ssrDir string, componentPaths []string, mod
 			mode := modes[entryName]
 			ssrPath := findSSRPath(ssrDir, entryName)
 
-			// Determine mode string and static flag
 			modeStr := "ssr"
 			isStatic := false
 			htmlPath := ""
@@ -777,9 +752,8 @@ func generateManifest(outdir string, ssrDir string, componentPaths []string, mod
 			case types.ModeStaticPrerender:
 				modeStr = "static-prerender"
 				isStatic = true
-				// For dynamic static pages, use the routes map
 				if routes != nil {
-					htmlPath = "" // Route-specific files
+					htmlPath = ""
 				} else {
 					htmlPath = "/pages/" + entryName + "/index.html"
 				}
@@ -823,7 +797,7 @@ func findSSRPath(ssrDir string, entryName string) string {
 	return ""
 }
 
-func dedupeCSSFile(outdir string, cssPath string, cssFiles map[string]string, cssHashToFile map[string]string) string {
+func dedupeCSSFile(outdir string, cssPath string, cssHashToFile map[string]string) string {
 	fullPath := filepath.Join(outdir, filepath.Base(cssPath))
 	content, err := os.ReadFile(fullPath)
 	if err != nil {
@@ -833,7 +807,7 @@ func dedupeCSSFile(outdir string, cssPath string, cssFiles map[string]string, cs
 	hash := hashContent(content)
 
 	if existingPath, exists := cssHashToFile[hash]; exists {
-		os.Remove(fullPath)
+		_ = os.Remove(fullPath)
 		return existingPath
 	}
 
@@ -896,7 +870,6 @@ func generateClientOnlyHTMLFiles(entryDir, outdir string, componentPaths []strin
 }
 
 func writeStaticHTML(htmlPath, scriptSrc, cssHref string, chunks []string, headHTML string, outdir string) error {
-	// Use absolute URLs for assets - they are already absolute from manifest (e.g., "/dist/...")
 	var cssLink string
 	if cssHref != "" {
 		cssLink = fmt.Sprintf(`<link rel="stylesheet" href="%s" />`, cssHref)
@@ -910,7 +883,7 @@ func writeStaticHTML(htmlPath, scriptSrc, cssHref string, chunks []string, headH
 
 	var chunksHTML strings.Builder
 	for _, chunk := range chunks {
-		chunksHTML.WriteString(fmt.Sprintf(`<script src="%s" type="module" defer></script>`, chunk))
+		fmt.Fprintf(&chunksHTML, `<script src="%s" type="module" defer></script>`, chunk)
 		chunksHTML.WriteString("\n")
 	}
 
@@ -945,7 +918,6 @@ func generatePrerenderedHTMLFiles(entryDir, outdir string, componentPaths []stri
 		scriptSrc, cssHref, chunks, _, _ := assets.GetAssets(man, entryName)
 		htmlPath := filepath.Join(pageDir, "index.html")
 
-		// Render the component at build time (use absolute path so Bun can resolve from any cwd)
 		absComponentPath := filepath.Join(originalCwd, componentPath)
 		reqBody := map[string]interface{}{
 			"path":  absComponentPath,
@@ -977,16 +949,15 @@ func generatePrerenderedHTMLFiles(entryDir, outdir string, componentPaths []stri
 		}
 
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return fmt.Errorf("failed to decode render response for %s: %w", componentPath, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if result.Error != nil {
 			return fmt.Errorf("render failed for %s: %s", componentPath, result.Error.Message)
 		}
 
-		// Write full HTML with prerendered body (no props for simple static prerender)
 		if err := writePrerenderedHTML(htmlPath, scriptSrc, cssHref, chunks, result.Head, result.HTML, nil); err != nil {
 			return fmt.Errorf("failed to write prerendered HTML for %s: %w", componentPath, err)
 		}
@@ -998,7 +969,6 @@ func generatePrerenderedHTMLFiles(entryDir, outdir string, componentPaths []stri
 }
 
 func writePrerenderedHTML(htmlPath, scriptSrc, cssHref string, chunks []string, headHTML, bodyHTML string, props map[string]any) error {
-	// Use absolute URLs for assets - they are already absolute from manifest (e.g., "/dist/...")
 	var cssLink string
 	if cssHref != "" {
 		cssLink = fmt.Sprintf(`<link rel="stylesheet" href="%s" />`, cssHref)
@@ -1012,13 +982,12 @@ func writePrerenderedHTML(htmlPath, scriptSrc, cssHref string, chunks []string, 
 
 	var chunksHTML strings.Builder
 	for _, chunk := range chunks {
-		chunksHTML.WriteString(fmt.Sprintf(`<script src="%s" type="module" defer></script>`, chunk))
+		fmt.Fprintf(&chunksHTML, `<script src="%s" type="module" defer></script>`, chunk)
 		chunksHTML.WriteString("\n")
 	}
 
-	// Include props for hydration
 	var propsScript string
-	if props != nil && len(props) > 0 {
+	if len(props) > 0 {
 		propsJSON, err := json.Marshal(props)
 		if err == nil {
 			escapedProps := strings.ReplaceAll(string(propsJSON), "</", "<\\/")
@@ -1039,14 +1008,6 @@ func writePrerenderedHTML(htmlPath, scriptSrc, cssHref string, chunks []string, 
 `, head, bodyHTML, chunksHTML.String(), propsScript, scriptSrc)
 
 	return os.WriteFile(htmlPath, []byte(html), 0644)
-}
-
-func makeRelativeToPages(path string) string {
-	path = strings.TrimPrefix(path, "/")
-	parts := strings.Split(path, "/")
-	depth := 2
-	prefix := strings.Repeat("../", depth)
-	return prefix + strings.Join(parts, "/")
 }
 
 func copyPublicDir(src, dst string) error {
@@ -1087,13 +1048,13 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+	defer func() { _ = dstFile.Close() }()
 
 	if _, err = io.Copy(dstFile, srcFile); err != nil {
 		return err
@@ -1107,32 +1068,35 @@ func copyFile(src, dst string) error {
 	return os.Chmod(dst, srcInfo.Mode())
 }
 
-// StaticPathExport represents a single path entry from export
 type StaticPathExport struct {
 	Path  string         `json:"path"`
 	Props map[string]any `json:"props"`
 }
 
-// StaticPageExport represents a single page's static paths from export
 type StaticPageExport struct {
 	ComponentPath string             `json:"componentPath"`
 	Entries       []StaticPathExport `json:"entries"`
 }
 
-// StaticBuildExport represents the export format
 type StaticBuildExport struct {
 	Version int                `json:"version"`
 	Pages   []StaticPageExport `json:"pages"`
 }
 
-// runStaticExport runs the Go app in export mode and returns the static data
-// Note: This function assumes it's called from the main file's directory
-// (already chdir'd there by BuildProject)
 func runStaticExport(originalCwd string) (*StaticBuildExport, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "go", "run", ".", "__bifrost_export_static__")
+	markerPath := filepath.Join(".bifrost", ".export-mode")
+	if err := os.MkdirAll(".bifrost", 0755); err != nil {
+		return nil, fmt.Errorf("failed to create .bifrost directory: %w", err)
+	}
+	if err := os.WriteFile(markerPath, []byte("1"), 0644); err != nil {
+		return nil, fmt.Errorf("failed to create export marker: %w", err)
+	}
+	defer func() { _ = os.Remove(markerPath) }()
+
+	cmd := exec.CommandContext(ctx, "go", "run", ".")
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -1140,7 +1104,7 @@ func runStaticExport(originalCwd string) (*StaticBuildExport, error) {
 			return nil, fmt.Errorf("export failed: %s", string(exitErr.Stderr))
 		}
 		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("export timed out after 90s; ensure RegisterAssetRoutes is called after all NewPage registrations")
+			return nil, fmt.Errorf("export timed out after 90s; ensure app.Wrap() is called after defining all pages")
 		}
 		return nil, fmt.Errorf("failed to run export: %w", err)
 	}
@@ -1153,20 +1117,16 @@ func runStaticExport(originalCwd string) (*StaticBuildExport, error) {
 	return &export, nil
 }
 
-// normalizeRoutePath normalizes a route path for comparison
 func normalizeRoutePath(path string) string {
-	// Ensure leading slash
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
-	// Remove trailing slash (except for root)
 	if path != "/" && strings.HasSuffix(path, "/") {
 		path = strings.TrimSuffix(path, "/")
 	}
 	return path
 }
 
-// validateRoutePath validates that a path is safe and well-formed
 func validateRoutePath(path string) error {
 	if path == "" {
 		return fmt.Errorf("path cannot be empty")
@@ -1176,7 +1136,6 @@ func validateRoutePath(path string) error {
 		return fmt.Errorf("path must start with /")
 	}
 
-	// Check for invalid characters
 	if strings.Contains(path, "?") {
 		return fmt.Errorf("path cannot contain query string")
 	}
@@ -1196,18 +1155,15 @@ func validateRoutePath(path string) error {
 	return nil
 }
 
-// generateDynamicStaticHTMLFiles generates multiple HTML files for dynamic static paths
 func generateDynamicStaticHTMLFiles(entryDir, outdir string, componentPath string, entries []StaticPathExport, man *assets.Manifest, client *http.Client, originalCwd string) error {
 	entryName := assets.EntryNameForPath(componentPath)
 	scriptSrc, cssHref, chunks, _, _ := assets.GetAssets(man, entryName)
 
-	// Use absolute path for component so Bun can resolve it from any cwd
 	absComponentPath := filepath.Join(originalCwd, componentPath)
 
 	pagesDir := filepath.Join(entryDir, "pages")
 
 	for _, entry := range entries {
-		// Create directory structure based on path
 		normalizedPath := normalizeRoutePath(entry.Path)
 		routeParts := strings.Split(strings.TrimPrefix(normalizedPath, "/"), "/")
 
@@ -1224,7 +1180,6 @@ func generateDynamicStaticHTMLFiles(entryDir, outdir string, componentPath strin
 
 		htmlPath := filepath.Join(pageDir, "index.html")
 
-		// Render the component with props (use absolute path so Bun can resolve from any cwd)
 		reqBody := map[string]interface{}{
 			"path":  absComponentPath,
 			"props": entry.Props,
@@ -1255,16 +1210,15 @@ func generateDynamicStaticHTMLFiles(entryDir, outdir string, componentPath strin
 		}
 
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return fmt.Errorf("failed to decode render response for %s: %w", entry.Path, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if result.Error != nil {
 			return fmt.Errorf("render failed for %s: %s", entry.Path, result.Error.Message)
 		}
 
-		// Write full HTML with prerendered body and props for hydration
 		if err := writePrerenderedHTML(htmlPath, scriptSrc, cssHref, chunks, result.Head, result.HTML, entry.Props); err != nil {
 			return fmt.Errorf("failed to write prerendered HTML for %s: %w", entry.Path, err)
 		}
@@ -1306,10 +1260,10 @@ func compileEmbeddedRuntime(entryDir string) error {
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		os.Remove(tempSourcePath)
+		_ = os.Remove(tempSourcePath)
 		return fmt.Errorf("bun compile failed: %w", err)
 	}
 
-	os.Remove(tempSourcePath)
+	_ = os.Remove(tempSourcePath)
 	return nil
 }

@@ -1,11 +1,11 @@
 package bifrost
 
 import (
-	"errors"
 	"net/http"
 	"testing"
 
 	"github.com/3-lines-studio/bifrost/internal/runtime"
+	"github.com/3-lines-studio/bifrost/internal/types"
 )
 
 func TestModeDetection(t *testing.T) {
@@ -47,163 +47,124 @@ func TestModeDetection(t *testing.T) {
 				t.Errorf("IsDev() = %v, want %v", isDev, tt.wantDev)
 			}
 			if isProd != tt.wantProd {
-				t.Errorf("IsProd() = %v, want %v", isProd, tt.wantProd)
+				t.Errorf("mode == ModeProd = %v, want %v", isProd, tt.wantProd)
 			}
 		})
 	}
 }
 
 func TestStrictProductionRequirements(t *testing.T) {
-	// Set production mode
 	t.Setenv("BIFROST_DEV", "")
 
-	// Test 1: Production without WithAssetsFS should fail
-	t.Run("production without assets FS fails", func(t *testing.T) {
-		_, err := New()
-		if err == nil {
-			t.Error("Expected error in production without WithAssetsFS, got nil")
-		}
-		if !errors.Is(err, runtime.ErrAssetsFSRequiredInProd) {
-			t.Errorf("Expected ErrAssetsFSRequiredInProd, got: %v", err)
-		}
+	t.Run("production without assets FS panics", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("Expected panic in production without assets FS, got nil")
+			}
+		}()
+		New(testFS)
 	})
 }
 
 func TestPageOptions(t *testing.T) {
-	t.Run("WithPropsLoader creates handler", func(t *testing.T) {
-		// This test requires a renderer, so we skip if bun is not available
-		t.Setenv("BIFROST_DEV", "1")
-
-		r, err := New()
-		if err != nil {
-			t.Skipf("Skipping test: %v (is bun installed?)", err)
-		}
-		defer r.Stop()
-
-		loader := func(*http.Request) (map[string]any, error) {
+	t.Run("WithLoader creates route with loader", func(t *testing.T) {
+		route := Page("/test", "./test.tsx", WithLoader(func(*http.Request) (map[string]any, error) {
 			return map[string]any{"test": "value"}, nil
+		}))
+
+		if route.Pattern != "/test" {
+			t.Errorf("Expected pattern '/test', got '%s'", route.Pattern)
 		}
 
-		handler := r.NewPage("./test.tsx", WithPropsLoader(loader))
-		if handler == nil {
-			t.Error("NewPage returned nil handler")
-		}
-	})
-
-	t.Run("WithClientOnly creates handler", func(t *testing.T) {
-		t.Setenv("BIFROST_DEV", "1")
-
-		r, err := New()
-		if err != nil {
-			t.Skipf("Skipping test: %v (is bun installed?)", err)
-		}
-		defer r.Stop()
-
-		handler := r.NewPage("./test.tsx", WithClientOnly())
-		if handler == nil {
-			t.Error("NewPage returned nil handler")
+		if len(route.Options) != 1 {
+			t.Errorf("Expected 1 option, got %d", len(route.Options))
 		}
 	})
 
-	t.Run("NewPage returns http.Handler", func(t *testing.T) {
-		t.Setenv("BIFROST_DEV", "1")
+	t.Run("WithClient creates route with client option", func(t *testing.T) {
+		route := Page("/about", "./about.tsx", WithClient())
 
-		r, err := New()
-		if err != nil {
-			t.Skipf("Skipping test: %v (is bun installed?)", err)
+		if route.Pattern != "/about" {
+			t.Errorf("Expected pattern '/about', got '%s'", route.Pattern)
 		}
-		defer r.Stop()
 
-		handler := r.NewPage("./test.tsx")
-
-		// Verify it implements http.Handler
-		var _ http.Handler = handler
+		if len(route.Options) != 1 {
+			t.Errorf("Expected 1 option, got %d", len(route.Options))
+		}
 	})
 
-	t.Run("WithStaticPrerender creates handler", func(t *testing.T) {
-		t.Setenv("BIFROST_DEV", "1")
+	t.Run("Page creates route without options", func(t *testing.T) {
+		route := Page("/", "./home.tsx")
 
-		r, err := New()
-		if err != nil {
-			t.Skipf("Skipping test: %v (is bun installed?)", err)
+		if route.Pattern != "/" {
+			t.Errorf("Expected pattern '/', got '%s'", route.Pattern)
 		}
-		defer r.Stop()
 
-		handler := r.NewPage("./test.tsx", WithStaticPrerender())
-		if handler == nil {
-			t.Error("NewPage returned nil handler")
+		if len(route.Options) != 0 {
+			t.Errorf("Expected 0 options, got %d", len(route.Options))
+		}
+	})
+
+	t.Run("WithStatic creates route with static option", func(t *testing.T) {
+		route := Page("/blog", "./blog.tsx", WithStatic())
+
+		if route.Pattern != "/blog" {
+			t.Errorf("Expected pattern '/blog', got '%s'", route.Pattern)
+		}
+
+		if len(route.Options) != 1 {
+			t.Errorf("Expected 1 option, got %d", len(route.Options))
 		}
 	})
 }
 
 func TestPageModeTypes(t *testing.T) {
 	t.Run("SSR page has correct mode", func(t *testing.T) {
+		skipIfNoBun(t)
 		t.Setenv("BIFROST_DEV", "1")
 
-		r, err := New()
-		if err != nil {
-			t.Skipf("Skipping test: %v (is bun installed?)", err)
-		}
-		defer r.Stop()
-
-		handler := r.NewPage("./test.tsx", WithPropsLoader(func(*http.Request) (map[string]any, error) {
+		app := New(testFS, Page("/test", "./test.tsx", WithLoader(func(*http.Request) (map[string]any, error) {
 			return map[string]any{}, nil
-		}))
-		if handler == nil {
-			t.Fatal("Handler is nil")
-		}
+		})))
+		defer func() { _ = app.Stop() }()
 
-		config := r.pageConfigs["./test.tsx"]
+		config := app.pageConfigs["./test.tsx"]
 		if config == nil {
 			t.Fatal("Config not stored")
 		}
-		if config.Mode != ModeSSR {
+		if config.Mode != types.ModeSSR {
 			t.Errorf("Expected ModeSSR, got %v", config.Mode)
 		}
 	})
 
-	t.Run("ClientOnly page has correct mode", func(t *testing.T) {
+	t.Run("Client page has correct mode", func(t *testing.T) {
+		skipIfNoBun(t)
 		t.Setenv("BIFROST_DEV", "1")
 
-		r, err := New()
-		if err != nil {
-			t.Skipf("Skipping test: %v (is bun installed?)", err)
-		}
-		defer r.Stop()
+		app := New(testFS, Page("/test", "./test.tsx", WithClient()))
+		defer func() { _ = app.Stop() }()
 
-		handler := r.NewPage("./test.tsx", WithClientOnly())
-		if handler == nil {
-			t.Fatal("Handler is nil")
-		}
-
-		config := r.pageConfigs["./test.tsx"]
+		config := app.pageConfigs["./test.tsx"]
 		if config == nil {
 			t.Fatal("Config not stored")
 		}
-		if config.Mode != ModeClientOnly {
+		if config.Mode != types.ModeClientOnly {
 			t.Errorf("Expected ModeClientOnly, got %v", config.Mode)
 		}
 	})
 
-	t.Run("StaticPrerender page has correct mode", func(t *testing.T) {
+	t.Run("Static page has correct mode", func(t *testing.T) {
+		skipIfNoBun(t)
 		t.Setenv("BIFROST_DEV", "1")
 
-		r, err := New()
-		if err != nil {
-			t.Skipf("Skipping test: %v (is bun installed?)", err)
-		}
-		defer r.Stop()
+		app := New(testFS, Page("/test", "./test.tsx", WithStatic()))
+		defer func() { _ = app.Stop() }()
 
-		handler := r.NewPage("./test.tsx", WithStaticPrerender())
-		if handler == nil {
-			t.Fatal("Handler is nil")
-		}
-
-		config := r.pageConfigs["./test.tsx"]
+		config := app.pageConfigs["./test.tsx"]
 		if config == nil {
 			t.Fatal("Config not stored")
 		}
-		if config.Mode != ModeStaticPrerender {
+		if config.Mode != types.ModeStaticPrerender {
 			t.Errorf("Expected ModeStaticPrerender, got %v", config.Mode)
 		}
 	})

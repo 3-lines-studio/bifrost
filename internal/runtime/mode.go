@@ -13,7 +13,7 @@ const (
 )
 
 var (
-	ErrAssetsFSRequiredInProd    = errors.New("WithAssetsFS is required in production mode (BIFROST_DEV not set)")
+	ErrAssetsFSRequiredInProd    = errors.New("embed.FS is required in production mode (BIFROST_DEV not set)")
 	ErrManifestMissingInAssetsFS = errors.New("manifest.json not found in embedded assets")
 	ErrEmbeddedRuntimeNotFound   = errors.New("embedded runtime helper not found; run 'bifrost-build' to generate it")
 	ErrEmbeddedRuntimeExtraction = errors.New("failed to extract embedded runtime")
@@ -29,8 +29,4 @@ func GetMode() Mode {
 
 func IsDev() bool {
 	return GetMode() == ModeDev
-}
-
-func IsProd() bool {
-	return GetMode() == ModeProd
 }

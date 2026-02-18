@@ -12,23 +12,15 @@ import (
 var bifrostFS embed.FS
 
 func main() {
-	r, err := bifrost.New(bifrost.WithAssetsFS(bifrostFS))
-	if err != nil {
-		log.Fatalf("Failed to create renderer: %v", err)
-	}
-	defer r.Stop()
-
-	app := r.NewPage("./pages/home.tsx", bifrost.WithClientOnly())
-
-	router := http.NewServeMux()
-	router.Handle("/", app)
-
-	assetRouter := http.NewServeMux()
-	bifrost.RegisterAssetRoutes(assetRouter, r, router)
+	app := bifrost.New(
+		bifrostFS,
+		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithClient()),
+	)
+	defer app.Stop()
 
 	addr := ":8080"
 	log.Printf("Server running on http://localhost%s", addr)
-	if err := http.ListenAndServe(addr, assetRouter); err != nil {
+	if err := http.ListenAndServe(addr, app.Handler()); err != nil {
 		log.Fatal(err)
 	}
 }

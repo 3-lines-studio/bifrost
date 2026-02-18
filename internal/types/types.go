@@ -20,16 +20,11 @@ const (
 	ModeStaticPrerender
 )
 
-// StaticPathData represents a single path and its props for static prerendering
 type StaticPathData struct {
 	Path  string
 	Props map[string]any
 }
 
-// StaticDataLoader is called at build time to generate dynamic static paths
-// It returns a list of paths and their corresponding props
-// Example: returning [{Path: "/blog/hello", Props: {slug: "hello"}}]
-// will generate a prerendered page at /blog/hello with those props
 type StaticDataLoader func(context.Context) ([]StaticPathData, error)
 
 type PageConfig struct {
@@ -41,26 +36,27 @@ type PageConfig struct {
 
 type PageOption func(*PageConfig)
 
-func WithPropsLoader(loader PropsLoader) PageOption {
+func WithLoader(loader PropsLoader) PageOption {
 	return func(c *PageConfig) {
 		c.PropsLoader = loader
 	}
 }
 
-func WithClientOnly() PageOption {
+func WithClient() PageOption {
 	return func(c *PageConfig) {
 		c.Mode = ModeClientOnly
 	}
 }
 
-func WithStaticPrerender() PageOption {
+func WithStatic() PageOption {
 	return func(c *PageConfig) {
 		c.Mode = ModeStaticPrerender
 	}
 }
 
-func WithStaticDataLoader(loader StaticDataLoader) PageOption {
+func WithStaticData(loader StaticDataLoader) PageOption {
 	return func(c *PageConfig) {
+		c.Mode = ModeStaticPrerender
 		c.StaticDataLoader = loader
 	}
 }

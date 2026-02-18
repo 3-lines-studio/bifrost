@@ -137,12 +137,12 @@ func TestDeriveModuleName(t *testing.T) {
 }
 
 func TestGetMinimalTemplate(t *testing.T) {
-	fs, err := GetMinimalTemplate()
+	fs, err := GetTemplate("minimal")
 	if err != nil {
-		t.Fatalf("GetMinimalTemplate() error = %v", err)
+		t.Fatalf("GetTemplate(\"minimal\") error = %v", err)
 	}
 	if fs == nil {
-		t.Error("GetMinimalTemplate() returned nil fs")
+		t.Error("GetTemplate(\"minimal\") returned nil fs")
 	}
 }
 
@@ -220,8 +220,8 @@ func TestGetSpaTemplate_Content(t *testing.T) {
 		t.Fatalf("Failed to read main.go.tmpl: %v", err)
 	}
 
-	if !strings.Contains(string(mainContent), "WithClientOnly()") {
-		t.Error("spa main.go.tmpl should contain WithClientOnly()")
+	if !strings.Contains(string(mainContent), "WithClient()") {
+		t.Error("spa main.go.tmpl should contain WithClient()")
 	}
 }
 

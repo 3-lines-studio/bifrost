@@ -3,16 +3,13 @@ package bifrost
 import (
 	"context"
 	"testing"
+
+	"github.com/3-lines-studio/bifrost/internal/types"
 )
 
-func TestWithStaticDataLoader(t *testing.T) {
+func TestWithStaticData(t *testing.T) {
+	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
-
-	r, err := New()
-	if err != nil {
-		t.Skipf("Skipping test: %v (is bun installed?)", err)
-	}
-	defer r.Stop()
 
 	loader := func(ctx context.Context) ([]StaticPathData, error) {
 		return []StaticPathData{
@@ -20,23 +17,27 @@ func TestWithStaticDataLoader(t *testing.T) {
 		}, nil
 	}
 
-	handler := r.NewPage("./test.tsx",
-		WithStaticPrerender(),
-		WithStaticDataLoader(loader),
-	)
-	if handler == nil {
-		t.Error("NewPage returned nil handler")
+	route := Page("/blog", "./blog.tsx", WithStaticData(loader))
+
+	if route.Pattern != "/blog" {
+		t.Errorf("Expected pattern '/blog', got '%s'", route.Pattern)
 	}
 
-	// Verify loader is stored in config
-	config := r.pageConfigs["./test.tsx"]
+	if len(route.Options) != 1 {
+		t.Errorf("Expected 1 option, got %d", len(route.Options))
+	}
+
+	app := New(testFS, route)
+	defer func() { _ = app.Stop() }()
+
+	config := app.pageConfigs["./blog.tsx"]
 	if config == nil {
 		t.Fatal("Config not stored")
 	}
 	if config.StaticDataLoader == nil {
 		t.Error("StaticDataLoader not set in config")
 	}
-	if config.Mode != ModeStaticPrerender {
+	if config.Mode != types.ModeStaticPrerender {
 		t.Errorf("Expected ModeStaticPrerender, got %v", config.Mode)
 	}
 }
@@ -60,12 +61,12 @@ func TestStaticPathDataStructure(t *testing.T) {
 }
 
 func TestStaticBuildExportStructure(t *testing.T) {
-	export := StaticBuildExport{
+	export := staticBuildExport{
 		Version: 1,
-		Pages: []StaticPageExport{
+		Pages: []staticPageExport{
 			{
 				ComponentPath: "./pages/blog.tsx",
-				Entries: []StaticPathExport{
+				Entries: []staticPathExport{
 					{Path: "/blog/hello", Props: map[string]any{"slug": "hello"}},
 					{Path: "/blog/world", Props: map[string]any{"slug": "world"}},
 				},

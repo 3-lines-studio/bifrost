@@ -48,7 +48,7 @@ func NewClient() (*Client, error) {
 	}
 
 	if err := waitForSocket(socket, 5*time.Second); err != nil {
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		return nil, err
 	}
 
@@ -115,15 +115,15 @@ func (c *Client) Render(path string, props map[string]any) (types.RenderedPage, 
 		if len(result.Error.Errors) > 0 {
 			sb.WriteString("\n\nErrors:")
 			for i, err := range result.Error.Errors {
-				sb.WriteString(fmt.Sprintf("\n  %d. %s", i+1, err.Message))
+				fmt.Fprintf(&sb, "\n  %d. %s", i+1, err.Message)
 				if err.Stack != "" {
-					sb.WriteString(fmt.Sprintf("\n     Stack: %s", err.Stack))
+					fmt.Fprintf(&sb, "\n     Stack: %s", err.Stack)
 				}
 			}
 		}
 
 		if result.Error.Stack != "" {
-			sb.WriteString(fmt.Sprintf("\n\nStack:\n%s", result.Error.Stack))
+			fmt.Fprintf(&sb, "\n\nStack:\n%s", result.Error.Stack)
 		}
 
 		return types.RenderedPage{}, fmt.Errorf("%s", sb.String())
@@ -222,53 +222,6 @@ func (c *Client) Build(entrypoints []string, outdir string) error {
 	return nil
 }
 
-func (c *Client) BuildWithTarget(entrypoints []string, outdir string, target string) error {
-	if len(entrypoints) == 0 {
-		return fmt.Errorf("missing entrypoints")
-	}
-
-	if outdir == "" {
-		return fmt.Errorf("missing outdir")
-	}
-
-	reqBody := map[string]any{
-		"entrypoints": entrypoints,
-		"outdir":      outdir,
-		"target":      target,
-	}
-
-	var result buildResponse
-	if err := c.postJSON("/build", reqBody, &result); err != nil {
-		return err
-	}
-
-	if result.Error != nil {
-		errors := make([]ErrorDetail, len(result.Error.Errors))
-		for i, err := range result.Error.Errors {
-			errors[i] = ErrorDetail{
-				Message:   err.Message,
-				File:      err.Position.File,
-				Line:      err.Position.Line,
-				Column:    err.Position.Column,
-				LineText:  err.Position.LineText,
-				Specifier: err.Specifier,
-				Referrer:  err.Referrer,
-			}
-		}
-		return &BifrostError{
-			Message: result.Error.Message,
-			Stack:   result.Error.Stack,
-			Errors:  errors,
-		}
-	}
-
-	if !result.OK {
-		return fmt.Errorf("build failed for entrypoints %v -> %s", entrypoints, outdir)
-	}
-
-	return nil
-}
-
 func (c *Client) postJSON(endpoint string, body interface{}, result interface{}) error {
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
@@ -285,7 +238,7 @@ func (c *Client) postJSON(endpoint string, body interface{}, result interface{})
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return json.NewDecoder(resp.Body).Decode(result)
 }
@@ -303,7 +256,7 @@ func NewClientFromExecutable(executablePath string, cleanup func()) (*Client, er
 	}
 
 	if err := waitForSocket(socket, 5*time.Second); err != nil {
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		return nil, err
 	}
 

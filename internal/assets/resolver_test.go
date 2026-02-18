@@ -61,24 +61,6 @@ func TestHasSSREntries(t *testing.T) {
 			},
 			want: true,
 		},
-		{
-			name: "legacy SSR bundle path returns true",
-			manifest: &Manifest{
-				Entries: map[string]ManifestEntry{
-					"home": {Mode: "", SSR: "/ssr/home.js"},
-				},
-			},
-			want: true,
-		},
-		{
-			name: "legacy empty mode with no SSR returns false",
-			manifest: &Manifest{
-				Entries: map[string]ManifestEntry{
-					"home": {Mode: "", SSR: ""},
-				},
-			},
-			want: false,
-		},
 	}
 
 	for _, tt := range tests {

@@ -22,22 +22,14 @@ var bifrostFS embed.FS
 var iconPNG []byte
 
 func main() {
-	r, err := bifrost.New(bifrost.WithAssetsFS(bifrostFS))
-	if err != nil {
-		log.Fatalf("Failed to start renderer: %v", err)
-	}
-	defer r.Stop()
-
-	app := r.NewPage("./pages/home.tsx", bifrost.WithClientOnly())
-
-	router := http.NewServeMux()
-	router.Handle("/", app)
-
-	assetRouter := http.NewServeMux()
-	bifrost.RegisterAssetRoutes(assetRouter, r, router)
+	app := bifrost.New(
+		bifrostFS,
+		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithClient()),
+	)
+	defer app.Stop()
 
 	server := &http.Server{
-		Handler: assetRouter,
+		Handler: app.Handler(),
 		Addr:    "127.0.0.1:0",
 	}
 

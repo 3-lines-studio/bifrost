@@ -30,12 +30,12 @@ func ExtractEmbeddedRuntime(assetsFS embed.FS) (string, func(), error) {
 	}
 
 	if err := os.WriteFile(executablePath, data, 0700); err != nil {
-		os.RemoveAll(tempDir)
+		_ = os.RemoveAll(tempDir)
 		return "", nil, fmt.Errorf("failed to write runtime executable: %w", err)
 	}
 
 	cleanup := func() {
-		os.RemoveAll(tempDir)
+		_ = os.RemoveAll(tempDir)
 	}
 
 	return executablePath, cleanup, nil
