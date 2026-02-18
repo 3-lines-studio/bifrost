@@ -14,7 +14,7 @@ var bifrostFS embed.FS
 func main() {
 	app := bifrost.New(
 		bifrostFS,
-		bifrost.Page("/", "./pages/home.tsx", bifrost.WithClient()),
+		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithClient()),
 	)
 	defer app.Stop()
 

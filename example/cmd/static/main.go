@@ -11,7 +11,7 @@ import (
 func main() {
 	app := bifrost.New(
 		example.BifrostFS,
-		bifrost.Page("/", "./pages/home.tsx", bifrost.WithClient()),
+		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithClient()),
 		bifrost.Page("/about", "./pages/about.tsx", bifrost.WithClient()),
 	)
 	defer app.Stop()

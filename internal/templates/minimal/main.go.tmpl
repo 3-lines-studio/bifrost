@@ -14,7 +14,7 @@ var bifrostFS embed.FS
 func main() {
 	app := bifrost.New(
 		bifrostFS,
-		bifrost.Page("/", "./pages/home.tsx", bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
 			return map[string]any{
 				"message": "Hello from Bifrost!",
 			}, nil
