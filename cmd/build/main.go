@@ -33,7 +33,7 @@ func main() {
 		cli.PrintError("Failed to initialize build engine: %v", err)
 		os.Exit(1)
 	}
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 
 	if err := engine.BuildProject(mainFile, originalCwd); err != nil {
 		cli.PrintError("%v", err)

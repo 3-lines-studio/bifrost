@@ -228,7 +228,7 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 		}
 
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			buildSpinner.Stop()
 			failedEntries = append(failedEntries, struct {
 				entry string
@@ -237,7 +237,7 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 			}{entryFile, info, fmt.Sprintf("Failed to decode response: %v", err)})
 			continue
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		buildSpinner.Stop()
 
@@ -348,12 +348,12 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 			}
 
 			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				buildSpinner.Stop()
 				cli.PrintWarning("Failed to decode SSR response for %s: %v", entryName, err)
 				continue
 			}
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			buildSpinner.Stop()
 
@@ -523,11 +523,11 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 			}
 
 			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				cli.PrintWarning("Failed to decode render response for %s: %v", componentPath, err)
 				continue
 			}
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			if result.Error != nil {
 				cli.PrintWarning("Failed to render head for %s: %s", componentPath, result.Error.Message)
@@ -807,7 +807,7 @@ func dedupeCSSFile(outdir string, cssPath string, cssHashToFile map[string]strin
 	hash := hashContent(content)
 
 	if existingPath, exists := cssHashToFile[hash]; exists {
-		os.Remove(fullPath)
+		_ = os.Remove(fullPath)
 		return existingPath
 	}
 
@@ -883,7 +883,7 @@ func writeStaticHTML(htmlPath, scriptSrc, cssHref string, chunks []string, headH
 
 	var chunksHTML strings.Builder
 	for _, chunk := range chunks {
-		chunksHTML.WriteString(fmt.Sprintf(`<script src="%s" type="module" defer></script>`, chunk))
+		fmt.Fprintf(&chunksHTML, `<script src="%s" type="module" defer></script>`, chunk)
 		chunksHTML.WriteString("\n")
 	}
 
@@ -949,10 +949,10 @@ func generatePrerenderedHTMLFiles(entryDir, outdir string, componentPaths []stri
 		}
 
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return fmt.Errorf("failed to decode render response for %s: %w", componentPath, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if result.Error != nil {
 			return fmt.Errorf("render failed for %s: %s", componentPath, result.Error.Message)
@@ -982,7 +982,7 @@ func writePrerenderedHTML(htmlPath, scriptSrc, cssHref string, chunks []string, 
 
 	var chunksHTML strings.Builder
 	for _, chunk := range chunks {
-		chunksHTML.WriteString(fmt.Sprintf(`<script src="%s" type="module" defer></script>`, chunk))
+		fmt.Fprintf(&chunksHTML, `<script src="%s" type="module" defer></script>`, chunk)
 		chunksHTML.WriteString("\n")
 	}
 
@@ -1048,13 +1048,13 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+	defer func() { _ = dstFile.Close() }()
 
 	if _, err = io.Copy(dstFile, srcFile); err != nil {
 		return err
@@ -1094,7 +1094,7 @@ func runStaticExport(originalCwd string) (*StaticBuildExport, error) {
 	if err := os.WriteFile(markerPath, []byte("1"), 0644); err != nil {
 		return nil, fmt.Errorf("failed to create export marker: %w", err)
 	}
-	defer os.Remove(markerPath)
+	defer func() { _ = os.Remove(markerPath) }()
 
 	cmd := exec.CommandContext(ctx, "go", "run", ".")
 
@@ -1210,10 +1210,10 @@ func generateDynamicStaticHTMLFiles(entryDir, outdir string, componentPath strin
 		}
 
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return fmt.Errorf("failed to decode render response for %s: %w", entry.Path, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if result.Error != nil {
 			return fmt.Errorf("render failed for %s: %s", entry.Path, result.Error.Message)
@@ -1260,10 +1260,10 @@ func compileEmbeddedRuntime(entryDir string) error {
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		os.Remove(tempSourcePath)
+		_ = os.Remove(tempSourcePath)
 		return fmt.Errorf("bun compile failed: %w", err)
 	}
 
-	os.Remove(tempSourcePath)
+	_ = os.Remove(tempSourcePath)
 	return nil
 }

@@ -130,7 +130,7 @@ func (r *Resolver) extractSSRBundles() (string, error) {
 		}
 
 		if err := os.WriteFile(filepath.Join(tempDir, entry.Name()), data, 0644); err != nil {
-			os.RemoveAll(tempDir)
+			_ = os.RemoveAll(tempDir)
 			return "", fmt.Errorf("failed to write SSR bundle %s: %w", entry.Name(), err)
 		}
 	}

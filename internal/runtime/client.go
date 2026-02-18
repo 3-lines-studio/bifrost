@@ -115,15 +115,15 @@ func (c *Client) Render(path string, props map[string]any) (types.RenderedPage, 
 		if len(result.Error.Errors) > 0 {
 			sb.WriteString("\n\nErrors:")
 			for i, err := range result.Error.Errors {
-				sb.WriteString(fmt.Sprintf("\n  %d. %s", i+1, err.Message))
+				fmt.Fprintf(&sb, "\n  %d. %s", i+1, err.Message)
 				if err.Stack != "" {
-					sb.WriteString(fmt.Sprintf("\n     Stack: %s", err.Stack))
+					fmt.Fprintf(&sb, "\n     Stack: %s", err.Stack)
 				}
 			}
 		}
 
 		if result.Error.Stack != "" {
-			sb.WriteString(fmt.Sprintf("\n\nStack:\n%s", result.Error.Stack))
+			fmt.Fprintf(&sb, "\n\nStack:\n%s", result.Error.Stack)
 		}
 
 		return types.RenderedPage{}, fmt.Errorf("%s", sb.String())
@@ -238,7 +238,7 @@ func (c *Client) postJSON(endpoint string, body interface{}, result interface{})
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return json.NewDecoder(resp.Body).Decode(result)
 }
