@@ -161,7 +161,7 @@ func TestHandlerClientOnlyDevMode(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		defer func() {
-			recover()
+			_ = recover()
 		}()
 
 		handler.ServeHTTP(rec, req)
@@ -189,7 +189,7 @@ func TestHandlerClientOnlyDevMode(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		defer func() {
-			recover()
+			_ = recover()
 		}()
 
 		handler.ServeHTTP(rec, req)

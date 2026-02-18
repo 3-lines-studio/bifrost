@@ -1,6 +1,7 @@
 test: ## Run all tests
 	go test ./...
 
-check: ## Run all checks (tests + build)
+check:
+	golangci-lint run
 	go test ./...
 	go build

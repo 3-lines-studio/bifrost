@@ -4,8 +4,20 @@ import (
 	"embed"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"testing"
 )
+
+func bunAvailable() bool {
+	_, err := exec.LookPath("bun")
+	return err == nil
+}
+
+func skipIfNoBun(t *testing.T) {
+	if !bunAvailable() {
+		t.Skip("bun not available, skipping integration test")
+	}
+}
 
 var testFS embed.FS
 
@@ -27,10 +39,11 @@ func (m *mockRedirectError) RedirectStatusCode() int {
 }
 
 func TestNewCreatesApp(t *testing.T) {
+	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
 	app := New(testFS)
-	defer app.Stop()
+	defer func() { _ = app.Stop() }()
 
 	if app == nil {
 		t.Error("New() returned nil app")

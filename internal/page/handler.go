@@ -207,7 +207,7 @@ func (h *Handler) serveStaticFile(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(data)
+		_, _ = w.Write(data)
 		return
 	}
 
@@ -353,7 +353,7 @@ func (h *Handler) renderClientOnlyDevShell(w http.ResponseWriter) {
 func serveHTML(w http.ResponseWriter, html string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(html))
+	_, _ = w.Write([]byte(html))
 }
 
 type errorData struct {
@@ -402,13 +402,13 @@ func (h *Handler) serveError(w http.ResponseWriter, err error) {
 	if err := ErrorTemplate.Execute(&buf, data); err != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("<!doctype html><html><body><pre>" + html.EscapeString(data.Message) + "</pre></body></html>"))
+		_, _ = w.Write([]byte("<!doctype html><html><body><pre>" + html.EscapeString(data.Message) + "</pre></body></html>"))
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusInternalServerError)
-	w.Write(buf.Bytes())
+	_, _ = w.Write(buf.Bytes())
 }
 
 func normalizePath(path string) string {
@@ -451,7 +451,7 @@ func (h *Handler) serveRouteFile(w http.ResponseWriter, req *http.Request, htmlP
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(data)
+		_, _ = w.Write(data)
 		return
 	}
 

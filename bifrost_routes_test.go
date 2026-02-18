@@ -7,10 +7,11 @@ import (
 )
 
 func TestAppWrapWithServeMux(t *testing.T) {
+	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
 	app := New(testFS, Page("/", "./example/components/hello.tsx"))
-	defer app.Stop()
+	defer func() { _ = app.Stop() }()
 
 	api := http.NewServeMux()
 
@@ -30,10 +31,11 @@ func TestAppWrapWithServeMux(t *testing.T) {
 }
 
 func TestAppHandlerNoRouter(t *testing.T) {
+	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
 	app := New(testFS, Page("/", "./test.tsx"))
-	defer app.Stop()
+	defer func() { _ = app.Stop() }()
 
 	handler := app.Handler()
 
@@ -63,8 +65,9 @@ func TestAppWrap(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			skipIfNoBun(t)
 			app := New(testFS, Page("/", "./test.tsx"))
-			defer app.Stop()
+			defer func() { _ = app.Stop() }()
 
 			api := http.NewServeMux()
 			handler := app.Wrap(api)
@@ -77,10 +80,11 @@ func TestAppWrap(t *testing.T) {
 }
 
 func TestAppWrapNilPanics(t *testing.T) {
+	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
 	app := New(testFS, Page("/", "./test.tsx"))
-	defer app.Stop()
+	defer func() { _ = app.Stop() }()
 
 	defer func() {
 		if r := recover(); r == nil {

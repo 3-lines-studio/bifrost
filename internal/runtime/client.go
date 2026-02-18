@@ -48,7 +48,7 @@ func NewClient() (*Client, error) {
 	}
 
 	if err := waitForSocket(socket, 5*time.Second); err != nil {
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		return nil, err
 	}
 
@@ -256,7 +256,7 @@ func NewClientFromExecutable(executablePath string, cleanup func()) (*Client, er
 	}
 
 	if err := waitForSocket(socket, 5*time.Second); err != nil {
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		return nil, err
 	}
 

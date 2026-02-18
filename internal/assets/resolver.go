@@ -186,7 +186,7 @@ func EmbeddedAssetHandler(assetsFS embed.FS) http.Handler {
 
 		contentType := GetContentType(path)
 		w.Header().Set("Content-Type", contentType)
-		w.Write(data)
+		_, _ = w.Write(data)
 	})
 }
 

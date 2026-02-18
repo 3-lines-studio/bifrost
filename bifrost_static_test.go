@@ -8,6 +8,7 @@ import (
 )
 
 func TestWithStaticData(t *testing.T) {
+	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
 	loader := func(ctx context.Context) ([]StaticPathData, error) {
@@ -27,7 +28,7 @@ func TestWithStaticData(t *testing.T) {
 	}
 
 	app := New(testFS, route)
-	defer app.Stop()
+	defer func() { _ = app.Stop() }()
 
 	config := app.pageConfigs["./blog.tsx"]
 	if config == nil {

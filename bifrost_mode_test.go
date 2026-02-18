@@ -120,12 +120,13 @@ func TestPageOptions(t *testing.T) {
 
 func TestPageModeTypes(t *testing.T) {
 	t.Run("SSR page has correct mode", func(t *testing.T) {
+		skipIfNoBun(t)
 		t.Setenv("BIFROST_DEV", "1")
 
 		app := New(testFS, Page("/test", "./test.tsx", WithLoader(func(*http.Request) (map[string]any, error) {
 			return map[string]any{}, nil
 		})))
-		defer app.Stop()
+		defer func() { _ = app.Stop() }()
 
 		config := app.pageConfigs["./test.tsx"]
 		if config == nil {
@@ -137,10 +138,11 @@ func TestPageModeTypes(t *testing.T) {
 	})
 
 	t.Run("Client page has correct mode", func(t *testing.T) {
+		skipIfNoBun(t)
 		t.Setenv("BIFROST_DEV", "1")
 
 		app := New(testFS, Page("/test", "./test.tsx", WithClient()))
-		defer app.Stop()
+		defer func() { _ = app.Stop() }()
 
 		config := app.pageConfigs["./test.tsx"]
 		if config == nil {
@@ -152,10 +154,11 @@ func TestPageModeTypes(t *testing.T) {
 	})
 
 	t.Run("Static page has correct mode", func(t *testing.T) {
+		skipIfNoBun(t)
 		t.Setenv("BIFROST_DEV", "1")
 
 		app := New(testFS, Page("/test", "./test.tsx", WithStatic()))
-		defer app.Stop()
+		defer func() { _ = app.Stop() }()
 
 		config := app.pageConfigs["./test.tsx"]
 		if config == nil {

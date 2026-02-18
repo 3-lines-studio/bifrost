@@ -24,6 +24,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
       - run: go vet ./...
       - run: go test ./... -race
       - run: go build ./...

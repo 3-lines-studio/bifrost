@@ -147,7 +147,7 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start bun: %w", err)
 	}
-	defer cmd.Process.Kill()
+	defer func() { _ = cmd.Process.Kill() }()
 
 	spinner := cli.NewSpinner("Waiting for renderer")
 	spinner.Start()
@@ -987,7 +987,7 @@ func writePrerenderedHTML(htmlPath, scriptSrc, cssHref string, chunks []string, 
 	}
 
 	var propsScript string
-	if props != nil && len(props) > 0 {
+	if len(props) > 0 {
 		propsJSON, err := json.Marshal(props)
 		if err == nil {
 			escapedProps := strings.ReplaceAll(string(propsJSON), "</", "<\\/")
