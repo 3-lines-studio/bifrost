@@ -387,6 +387,7 @@ func (e *Engine) BuildProject(mainFile string, originalCwd string) error {
 					if err := os.Remove(cssPath); err != nil {
 						cli.PrintWarning("Failed to remove CSS file %s: %v", cssPath, err)
 					}
+					cli.PrintStep("File removed %s", cssPath)
 				}
 			}
 		}
@@ -751,6 +752,13 @@ func generateManifest(outdir string, ssrDir string, componentPaths []string, mod
 
 			if css != "" {
 				css = dedupeCSSFile(outdir, css, cssFiles, cssHashToFile)
+			}
+
+			if css == "" && len(cssHashToFile) > 0 {
+				for _, sharedCSS := range cssHashToFile {
+					css = sharedCSS
+					break
+				}
 			}
 
 			mode := modes[entryName]
