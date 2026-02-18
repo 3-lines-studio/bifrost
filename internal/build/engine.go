@@ -753,6 +753,13 @@ func generateManifest(outdir string, ssrDir string, componentPaths []string, mod
 				css = dedupeCSSFile(outdir, css, cssFiles, cssHashToFile)
 			}
 
+			if css == "" && len(cssHashToFile) > 0 {
+				for _, sharedCSS := range cssHashToFile {
+					css = sharedCSS
+					break
+				}
+			}
+
 			mode := modes[entryName]
 			ssrPath := findSSRPath(ssrDir, entryName)
 
