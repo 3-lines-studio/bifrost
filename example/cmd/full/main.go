@@ -25,7 +25,7 @@ var posts = []Post{
 func main() {
 	app := bifrost.New(
 		example.BifrostFS,
-		bifrost.Page("/", "./pages/home.tsx", bifrost.WithLoader(func(*http.Request) (map[string]any, error) {
+		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(*http.Request) (map[string]any, error) {
 			return map[string]any{
 				"name": "World",
 			}, nil
@@ -36,7 +36,7 @@ func main() {
 				"name": "Nested",
 			}, nil
 		})),
-		bifrost.Page("/blog/*", "./pages/blog.tsx",
+		bifrost.Page("/blog/{slug...}", "./pages/blog.tsx",
 			bifrost.WithStaticData(func(ctx context.Context) ([]bifrost.StaticPathData, error) {
 				paths := make([]bifrost.StaticPathData, len(posts))
 				for i, post := range posts {

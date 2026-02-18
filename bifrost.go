@@ -83,6 +83,7 @@ func New(assetsFS embed.FS, routes ...Route) *App {
 		panic(fmt.Sprintf("failed to create bifrost renderer: %v", err))
 	}
 	app.renderer = r
+	app.manifest = r.manifest
 
 	for _, route := range routes {
 		config := types.PageConfig{

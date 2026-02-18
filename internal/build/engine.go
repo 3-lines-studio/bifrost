@@ -1087,7 +1087,10 @@ func runStaticExport(originalCwd string) (*StaticBuildExport, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	markerPath := ".bifrost/.export-mode"
+	markerPath := filepath.Join(".bifrost", ".export-mode")
+	if err := os.MkdirAll(".bifrost", 0755); err != nil {
+		return nil, fmt.Errorf("failed to create .bifrost directory: %w", err)
+	}
 	if err := os.WriteFile(markerPath, []byte("1"), 0644); err != nil {
 		return nil, fmt.Errorf("failed to create export marker: %w", err)
 	}

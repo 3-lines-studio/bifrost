@@ -38,7 +38,7 @@ func scanPages(filename string) ([]PageInfo, error) {
 		switch fn := callExpr.Fun.(type) {
 		case *ast.SelectorExpr:
 			funcName = fn.Sel.Name
-			argIndex = 0
+			argIndex = 1
 		case *ast.Ident:
 			funcName = fn.Name
 			argIndex = 1
@@ -114,6 +114,7 @@ func detectPageOptions(args []ast.Expr) (types.PageMode, bool) {
 		case "WithStatic":
 			hasStaticPrerender = true
 		case "WithStaticData":
+			hasStaticPrerender = true
 			hasStaticDataLoader = true
 		}
 	}
@@ -121,10 +122,6 @@ func detectPageOptions(args []ast.Expr) (types.PageMode, bool) {
 	if hasClientOnly && hasStaticPrerender {
 		slog.Warn("Both WithClient and WithStatic detected, defaulting to SSR")
 		return types.ModeSSR, hasStaticDataLoader
-	}
-
-	if hasStaticDataLoader && !hasStaticPrerender {
-		slog.Warn("WithStaticData requires WithStatic")
 	}
 
 	if hasStaticPrerender {
