@@ -269,7 +269,9 @@ func servePublicFromFS(w http.ResponseWriter, req *http.Request, path string) {
 		http.NotFound(w, req)
 		return
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	http.ServeContent(w, req, info.Name(), info.ModTime(), file)
 }
@@ -286,5 +288,5 @@ func servePublicFromEmbed(assetsFS embed.FS, w http.ResponseWriter, req *http.Re
 
 	contentType := GetContentType(path)
 	w.Header().Set("Content-Type", contentType)
-	w.Write(data)
+	_, _ = w.Write(data)
 }
