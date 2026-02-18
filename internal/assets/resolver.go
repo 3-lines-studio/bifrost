@@ -205,3 +205,86 @@ func ComponentImportPath(entryPath string, componentPath string) (string, error)
 
 	return "./" + rel, nil
 }
+
+func PublicHandler(assetsFS embed.FS, next http.Handler, isDev bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		path := strings.TrimPrefix(req.URL.Path, "/")
+		if path == "" {
+			next.ServeHTTP(w, req)
+			return
+		}
+
+		var exists bool
+		if isDev {
+			exists = PublicFileExistsInFS(path)
+		} else {
+			exists = PublicFileExistsInEmbed(assetsFS, path)
+		}
+
+		if !exists {
+			next.ServeHTTP(w, req)
+			return
+		}
+
+		if isDev {
+			servePublicFromFS(w, req, path)
+		} else {
+			servePublicFromEmbed(assetsFS, w, req, path)
+		}
+	})
+}
+
+func PublicFileExistsInFS(path string) bool {
+	fullPath := filepath.Join("public", path)
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
+}
+
+func PublicFileExistsInEmbed(assetsFS embed.FS, path string) bool {
+	embedPath := filepath.Join(".bifrost", "public", path)
+	embedPath = filepath.ToSlash(embedPath)
+	_, err := assetsFS.ReadFile(embedPath)
+	return err == nil
+}
+
+func servePublicFromFS(w http.ResponseWriter, req *http.Request, path string) {
+	fullPath := filepath.Join("public", path)
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		http.NotFound(w, req)
+		return
+	}
+
+	if info.IsDir() {
+		http.NotFound(w, req)
+		return
+	}
+
+	file, err := os.Open(fullPath)
+	if err != nil {
+		http.NotFound(w, req)
+		return
+	}
+	defer file.Close()
+
+	http.ServeContent(w, req, info.Name(), info.ModTime(), file)
+}
+
+func servePublicFromEmbed(assetsFS embed.FS, w http.ResponseWriter, req *http.Request, path string) {
+	embedPath := filepath.Join(".bifrost", "public", path)
+	embedPath = filepath.ToSlash(embedPath)
+
+	data, err := assetsFS.ReadFile(embedPath)
+	if err != nil {
+		http.NotFound(w, req)
+		return
+	}
+
+	contentType := GetContentType(path)
+	w.Header().Set("Content-Type", contentType)
+	w.Write(data)
+}

@@ -227,7 +227,7 @@ func (r *renderer) stop() error {
 func createAssetHandler(router router, app *App) http.Handler {
 	isDev := app.isDev
 
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	distHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := req.URL.Path
 
 		if len(path) >= 6 && path[:6] == "/dist/" {
@@ -241,4 +241,6 @@ func createAssetHandler(router router, app *App) http.Handler {
 
 		router.ServeHTTP(w, req)
 	})
+
+	return assets.PublicHandler(app.assetsFS, distHandler, isDev)
 }

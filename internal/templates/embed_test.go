@@ -271,6 +271,18 @@ func TestGetMinimalTemplate_DockerfileExists(t *testing.T) {
 	}
 }
 
+func TestGetMinimalTemplate_FaviconExists(t *testing.T) {
+	templateFS, err := GetTemplate("minimal")
+	if err != nil {
+		t.Fatalf("GetTemplate('minimal') error = %v", err)
+	}
+
+	_, err = fs.ReadFile(templateFS, "public/favicon.ico")
+	if err != nil {
+		t.Fatalf("minimal template should include public/favicon.ico: %v", err)
+	}
+}
+
 func TestGetSpaTemplate_DockerfileExists(t *testing.T) {
 	templateFS, err := GetTemplate("spa")
 	if err != nil {
@@ -280,5 +292,17 @@ func TestGetSpaTemplate_DockerfileExists(t *testing.T) {
 	_, err = fs.ReadFile(templateFS, "Dockerfile")
 	if err != nil {
 		t.Fatalf("spa template should include Dockerfile: %v", err)
+	}
+}
+
+func TestGetSpaTemplate_FaviconExists(t *testing.T) {
+	templateFS, err := GetTemplate("spa")
+	if err != nil {
+		t.Fatalf("GetTemplate('spa') error = %v", err)
+	}
+
+	_, err = fs.ReadFile(templateFS, "public/favicon.ico")
+	if err != nil {
+		t.Fatalf("spa template should include public/favicon.ico: %v", err)
 	}
 }

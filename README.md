@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/bifrost.png" alt="Bifrost logo" width="200">
+</p>
+
 # Bifrost
 
 Server-side rendering for React components in Go. Bridge your Go backend with React frontends.
