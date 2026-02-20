@@ -8,11 +8,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sync"
 
 	adaptersfs "github.com/3-lines-studio/bifrost/internal/adapters/fs"
 	adaptershttp "github.com/3-lines-studio/bifrost/internal/adapters/http"
-	"github.com/3-lines-studio/bifrost/internal/adapters/process"
 	"github.com/3-lines-studio/bifrost/internal/core"
 	"github.com/3-lines-studio/bifrost/internal/usecase"
 )
@@ -29,17 +27,9 @@ func detectMode() core.Mode {
 	return core.ModeProd
 }
 
-var (
-	exportModeOnce sync.Once
-	exportMode     bool
-)
-
 func isExportMode() bool {
-	exportModeOnce.Do(func() {
-		_, err := os.Stat(exportMarkerPath)
-		exportMode = err == nil
-	})
-	return exportMode
+	_, err := os.Stat(exportMarkerPath)
+	return err == nil
 }
 
 type RedirectError = core.RedirectError
@@ -52,6 +42,17 @@ type Route struct {
 	Pattern       string
 	ComponentPath string
 	Options       []PageOption
+}
+
+func buildPageConfig(route Route) core.PageConfig {
+	config := core.PageConfig{
+		ComponentPath: route.ComponentPath,
+		Mode:          core.ModeSSR,
+	}
+	for _, opt := range route.Options {
+		opt(&config)
+	}
+	return config
 }
 
 type App struct {
@@ -70,7 +71,6 @@ type router interface {
 
 func New(assetsFS embed.FS, routes ...Route) *App {
 	mode := detectMode()
-
 	app := &App{
 		assetsFS:    assetsFS,
 		isDev:       mode == core.ModeDev,
@@ -78,44 +78,17 @@ func New(assetsFS embed.FS, routes ...Route) *App {
 		pageConfigs: make(map[string]*core.PageConfig),
 	}
 
+	for _, route := range routes {
+		config := buildPageConfig(route)
+		app.pageConfigs[route.ComponentPath] = &config
+	}
+
 	if isExportMode() {
-		for _, route := range routes {
-			config := core.PageConfig{
-				ComponentPath: route.ComponentPath,
-				Mode:          core.ModeSSR,
-			}
-			for _, opt := range route.Options {
-				opt(&config)
-			}
-			app.pageConfigs[route.ComponentPath] = &config
-		}
 		return app
 	}
 
-	// Handle export mode
 	if mode == core.ModeExport {
-		// Initialize renderer for export (reads manifest from disk)
-		r, err := newRenderer(assetsFS, core.ModeExport)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Export failed: %v\n", err)
-			os.Exit(1)
-		}
-		app.renderer = r
-		app.manifest = r.manifest
-
-		// Run export
-		outputDir := os.Getenv("BIFROST_EXPORT_DIR")
-		if outputDir == "" {
-			outputDir = ".bifrost"
-		}
-
-		if err := app.ExportStaticPages(outputDir); err != nil {
-			fmt.Fprintf(os.Stderr, "Export failed: %v\n", err)
-			os.Exit(1)
-		}
-
-		app.Stop()
-		os.Exit(0)
+		app.runExportMode()
 	}
 
 	r, err := newRenderer(assetsFS, mode)
@@ -125,18 +98,30 @@ func New(assetsFS embed.FS, routes ...Route) *App {
 	app.renderer = r
 	app.manifest = r.manifest
 
-	for _, route := range routes {
-		config := core.PageConfig{
-			ComponentPath: route.ComponentPath,
-			Mode:          core.ModeSSR,
-		}
-		for _, opt := range route.Options {
-			opt(&config)
-		}
-		app.pageConfigs[route.ComponentPath] = &config
+	return app
+}
+
+func (a *App) runExportMode() {
+	r, err := newRenderer(a.assetsFS, core.ModeExport)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Export failed: %v\n", err)
+		os.Exit(1)
+	}
+	a.renderer = r
+	a.manifest = r.manifest
+
+	outputDir := os.Getenv("BIFROST_EXPORT_DIR")
+	if outputDir == "" {
+		outputDir = ".bifrost"
 	}
 
-	return app
+	if err := a.ExportStaticPages(outputDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Export failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	a.Stop()
+	os.Exit(0)
 }
 
 func (a *App) Wrap(api router) http.Handler {
@@ -153,36 +138,11 @@ func (a *App) Wrap(api router) http.Handler {
 	}
 
 	for _, route := range a.routes {
-		config := core.PageConfig{
-			ComponentPath: route.ComponentPath,
-			Mode:          core.ModeSSR,
-		}
-		for _, opt := range route.Options {
-			opt(&config)
-		}
+		config := buildPageConfig(route)
+		staticPath := a.getStaticPath(config)
 
 		fsAdapter := adaptersfs.NewEmbedFileSystem(a.assetsFS)
 		pageService := usecase.NewPageService(a.renderer.client, fsAdapter)
-
-		// Get static path from manifest based on page mode
-		staticPath := ""
-		if a.manifest != nil {
-			entryName := core.EntryNameForPath(config.ComponentPath)
-			if entry, ok := a.manifest.Entries[entryName]; ok {
-				switch config.Mode {
-				case core.ModeClientOnly:
-					// ClientOnly pages use pre-built HTML shell
-					staticPath = entry.HTML
-				default:
-					// SSR and StaticPrerender pages use SSR bundle
-					staticPath = entry.SSR
-					// In production, prepend the temp directory to get absolute path
-					if !a.isDev && a.renderer != nil && a.renderer.ssrTempDir != "" && staticPath != "" {
-						staticPath = filepath.Join(a.renderer.ssrTempDir, staticPath)
-					}
-				}
-			}
-		}
 
 		handler := adaptershttp.NewPageHandler(pageService, config, a.manifest, a.assetsFS, a.isDev, staticPath)
 		api.Handle(route.Pattern, handler)
@@ -193,6 +153,41 @@ func (a *App) Wrap(api router) http.Handler {
 
 func (a *App) Handler() http.Handler {
 	return a.Wrap(http.NewServeMux())
+}
+
+func (a *App) getStaticPath(config core.PageConfig) string {
+	if a.manifest == nil {
+		return ""
+	}
+	entryName := core.EntryNameForPath(config.ComponentPath)
+	entry, ok := a.manifest.Entries[entryName]
+	if !ok {
+		return ""
+	}
+
+	switch config.Mode {
+	case core.ModeClientOnly:
+		return entry.HTML
+	default:
+		if !a.isDev && a.renderer != nil && a.renderer.ssrTempDir != "" && entry.SSR != "" {
+			return filepath.Join(a.renderer.ssrTempDir, entry.SSR)
+		}
+		return entry.SSR
+	}
+}
+
+func (a *App) getSSBundlePath(entryName string) string {
+	if a.manifest == nil {
+		return ""
+	}
+	entry, ok := a.manifest.Entries[entryName]
+	if !ok || entry.SSR == "" {
+		return ""
+	}
+	if a.renderer != nil && a.renderer.ssrTempDir != "" {
+		return filepath.Join(a.renderer.ssrTempDir, entry.SSR)
+	}
+	return entry.SSR
 }
 
 func (a *App) Stop() error {
@@ -214,47 +209,19 @@ func (a *App) ExportStaticPages(outputDir string) error {
 		Entries: make(map[string]core.ManifestEntry),
 	}
 
-	// Process each route
 	for _, route := range a.routes {
-		config := core.PageConfig{
-			ComponentPath: route.ComponentPath,
-			Mode:          core.ModeSSR,
-		}
-		for _, opt := range route.Options {
-			opt(&config)
-		}
-
-		// Only process StaticPrerender pages
-		if config.Mode != core.ModeStaticPrerender {
-			continue
-		}
-
-		if config.StaticDataLoader == nil {
-			fmt.Printf("Warning: No StaticDataLoader for %s, skipping\n", route.Pattern)
+		config := buildPageConfig(route)
+		if config.Mode != core.ModeStaticPrerender || config.StaticDataLoader == nil {
 			continue
 		}
 
 		entryName := core.EntryNameForPath(config.ComponentPath)
-
-		// Get SSR bundle path from manifest
-		ssrBundlePath := ""
-		if a.manifest != nil {
-			if entry, ok := a.manifest.Entries[entryName]; ok {
-				ssrBundlePath = entry.SSR
-			}
-		}
-
+		ssrBundlePath := a.getSSBundlePath(entryName)
 		if ssrBundlePath == "" {
 			fmt.Printf("Warning: No SSR bundle for %s, skipping\n", route.Pattern)
 			continue
 		}
 
-		// Build full path to extracted SSR bundle
-		if a.renderer != nil && a.renderer.ssrTempDir != "" {
-			ssrBundlePath = filepath.Join(a.renderer.ssrTempDir, ssrBundlePath)
-		}
-
-		// Get all static paths
 		entries, err := config.StaticDataLoader(context.Background())
 		if err != nil {
 			fmt.Printf("Warning: Failed to load static data for %s: %v, skipping\n", route.Pattern, err)
@@ -268,22 +235,18 @@ func (a *App) ExportStaticPages(outputDir string) error {
 			StaticRoutes: make(map[string]string),
 		}
 
-		// Render each path
 		for _, entry := range entries {
 			fmt.Printf("Exporting %s...\n", entry.Path)
 
-			// Render page
 			page, err := a.renderer.client.Render(ssrBundlePath, entry.Props)
 			if err != nil {
 				fmt.Printf("Warning: Failed to render %s: %v, skipping\n", entry.Path, err)
 				continue
 			}
 
-			// Generate full HTML
 			html := renderFullHTML(page, entryName, entry.Props)
-
-			// Write to file
 			htmlPath := filepath.Join(pagesDir, entry.Path, "index.html")
+
 			if err := os.MkdirAll(filepath.Dir(htmlPath), 0755); err != nil {
 				fmt.Printf("Warning: Failed to create directory for %s: %v, skipping\n", entry.Path, err)
 				continue
@@ -294,7 +257,6 @@ func (a *App) ExportStaticPages(outputDir string) error {
 				continue
 			}
 
-			// Update manifest
 			normalizedPath := core.NormalizePath(entry.Path)
 			manifestEntry.StaticRoutes[normalizedPath] = "/pages/routes" + entry.Path + "/index.html"
 		}
@@ -367,165 +329,6 @@ func WithStatic() PageOption {
 
 func WithStaticData(loader core.StaticDataLoader) PageOption {
 	return core.WithStaticData(loader)
-}
-
-type renderer struct {
-	client     *process.Renderer
-	assetsFS   embed.FS
-	isDev      bool
-	manifest   *core.Manifest
-	ssrTempDir string
-	ssrCleanup func()
-}
-
-func copySSRBundlesFromDisk(exportDir string, manifest *core.Manifest) (string, func(), error) {
-	tempDir, err := os.MkdirTemp("", "bifrost-ssr-*")
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to create SSR temp dir: %w", err)
-	}
-
-	for entryName, entry := range manifest.Entries {
-		if entry.SSR == "" {
-			continue
-		}
-
-		srcPath := filepath.Join(exportDir, entry.SSR)
-
-		data, err := os.ReadFile(srcPath)
-		if err != nil {
-			os.RemoveAll(tempDir)
-			return "", nil, fmt.Errorf("failed to read SSR bundle %s: %w", srcPath, err)
-		}
-
-		destPath := filepath.Join(tempDir, entry.SSR)
-		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-			os.RemoveAll(tempDir)
-			return "", nil, fmt.Errorf("failed to create SSR dest dir: %w", err)
-		}
-
-		if err := os.WriteFile(destPath, data, 0644); err != nil {
-			os.RemoveAll(tempDir)
-			return "", nil, fmt.Errorf("failed to write SSR bundle %s: %w", entryName, err)
-		}
-	}
-
-	cleanup := func() {
-		os.RemoveAll(tempDir)
-	}
-
-	return tempDir, cleanup, nil
-}
-
-func newRenderer(assetsFS embed.FS, mode core.Mode) (*renderer, error) {
-	r := &renderer{
-		isDev:    mode == core.ModeDev,
-		assetsFS: assetsFS,
-	}
-
-	if mode == core.ModeExport {
-		exportDir := os.Getenv("BIFROST_EXPORT_DIR")
-		if exportDir == "" {
-			exportDir = ".bifrost"
-		}
-
-		manifestPath := filepath.Join(exportDir, "manifest.json")
-		data, err := os.ReadFile(manifestPath)
-		if err != nil {
-			return nil, fmt.Errorf("manifest.json not found at %s: %w", manifestPath, err)
-		}
-
-		man, err := core.ParseManifest(data)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse manifest: %w", err)
-		}
-		r.manifest = man
-
-		needsRuntime := core.HasSSREntries(man)
-
-		if needsRuntime {
-			ssrTempDir, ssrCleanup, err := copySSRBundlesFromDisk(exportDir, man)
-			if err != nil {
-				return nil, fmt.Errorf("failed to copy SSR bundles: %w", err)
-			}
-			r.ssrTempDir = ssrTempDir
-			r.ssrCleanup = ssrCleanup
-
-			client, err := process.NewRenderer(core.ModeProd)
-			if err != nil {
-				ssrCleanup()
-				return nil, fmt.Errorf("failed to start bun runtime: %w", err)
-			}
-			r.client = client
-		}
-
-		return r, nil
-	}
-
-	if mode == core.ModeProd {
-		if assetsFS == (embed.FS{}) {
-			return nil, fmt.Errorf("embed.FS is required in production mode")
-		}
-
-		data, err := assetsFS.ReadFile(".bifrost/manifest.json")
-		if err != nil {
-			return nil, fmt.Errorf("manifest.json not found in embedded assets: %w", err)
-		}
-
-		man, err := core.ParseManifest(data)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse manifest: %w", err)
-		}
-		r.manifest = man
-
-		needsRuntime := core.HasSSREntries(man)
-
-		if needsRuntime {
-			if !process.HasEmbeddedRuntime(assetsFS) {
-				return nil, fmt.Errorf("embedded runtime not found: run 'bifrost-build' to generate production assets")
-			}
-
-			ssrTempDir, ssrCleanup, err := process.ExtractSSRBundles(assetsFS, man)
-			if err != nil {
-				return nil, fmt.Errorf("failed to extract SSR bundles: %w", err)
-			}
-			r.ssrTempDir = ssrTempDir
-			r.ssrCleanup = ssrCleanup
-
-			executablePath, cleanup, err := process.ExtractEmbeddedRuntime(assetsFS)
-			if err != nil {
-				ssrCleanup()
-				return nil, fmt.Errorf("failed to extract embedded runtime: %w", err)
-			}
-
-			combinedCleanup := func() {
-				cleanup()
-				ssrCleanup()
-			}
-
-			client, err := process.NewRendererFromExecutable(executablePath, combinedCleanup)
-			if err != nil {
-				cleanup()
-				ssrCleanup()
-				return nil, fmt.Errorf("failed to start embedded runtime: %w", err)
-			}
-			r.client = client
-		}
-	} else {
-		client, err := process.NewRenderer(mode)
-		if err != nil {
-			return nil, err
-		}
-		r.client = client
-	}
-
-	return r, nil
-}
-
-func (r *renderer) stop() error {
-	if r.client != nil {
-		return r.client.Stop()
-	}
-	return nil
 }
 
 func createAssetHandler(router router, app *App) http.Handler {
