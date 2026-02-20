@@ -2,6 +2,7 @@ package fs
 
 import (
 	"embed"
+	"errors"
 	iofs "io/fs"
 )
 
@@ -26,6 +27,14 @@ func (fs *EmbedFileSystem) FileExists(path string) bool {
 	return err == nil
 }
 
-func (fs *EmbedFileSystem) Sub(dir string) (iofs.FS, error) {
-	return iofs.Sub(fs.fs, dir)
+func (fs *EmbedFileSystem) WriteFile(path string, data []byte, perm iofs.FileMode) error {
+	return errors.New("embed filesystem is read-only")
+}
+
+func (fs *EmbedFileSystem) MkdirAll(path string, perm iofs.FileMode) error {
+	return errors.New("embed filesystem is read-only")
+}
+
+func (fs *EmbedFileSystem) Remove(path string) error {
+	return errors.New("embed filesystem is read-only")
 }

@@ -35,8 +35,8 @@ func main() {
 		output.PrintHeader("Bifrost Build")
 		output.PrintError("Missing main.go file argument")
 		fmt.Println()
-		output.PrintStep(cli.EmojiInfo, "Usage: bifrost-build <main.go>")
-		output.PrintStep(cli.EmojiInfo, "Example: bifrost-build ./main.go")
+		output.PrintStep("", "Usage: bifrost-build <main.go>")
+		output.PrintStep("", "Example: bifrost-build ./main.go")
 		os.Exit(1)
 	}
 
@@ -61,7 +61,7 @@ func main() {
 	fsAdapter := fs.NewOSFileSystem()
 	output := cli.NewOutput()
 
-	runtime, err := process.NewBunRuntime(core.ModeDev)
+	runtime, err := process.NewRenderer(core.ModeDev)
 	if err != nil {
 		output.PrintHeader("Bifrost Build")
 		output.PrintError("Failed to initialize build engine: %v", err)
@@ -69,7 +69,7 @@ func main() {
 	}
 	defer func() { _ = runtime.Stop() }()
 
-	buildService := usecase.NewBuildService(runtime, fsAdapter, fsAdapter, output)
+	buildService := usecase.NewBuildService(runtime, fsAdapter, output)
 
 	input := usecase.BuildInput{
 		MainFile:    mainFileAbs,

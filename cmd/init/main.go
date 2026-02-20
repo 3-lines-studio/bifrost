@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/3-lines-studio/bifrost/internal/adapters"
 	"github.com/3-lines-studio/bifrost/internal/adapters/cli"
 	"github.com/3-lines-studio/bifrost/internal/adapters/fs"
 	"github.com/3-lines-studio/bifrost/internal/core"
@@ -63,9 +62,8 @@ func main() {
 
 	fsAdapter := fs.NewOSFileSystem()
 	output := cli.NewOutput()
-	templateAdapter := adapters.NewTemplateSource()
 
-	initService := usecase.NewInitService(fsAdapter, fsAdapter, templateAdapter, output)
+	initService := usecase.NewInitService(fsAdapter, output)
 
 	input := usecase.InitInput{
 		ProjectDir: absProjectDir,
@@ -80,7 +78,7 @@ func main() {
 	}
 
 	fmt.Println()
-	output.PrintStep(cli.EmojiInfo, "Next steps:")
+	output.PrintStep("", "Next steps:")
 	fmt.Println()
 	fmt.Printf("  # Install air\n")
 	fmt.Printf("  go install github.com/air-verse/air@latest\n")

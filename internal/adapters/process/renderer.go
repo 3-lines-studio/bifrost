@@ -17,20 +17,22 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-//go:embed bun_renderer_dev.ts
-var BunRendererDevSource string
+var (
+	//go:embed bun_renderer_dev.ts
+	BunRendererDevSource string
 
-//go:embed bun_renderer_prod.ts
-var BunRendererProdSource string
+	//go:embed bun_renderer_prod.ts
+	BunRendererProdSource string
+)
 
-type BunRuntime struct {
+type Renderer struct {
 	cmd     *exec.Cmd
 	socket  string
 	client  *http.Client
 	cleanup func()
 }
 
-func NewBunRuntime(mode core.Mode) (*BunRuntime, error) {
+func NewRenderer(mode core.Mode) (*Renderer, error) {
 	socket := filepath.Join(os.TempDir(), fmt.Sprintf("bifrost-%d.sock", os.Getpid()))
 
 	cwd, err := os.Getwd()
@@ -65,14 +67,14 @@ func NewBunRuntime(mode core.Mode) (*BunRuntime, error) {
 		},
 	}
 
-	return &BunRuntime{
+	return &Renderer{
 		cmd:    cmd,
 		socket: socket,
 		client: &http.Client{Transport: transport},
 	}, nil
 }
 
-func NewBunRuntimeFromExecutable(executablePath string, cleanup func()) (*BunRuntime, error) {
+func NewRendererFromExecutable(executablePath string, cleanup func()) (*Renderer, error) {
 	socket := filepath.Join(os.TempDir(), fmt.Sprintf("bifrost-%d.sock", os.Getpid()))
 
 	cmd := exec.Command(executablePath)
@@ -95,7 +97,7 @@ func NewBunRuntimeFromExecutable(executablePath string, cleanup func()) (*BunRun
 		},
 	}
 
-	return &BunRuntime{
+	return &Renderer{
 		cmd:     cmd,
 		socket:  socket,
 		client:  &http.Client{Transport: transport},
@@ -103,7 +105,7 @@ func NewBunRuntimeFromExecutable(executablePath string, cleanup func()) (*BunRun
 	}, nil
 }
 
-func (r *BunRuntime) Stop() error {
+func (r *Renderer) Stop() error {
 	err := r.cmd.Process.Kill()
 	if r.cleanup != nil {
 		r.cleanup()
@@ -111,7 +113,7 @@ func (r *BunRuntime) Stop() error {
 	return err
 }
 
-func (r *BunRuntime) Render(path string, props map[string]any) (core.RenderedPage, error) {
+func (r *Renderer) Render(path string, props map[string]any) (core.RenderedPage, error) {
 	reqBody := map[string]any{
 		"path":  path,
 		"props": props,
@@ -161,7 +163,7 @@ func (r *BunRuntime) Render(path string, props map[string]any) (core.RenderedPag
 	}, nil
 }
 
-func (r *BunRuntime) Build(entrypoints []string, outdir string, entryNames []string) error {
+func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []string) error {
 	if len(entrypoints) == 0 {
 		return fmt.Errorf("missing entrypoints")
 	}
@@ -220,7 +222,7 @@ func (r *BunRuntime) Build(entrypoints []string, outdir string, entryNames []str
 	return nil
 }
 
-func (r *BunRuntime) BuildSSR(entrypoints []string, outdir string) error {
+func (r *Renderer) BuildSSR(entrypoints []string, outdir string) error {
 	if len(entrypoints) == 0 {
 		return fmt.Errorf("missing entrypoints")
 	}
@@ -279,7 +281,7 @@ func (r *BunRuntime) BuildSSR(entrypoints []string, outdir string) error {
 	return nil
 }
 
-func (r *BunRuntime) postJSON(endpoint string, body interface{}, result interface{}) error {
+func (r *Renderer) postJSON(endpoint string, body interface{}, result interface{}) error {
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		return err

@@ -39,10 +39,10 @@ type ServePageOutput struct {
 
 type PageService struct {
 	renderer Renderer
-	fs       FileReader
+	fs       FileSystem
 }
 
-func NewPageService(renderer Renderer, fs FileReader) *PageService {
+func NewPageService(renderer Renderer, fs FileSystem) *PageService {
 	return &PageService{
 		renderer: renderer,
 		fs:       fs,
@@ -130,15 +130,15 @@ func (s *PageService) ServePage(ctx context.Context, input ServePageInput) Serve
 }
 
 func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error) {
-	scriptSrc, cssHref, chunks, _, _ := core.GetAssets(input.Manifest, input.EntryName)
+	assets := core.GetAssets(input.Manifest, input.EntryName)
 
 	return core.RenderHTMLShell(
 		"",
 		map[string]any{},
-		scriptSrc,
+		assets.Script,
 		"",
-		cssHref,
-		chunks,
+		assets.CSS,
+		assets.Chunks,
 	)
 }
 
@@ -239,12 +239,7 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 
 	renderPath := input.Config.ComponentPath
 	if !input.IsDev {
-		renderPathInput := core.RenderPathInput{
-			IsDev:         input.IsDev,
-			SSRPath:       input.StaticPath,
-			ComponentPath: input.Config.ComponentPath,
-		}
-		renderPath, _ = core.ResolveRenderPath(renderPathInput)
+		renderPath = core.ResolveRenderPath(input.IsDev, input.StaticPath, input.Config.ComponentPath)
 	}
 
 	page, err := s.renderer.Render(renderPath, props)
@@ -265,15 +260,15 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 }
 
 func (s *PageService) renderPageHTML(input ServePageInput, props map[string]any, page core.RenderedPage) (string, error) {
-	scriptSrc, cssHref, chunks, _, _ := core.GetAssets(input.Manifest, input.EntryName)
+	assets := core.GetAssets(input.Manifest, input.EntryName)
 
 	return core.RenderHTMLShell(
 		page.Body,
 		props,
-		scriptSrc,
+		assets.Script,
 		page.Head,
-		cssHref,
-		chunks,
+		assets.CSS,
+		assets.Chunks,
 	)
 }
 

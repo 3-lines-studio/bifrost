@@ -370,7 +370,7 @@ func WithStaticData(loader core.StaticDataLoader) PageOption {
 }
 
 type renderer struct {
-	client     *process.BunRuntime
+	client     *process.Renderer
 	assetsFS   embed.FS
 	isDev      bool
 	manifest   *core.Manifest
@@ -450,7 +450,7 @@ func newRenderer(assetsFS embed.FS, mode core.Mode) (*renderer, error) {
 			r.ssrTempDir = ssrTempDir
 			r.ssrCleanup = ssrCleanup
 
-			client, err := process.NewBunRuntime(core.ModeProd)
+			client, err := process.NewRenderer(core.ModeProd)
 			if err != nil {
 				ssrCleanup()
 				return nil, fmt.Errorf("failed to start bun runtime: %w", err)
@@ -502,7 +502,7 @@ func newRenderer(assetsFS embed.FS, mode core.Mode) (*renderer, error) {
 				ssrCleanup()
 			}
 
-			client, err := process.NewBunRuntimeFromExecutable(executablePath, combinedCleanup)
+			client, err := process.NewRendererFromExecutable(executablePath, combinedCleanup)
 			if err != nil {
 				cleanup()
 				ssrCleanup()
@@ -511,7 +511,7 @@ func newRenderer(assetsFS embed.FS, mode core.Mode) (*renderer, error) {
 			r.client = client
 		}
 	} else {
-		client, err := process.NewBunRuntime(mode)
+		client, err := process.NewRenderer(mode)
 		if err != nil {
 			return nil, err
 		}

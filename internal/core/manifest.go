@@ -28,12 +28,32 @@ func ParseManifest(data []byte) (*Manifest, error) {
 	return &m, nil
 }
 
-func GetAssets(man *Manifest, entryName string) (scriptSrc, cssHref string, chunks []string, isStatic bool, ssrPath string) {
+type Assets struct {
+	Script   string
+	CSS      string
+	Chunks   []string
+	IsStatic bool
+	SSRPath  string
+}
+
+func GetAssets(man *Manifest, entryName string) Assets {
 	if man != nil && man.Entries[entryName].Script != "" {
 		entry := man.Entries[entryName]
-		return entry.Script, entry.CSS, entry.Chunks, entry.Static, entry.SSR
+		return Assets{
+			Script:   entry.Script,
+			CSS:      entry.CSS,
+			Chunks:   entry.Chunks,
+			IsStatic: entry.Static,
+			SSRPath:  entry.SSR,
+		}
 	}
-	return "/dist/" + entryName + ".js", "/dist/" + entryName + ".css", nil, false, ""
+	return Assets{
+		Script:   "/dist/" + entryName + ".js",
+		CSS:      "/dist/" + entryName + ".css",
+		Chunks:   nil,
+		IsStatic: false,
+		SSRPath:  "",
+	}
 }
 
 func HasSSREntries(man *Manifest) bool {

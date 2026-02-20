@@ -53,21 +53,17 @@ func HasEmbeddedRuntime(assetsFS embed.FS) bool {
 	return err == nil
 }
 
-// ExtractSSRBundles extracts all SSR bundles from embedded FS to a temp directory
 func ExtractSSRBundles(assetsFS embed.FS, manifest *core.Manifest) (string, func(), error) {
 	tempDir, err := os.MkdirTemp("", "bifrost-ssr-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create SSR temp dir: %w", err)
 	}
 
-	// Extract each SSR bundle
 	for entryName, entry := range manifest.Entries {
 		if entry.SSR == "" {
 			continue
 		}
 
-		// SSR path in manifest is like "/ssr/pages-home-entry-ssr.js"
-		// Convert to embedded path: ".bifrost/ssr/pages-home-entry-ssr.js"
 		embedPath := ".bifrost" + entry.SSR
 
 		data, err := assetsFS.ReadFile(embedPath)
@@ -76,7 +72,6 @@ func ExtractSSRBundles(assetsFS embed.FS, manifest *core.Manifest) (string, func
 			return "", nil, fmt.Errorf("failed to read SSR bundle %s: %w", embedPath, err)
 		}
 
-		// Write to temp directory maintaining structure
 		destPath := filepath.Join(tempDir, entry.SSR)
 		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 			os.RemoveAll(tempDir)

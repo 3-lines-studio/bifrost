@@ -30,33 +30,14 @@ type PageDecision struct {
 }
 
 func DecidePageAction(req PageRequest, entry *ManifestEntry) PageDecision {
+	// Production mode: serve static files when available
 	if !req.IsDev {
-		switch req.Mode {
-		case ModeClientOnly:
-			// Check for HTML field in manifest first (new build system)
-			if entry != nil && entry.HTML != "" {
-				return PageDecision{Action: ActionServeStaticFile, StaticPath: entry.HTML}
-			}
-			// Fall back to StaticPath (backward compatibility)
-			if req.StaticPath != "" {
-				return PageDecision{Action: ActionServeStaticFile, StaticPath: req.StaticPath}
-			}
-		case ModeStaticPrerender:
-			if req.HasManifest && entry != nil && entry.StaticRoutes != nil {
-				normalizedPath := NormalizePath(req.RequestPath)
-				if htmlPath, ok := entry.StaticRoutes[normalizedPath]; ok {
-					return PageDecision{Action: ActionServeRouteFile, HTMLPath: htmlPath}
-				}
-				return PageDecision{Action: ActionNotFound}
-			}
-			if req.StaticPath != "" {
-				return PageDecision{Action: ActionServeStaticFile, StaticPath: req.StaticPath}
-			}
-		}
+		return decideProductionAction(req, entry)
 	}
 
-	needsSetup := (!req.HasManifest || req.IsDev) && (req.Mode != ModeClientOnly && req.Mode != ModeStaticPrerender)
-	if (req.Mode == ModeClientOnly || req.Mode == ModeStaticPrerender) && req.IsDev && req.HasRenderer {
+	// Development mode: check if setup is needed
+	needsSetup := req.Mode != ModeClientOnly && req.Mode != ModeStaticPrerender
+	if (req.Mode == ModeClientOnly || req.Mode == ModeStaticPrerender) && req.HasRenderer {
 		needsSetup = true
 	}
 
@@ -64,41 +45,61 @@ func DecidePageAction(req PageRequest, entry *ManifestEntry) PageDecision {
 		return PageDecision{Action: ActionNeedsSetup, NeedsSetup: true}
 	}
 
-	if req.IsDev && req.Mode == ModeClientOnly {
+	// Dev mode: render based on page type
+	switch req.Mode {
+	case ModeClientOnly:
 		return PageDecision{Action: ActionRenderClientOnlyShell}
-	}
-
-	if req.IsDev && req.Mode == ModeStaticPrerender {
+	case ModeStaticPrerender:
 		return PageDecision{Action: ActionRenderStaticPrerender}
+	default:
+		return PageDecision{Action: ActionRenderSSR}
 	}
-
-	return PageDecision{Action: ActionRenderSSR}
 }
 
-type RenderPathInput struct {
-	IsDev         bool
-	SSRPath       string
-	ComponentPath string
+func decideProductionAction(req PageRequest, entry *ManifestEntry) PageDecision {
+	normalizedPath := NormalizePath(req.RequestPath)
+
+	switch req.Mode {
+	case ModeClientOnly:
+		return decideClientOnlyAction(req, entry)
+	case ModeStaticPrerender:
+		return decideStaticPrerenderAction(req, entry, normalizedPath)
+	default:
+		return PageDecision{Action: ActionRenderSSR}
+	}
 }
 
-func ResolveRenderPath(input RenderPathInput) (string, error) {
-	if input.IsDev {
-		return input.ComponentPath, nil
+func decideClientOnlyAction(req PageRequest, entry *ManifestEntry) PageDecision {
+	if entry != nil && entry.HTML != "" {
+		return PageDecision{Action: ActionServeStaticFile, StaticPath: entry.HTML}
 	}
-
-	if input.SSRPath == "" {
-		return "", nil
+	if req.StaticPath != "" {
+		return PageDecision{Action: ActionServeStaticFile, StaticPath: req.StaticPath}
 	}
-
-	return input.SSRPath, nil
+	return PageDecision{Action: ActionNotFound}
 }
 
-func ShouldTriggerSetup(manifest *Manifest, isDev bool, mode PageMode, hasRenderer bool) bool {
-	needsSetup := (manifest == nil || isDev) && (mode != ModeClientOnly && mode != ModeStaticPrerender)
-	if (mode == ModeClientOnly || mode == ModeStaticPrerender) && isDev && hasRenderer {
-		needsSetup = true
+func decideStaticPrerenderAction(req PageRequest, entry *ManifestEntry, normalizedPath string) PageDecision {
+	if req.HasManifest && entry != nil && entry.StaticRoutes != nil {
+		if htmlPath, ok := entry.StaticRoutes[normalizedPath]; ok {
+			return PageDecision{Action: ActionServeRouteFile, HTMLPath: htmlPath}
+		}
+		return PageDecision{Action: ActionNotFound}
 	}
-	return needsSetup
+	if req.StaticPath != "" {
+		return PageDecision{Action: ActionServeStaticFile, StaticPath: req.StaticPath}
+	}
+	return PageDecision{Action: ActionRenderStaticPrerender}
+}
+
+func ResolveRenderPath(isDev bool, ssrPath string, componentPath string) string {
+	if isDev {
+		return componentPath
+	}
+	if ssrPath == "" {
+		return ""
+	}
+	return ssrPath
 }
 
 func MatchStaticRoute(manifest *Manifest, entryName string, requestPath string) (htmlPath string, found bool) {

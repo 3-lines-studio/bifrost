@@ -65,3 +65,16 @@ type RenderedPage struct {
 	Body string
 	Head string
 }
+
+type Mode int
+
+const (
+	ModeDev Mode = iota
+	ModeProd
+	ModeExport
+)
+
+type Renderer interface {
+	Render(componentPath string, props map[string]any) (RenderedPage, error)
+	Build(entrypoints []string, outdir string) error
+}

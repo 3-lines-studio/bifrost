@@ -38,16 +38,14 @@ type BuildOutput struct {
 
 type BuildService struct {
 	renderer Renderer
-	fs       FileReader
-	fw       FileWriter
+	fs       FileSystem
 	cli      CLIOutput
 }
 
-func NewBuildService(renderer Renderer, fs FileReader, fw FileWriter, cli CLIOutput) *BuildService {
+func NewBuildService(renderer Renderer, fs FileSystem, cli CLIOutput) *BuildService {
 	return &BuildService{
 		renderer: renderer,
 		fs:       fs,
-		fw:       fw,
 		cli:      cli,
 	}
 }
@@ -481,83 +479,6 @@ func (s *BuildService) writeClientOnlyHTML(htmlPath, entryName, title string) er
 	return os.WriteFile(htmlPath, []byte(html), 0644)
 }
 
-func (s *BuildService) buildStaticPrerenderPages(ctx context.Context, originalCwd string, config core.PageConfig, entryName, pagesDir string, manifest *core.Manifest) error {
-	if config.StaticDataLoader == nil {
-		return fmt.Errorf("no StaticDataLoader configured")
-	}
-
-	// Get all static paths and props
-	entries, err := config.StaticDataLoader(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to load static data: %w", err)
-	}
-
-	// Initialize StaticRoutes in manifest
-	manifestEntry := manifest.Entries[entryName]
-	manifestEntry.StaticRoutes = make(map[string]string)
-
-	// Build SSR bundle for StaticPrerender pages
-	entriesDir := filepath.Join(originalCwd, ".bifrost", "entries")
-	ssrDir := filepath.Join(originalCwd, ".bifrost", "ssr")
-	ssrEntryName := entryName + "-ssr"
-	ssrEntryPath := filepath.Join(entriesDir, ssrEntryName+".tsx")
-
-	// Calculate import path
-	absComponentPath := filepath.Join(originalCwd, config.ComponentPath)
-	importPath, err := s.calculateImportPath(ssrEntryPath, absComponentPath)
-	if err != nil {
-		return fmt.Errorf("failed to calculate import path: %w", err)
-	}
-
-	// Write SSR entry
-	if err := s.writeSSREntry(ssrEntryPath, importPath); err != nil {
-		return fmt.Errorf("failed to write SSR entry: %w", err)
-	}
-	defer os.Remove(ssrEntryPath)
-
-	// Build SSR bundle
-	s.cli.PrintStep("🔨", "Building SSR bundle for %s...", entryName)
-	entrypoints := []string{ssrEntryPath}
-	if err := s.renderer.BuildSSR(entrypoints, ssrDir); err != nil {
-		return fmt.Errorf("failed to build SSR bundle: %w", err)
-	}
-
-	ssrBundlePath := filepath.Join(ssrDir, ssrEntryName+".js")
-
-	// Render each static path
-	for _, entry := range entries {
-		s.cli.PrintStep("📄", "Rendering %s...", entry.Path)
-
-		// Render the page
-		renderedPage, err := s.renderer.Render(ssrBundlePath, entry.Props)
-		if err != nil {
-			s.cli.PrintWarning("Failed to render %s: %v", entry.Path, err)
-			continue
-		}
-
-		// Generate full HTML
-		html := s.renderFullHTML(renderedPage, entryName, entry.Props)
-
-		// Write to file
-		htmlPath := filepath.Join(pagesDir, "routes", entry.Path, "index.html")
-		if err := os.MkdirAll(filepath.Dir(htmlPath), 0755); err != nil {
-			s.cli.PrintWarning("Failed to create directory for %s: %v", entry.Path, err)
-			continue
-		}
-		if err := os.WriteFile(htmlPath, []byte(html), 0644); err != nil {
-			s.cli.PrintWarning("Failed to write HTML for %s: %v", entry.Path, err)
-			continue
-		}
-
-		// Update manifest
-		normalizedPath := core.NormalizePath(entry.Path)
-		manifestEntry.StaticRoutes[normalizedPath] = "/pages/routes" + entry.Path + "/index.html"
-	}
-
-	manifest.Entries[entryName] = manifestEntry
-	return nil
-}
-
 func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *core.Manifest, mainFile string) error {
 	s.cli.PrintStep("📤", "Running export mode to generate static pages...")
 
@@ -622,38 +543,6 @@ func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *c
 	os.Remove(exportManifestPath)
 
 	return nil
-}
-
-func (s *BuildService) renderFullHTML(page core.RenderedPage, entryName string, props map[string]any) string {
-	// Build props JSON
-	propsJSON := "{}"
-	if len(props) > 0 {
-		data, _ := json.Marshal(props)
-		propsJSON = string(data)
-	}
-
-	// Generate HTML shell with rendered content
-	html := fmt.Sprintf(`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />%s
-    <link rel="stylesheet" href="/dist/%s.css" />
-  </head>
-  <body>
-    <div id="app">%s</div>
-    <script id="__BIFROST_PROPS__" type="application/json">%s</script>
-    <script src="/dist/%s.js" type="module" defer></script>
-  </body>
-</html>`,
-		page.Head,
-		entryName,
-		page.Body,
-		propsJSON,
-		entryName,
-	)
-
-	return html
 }
 
 func (s *BuildService) writeSSREntry(entryPath, importPath string) error {

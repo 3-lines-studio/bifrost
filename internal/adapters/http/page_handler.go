@@ -5,7 +5,6 @@ import (
 	"embed"
 	"fmt"
 	"html"
-	"html/template"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -130,13 +129,13 @@ func (h *PageHandler) serveHTML(w http.ResponseWriter, html string) {
 }
 
 func (h *PageHandler) serveError(w http.ResponseWriter, err error) {
-	data := errorData{
+	data := core.ErrorData{
 		Message: err.Error(),
 		IsDev:   h.isDev,
 	}
 
 	var buf bytes.Buffer
-	if err := errorTemplate.Execute(&buf, data); err != nil {
+	if err := core.ErrorTemplate.Execute(&buf, data); err != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("<!doctype html><html><body><pre>" + html.EscapeString(data.Message) + "</pre></body></html>"))
@@ -147,30 +146,3 @@ func (h *PageHandler) serveError(w http.ResponseWriter, err error) {
 	w.WriteHeader(http.StatusInternalServerError)
 	_, _ = w.Write(buf.Bytes())
 }
-
-type errorData struct {
-	Message string
-	IsDev   bool
-}
-
-var errorTemplate = template.Must(template.New("error").Parse(`<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Error</title>
-    <style>
-        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 50px auto; padding: 0 20px; }
-        h1 { color: #e74c3c; }
-        pre { background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto; }
-    </style>
-</head>
-<body>
-    <h1>Internal Server Error</h1>
-    {{if .IsDev}}
-    <pre>{{.Message}}</pre>
-    {{else}}
-    <p>An error occurred while processing your request.</p>
-    {{end}}
-</body>
-</html>`))

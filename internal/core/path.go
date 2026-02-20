@@ -16,16 +16,6 @@ func NormalizePath(path string) string {
 	return path
 }
 
-func NormalizeRoutePath(path string) string {
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	if path != "/" && strings.HasSuffix(path, "/") {
-		path = strings.TrimSuffix(path, "/")
-	}
-	return path
-}
-
 func ValidateRoutePath(path string) error {
 	if path == "" {
 		return fmt.Errorf("path cannot be empty")
