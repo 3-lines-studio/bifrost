@@ -69,5 +69,7 @@ func main() {
 	)
 	defer app.Stop()
 
+	fmt.Println("started dev @ http://localhost:3000")
+	fmt.Println("started server @ http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", app.Handler()))
 }

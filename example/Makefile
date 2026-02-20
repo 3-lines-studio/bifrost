@@ -2,7 +2,7 @@ doctor:
 	go run ../cmd/doctor .
 
 dev:
-	BIFROST_DEV=1 air -c .air.toml --build.cmd "go build -o ./tmp/main ./cmd/full/main.go"
+	@BIFROST_DEV=1 air -c .air.toml --build.cmd "go build -o ./tmp/main ./cmd/full/main.go"
 
 build:
 	rm -rf .bifrost/*

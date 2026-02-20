@@ -19,6 +19,10 @@ type CLIOutput interface {
 	PrintError(msg string, args ...any)
 	PrintFile(path string)
 	PrintDone(msg string)
+	Green(text string) string
+	Yellow(text string) string
+	Red(text string) string
+	Gray(text string) string
 }
 
 type FileSystem = fs.FileSystem

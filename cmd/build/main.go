@@ -83,5 +83,4 @@ func main() {
 		os.Exit(1)
 	}
 
-	output.PrintDone("Build completed successfully")
 }
