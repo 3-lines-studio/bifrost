@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/3-lines-studio/bifrost/internal/types"
+	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
 func TestAbsoluteAssetURLsInHTML(t *testing.T) {
@@ -58,7 +58,7 @@ func TestDevModeSetupBeforeStaticDataLoader(t *testing.T) {
 		t.Fatal("Config not stored")
 	}
 
-	if config.Mode != types.ModeStaticPrerender {
+	if config.Mode != core.ModeStaticPrerender {
 		t.Errorf("Expected ModeStaticPrerender, got %v", config.Mode)
 	}
 

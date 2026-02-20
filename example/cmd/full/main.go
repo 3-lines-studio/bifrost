@@ -8,7 +8,6 @@ import (
 
 	"github.com/3-lines-studio/bifrost"
 	"github.com/3-lines-studio/bifrost/example"
-	"github.com/go-chi/chi/v5"
 )
 
 type Post struct {
@@ -52,9 +51,11 @@ func main() {
 				return paths, nil
 			})),
 		bifrost.Page("/message/{message}", "./pages/home.tsx", bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
-			message := chi.URLParam(req, "message")
-			if message == "" {
-				message = "World"
+			// Extract message from URL path: /message/NAME -> NAME
+			path := req.URL.Path
+			message := "World"
+			if len(path) > 9 && path[:9] == "/message/" {
+				message = path[9:]
 			}
 			return map[string]any{
 				"name": message,
