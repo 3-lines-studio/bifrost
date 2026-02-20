@@ -174,24 +174,24 @@ func copySSRBundlesFromDisk(exportDir string, manifest *core.Manifest) (string, 
 
 		data, err := os.ReadFile(srcPath)
 		if err != nil {
-			os.RemoveAll(tempDir)
+			_ = os.RemoveAll(tempDir)
 			return "", nil, fmt.Errorf("failed to read SSR bundle %s: %w", srcPath, err)
 		}
 
 		destPath := filepath.Join(tempDir, entry.SSR)
 		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-			os.RemoveAll(tempDir)
+			_ = os.RemoveAll(tempDir)
 			return "", nil, fmt.Errorf("failed to create SSR dest dir: %w", err)
 		}
 
 		if err := os.WriteFile(destPath, data, 0644); err != nil {
-			os.RemoveAll(tempDir)
+			_ = os.RemoveAll(tempDir)
 			return "", nil, fmt.Errorf("failed to write SSR bundle %s: %w", entryName, err)
 		}
 	}
 
 	cleanup := func() {
-		os.RemoveAll(tempDir)
+		_ = os.RemoveAll(tempDir)
 	}
 
 	return tempDir, cleanup, nil

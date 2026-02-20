@@ -32,12 +32,12 @@ func ExtractEmbeddedRuntime(assetsFS embed.FS) (string, func(), error) {
 	}
 
 	if err := os.WriteFile(executablePath, data, 0755); err != nil {
-		os.RemoveAll(tempDir)
+		_ = os.RemoveAll(tempDir)
 		return "", nil, fmt.Errorf("failed to write runtime executable: %w", err)
 	}
 
 	cleanup := func() {
-		os.RemoveAll(tempDir)
+		_ = os.RemoveAll(tempDir)
 	}
 
 	return executablePath, cleanup, nil
@@ -68,24 +68,24 @@ func ExtractSSRBundles(assetsFS embed.FS, manifest *core.Manifest) (string, func
 
 		data, err := assetsFS.ReadFile(embedPath)
 		if err != nil {
-			os.RemoveAll(tempDir)
+			_ = os.RemoveAll(tempDir)
 			return "", nil, fmt.Errorf("failed to read SSR bundle %s: %w", embedPath, err)
 		}
 
 		destPath := filepath.Join(tempDir, entry.SSR)
 		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-			os.RemoveAll(tempDir)
+			_ = os.RemoveAll(tempDir)
 			return "", nil, fmt.Errorf("failed to create SSR dest dir: %w", err)
 		}
 
 		if err := os.WriteFile(destPath, data, 0644); err != nil {
-			os.RemoveAll(tempDir)
+			_ = os.RemoveAll(tempDir)
 			return "", nil, fmt.Errorf("failed to write SSR bundle %s: %w", entryName, err)
 		}
 	}
 
 	cleanup := func() {
-		os.RemoveAll(tempDir)
+		_ = os.RemoveAll(tempDir)
 	}
 
 	return tempDir, cleanup, nil

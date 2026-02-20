@@ -141,7 +141,7 @@ func (h *PublicHandler) servePublicFromFS(w http.ResponseWriter, req *http.Reque
 		http.NotFound(w, req)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	contentType := core.GetContentType(path)
 	w.Header().Set("Content-Type", contentType)

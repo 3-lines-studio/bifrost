@@ -214,11 +214,14 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		}
 
 		// Update or add to manifest
-		modeStr := "ssr"
-		if config.Mode == core.ModeClientOnly {
+		var modeStr string
+		switch config.Mode {
+		case core.ModeClientOnly:
 			modeStr = "client"
-		} else if config.Mode == core.ModeStaticPrerender {
+		case core.ModeStaticPrerender:
 			modeStr = "static"
+		default:
+			modeStr = "ssr"
 		}
 
 		entry := manifest.Entries[entryName]
@@ -305,10 +308,10 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 	// Clean up entry files
 	s.cli.PrintStep("🧹", "Cleaning up entry files...")
 	for _, entryFile := range clientEntryFiles {
-		os.Remove(entryFile)
+		_ = os.Remove(entryFile)
 	}
 	for _, entryFile := range ssrEntryFiles {
-		os.Remove(entryFile)
+		_ = os.Remove(entryFile)
 	}
 
 	s.cli.PrintDone("Build completed successfully")
@@ -501,7 +504,7 @@ func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *c
 		return fmt.Errorf("failed to make binary executable: %w", err)
 	}
 
-	defer os.Remove(binaryPath)
+	defer func() { _ = os.Remove(binaryPath) }()
 
 	// Run the binary in export mode
 	exportCmd := exec.Command(binaryPath)
@@ -540,7 +543,7 @@ func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *c
 	}
 
 	// Clean up export manifest
-	os.Remove(exportManifestPath)
+	_ = os.Remove(exportManifestPath)
 
 	return nil
 }
@@ -625,11 +628,11 @@ func (s *BuildService) compileEmbeddedRuntime(bifrostDir string) error {
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		os.Remove(tempSourcePath)
+		_ = os.Remove(tempSourcePath)
 		return fmt.Errorf("bun compile failed: %w", err)
 	}
 
-	os.Remove(tempSourcePath)
+	_ = os.Remove(tempSourcePath)
 	return nil
 }
 

@@ -205,9 +205,9 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 		if len(result.Error.Errors) > 0 {
 			errorDetails.WriteString("\n")
 			for _, e := range result.Error.Errors {
-				errorDetails.WriteString(fmt.Sprintf("  - %s", e.Message))
+				_, _ = fmt.Fprintf(&errorDetails, "  - %s", e.Message)
 				if e.File != "" {
-					errorDetails.WriteString(fmt.Sprintf(" (%s:%d:%d)", e.File, e.Line, e.Column))
+					_, _ = fmt.Fprintf(&errorDetails, " (%s:%d:%d)", e.File, e.Line, e.Column)
 				}
 				errorDetails.WriteString("\n")
 			}
@@ -264,9 +264,9 @@ func (r *Renderer) BuildSSR(entrypoints []string, outdir string) error {
 		if len(result.Error.Errors) > 0 {
 			errorDetails.WriteString("\n")
 			for _, e := range result.Error.Errors {
-				errorDetails.WriteString(fmt.Sprintf("  - %s", e.Message))
+				_, _ = fmt.Fprintf(&errorDetails, "  - %s", e.Message)
 				if e.File != "" {
-					errorDetails.WriteString(fmt.Sprintf(" (%s:%d:%d)", e.File, e.Line, e.Column))
+					_, _ = fmt.Fprintf(&errorDetails, " (%s:%d:%d)", e.File, e.Line, e.Column)
 				}
 				errorDetails.WriteString("\n")
 			}

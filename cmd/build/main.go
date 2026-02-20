@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -76,7 +77,7 @@ func main() {
 		OriginalCwd: goModRoot,
 	}
 
-	result := buildService.BuildProject(nil, input)
+	result := buildService.BuildProject(context.Background(), input)
 	if result.Error != nil {
 		output.PrintError("%v", result.Error)
 		os.Exit(1)

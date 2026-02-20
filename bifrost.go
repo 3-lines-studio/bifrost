@@ -120,7 +120,7 @@ func (a *App) runExportMode() {
 		os.Exit(1)
 	}
 
-	a.Stop()
+	_ = a.Stop()
 	os.Exit(0)
 }
 
