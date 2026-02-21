@@ -15,6 +15,10 @@ jobs:
         with:
           go-version: "1.26"
 
+      # Phase 0: Create required directories for embed
+      - name: Setup embed directories
+        run: mkdir -p example/.bifrost
+
       # Phase 1: Fast static analysis (fail fast)
       - name: Lint
         uses: golangci/golangci-lint-action@v7
