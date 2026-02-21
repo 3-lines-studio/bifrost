@@ -4,8 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/3-lines-studio/bifrost/internal/runtime"
-	"github.com/3-lines-studio/bifrost/internal/types"
+	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
 func TestModeDetection(t *testing.T) {
@@ -39,9 +38,9 @@ func TestModeDetection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("BIFROST_DEV", tt.envValue)
 
-			mode := runtime.GetMode()
-			isDev := mode == runtime.ModeDev
-			isProd := mode == runtime.ModeProd
+			mode := detectMode()
+			isDev := mode == core.ModeDev
+			isProd := mode == core.ModeProd
 
 			if isDev != tt.wantDev {
 				t.Errorf("IsDev() = %v, want %v", isDev, tt.wantDev)
@@ -132,7 +131,7 @@ func TestPageModeTypes(t *testing.T) {
 		if config == nil {
 			t.Fatal("Config not stored")
 		}
-		if config.Mode != types.ModeSSR {
+		if config.Mode != core.ModeSSR {
 			t.Errorf("Expected ModeSSR, got %v", config.Mode)
 		}
 	})
@@ -148,7 +147,7 @@ func TestPageModeTypes(t *testing.T) {
 		if config == nil {
 			t.Fatal("Config not stored")
 		}
-		if config.Mode != types.ModeClientOnly {
+		if config.Mode != core.ModeClientOnly {
 			t.Errorf("Expected ModeClientOnly, got %v", config.Mode)
 		}
 	})
@@ -164,7 +163,7 @@ func TestPageModeTypes(t *testing.T) {
 		if config == nil {
 			t.Fatal("Config not stored")
 		}
-		if config.Mode != types.ModeStaticPrerender {
+		if config.Mode != core.ModeStaticPrerender {
 			t.Errorf("Expected ModeStaticPrerender, got %v", config.Mode)
 		}
 	})

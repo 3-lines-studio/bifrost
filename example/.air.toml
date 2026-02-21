@@ -1,43 +1,16 @@
 root = "."
-testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
-  args_bin = []
-  bin = "./tmp/main"
-  delay = 0
-  exclude_dir = ["node_modules", ".bifrost", "tmp"]
-  exclude_file = []
-  exclude_regex = ["_test.go"]
-  exclude_unchanged = false
-  follow_symlink = false
-  full_bin = ""
-  include_dir = []
+  entrypoint = "./tmp/main"
   include_ext = ["go", "tsx", "ts", "css"]
-  kill_delay = "0s"
-  log = "build-errors.log"
-  send_interrupt = false
-  stop_on_root = false
-
-[color]
-  app = ""
-  build = "yellow"
-  main = "magenta"
-  runner = "green"
-  watcher = "cyan"
-
-[log]
-  main_only = false
-  time = false
-
-[misc]
-  clean_on_exit = false
+  exclude_dir = ["node_modules", ".bifrost", "tmp"]
+  exclude_regex = ["_test.go"]
 
 [proxy]
+  enabled = true
   app_port = 8080
   proxy_port = 3000
-  enabled = true
 
-[screen]
-  clear_on_rebuild = false
-  keep_scroll = true
+[log]
+  silent = true

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/3-lines-studio/bifrost/internal/types"
+	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
 func TestWithStaticData(t *testing.T) {
@@ -37,7 +37,7 @@ func TestWithStaticData(t *testing.T) {
 	if config.StaticDataLoader == nil {
 		t.Error("StaticDataLoader not set in config")
 	}
-	if config.Mode != types.ModeStaticPrerender {
+	if config.Mode != core.ModeStaticPrerender {
 		t.Errorf("Expected ModeStaticPrerender, got %v", config.Mode)
 	}
 }

@@ -2,7 +2,7 @@ package example
 
 import "embed"
 
-//go:embed all:.bifrost
+//go:embed all:.bifrost all:public
 var BifrostFS embed.FS
 
 //go:embed public/icon.png

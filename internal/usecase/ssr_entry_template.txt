@@ -1,0 +1,16 @@
+import React from "react";
+import { renderToString } from "react-dom/server";
+import { Page, Head } from "COMPONENT_PATH";
+
+export function render(props) {
+	const pageEl = React.createElement(Page, props);
+	const html = renderToString(pageEl);
+	
+	let head = "";
+	if (Head) {
+		const headEl = React.createElement(Head, props);
+		head = renderToString(headEl);
+	}
+	
+	return { html, head };
+}
