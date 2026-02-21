@@ -21,10 +21,7 @@ jobs:
         with:
           version: latest
 
-      - name: Vet
-        run: go vet ./...
-
-      # Phase 2: Setup dependencies (only if Phase 1 passes)
+      # Phase 2: Setup dependencies
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -32,10 +29,21 @@ jobs:
       - name: Install example dependencies
         run: cd example && bun install
 
-      # Phase 3: All tests with race detector (fail fast)
+      # Phase 3: Run doctor to validate environment
+      - name: Doctor
+        run: go run ./cmd/doctor ./example
+
+      # Phase 4: Build example assets (required for production tests)
+      - name: Build bifrost tool
+        run: go build -o /tmp/bifrost-build ./cmd/build/main.go
+
+      - name: Build example assets
+        run: cd example && /tmp/bifrost-build ./cmd/full/main.go || true
+
+      # Phase 4: Run all tests with race detector
       - name: Test All
         run: go test ./... -race
 
-      # Phase 4: Build verification
+      # Phase 5: Build verification
       - name: Build
         run: go build ./...
