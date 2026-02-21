@@ -239,6 +239,9 @@ func normalizeHTML(html string) string {
 
 	html = regexp.MustCompile(`\s+`).ReplaceAllString(html, " ")
 
+	// Normalize file paths in error stack traces
+	html = regexp.MustCompile(`at\s+Page\s*\([^)]*/(home|runner)/[^)]+\)`).ReplaceAllString(html, "at Page ([FILE_PATH])")
+
 	return html
 }
 
