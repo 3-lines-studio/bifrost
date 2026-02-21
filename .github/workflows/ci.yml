@@ -15,9 +15,11 @@ jobs:
         with:
           go-version: "1.26"
 
-      # Phase 0: Create required directories for embed
+      # Phase 0: Create required directories and files for embed
       - name: Setup embed directories
-        run: mkdir -p example/.bifrost
+        run: |
+          mkdir -p example/.bifrost
+          touch example/.bifrost/.gitkeep
 
       # Phase 1: Fast static analysis (fail fast)
       - name: Lint
