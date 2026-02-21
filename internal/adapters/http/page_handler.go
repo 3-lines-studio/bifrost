@@ -56,7 +56,7 @@ func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	output := h.service.ServePage(req.Context(), input)
 
 	if output.Error != nil {
-		h.serveError(w, output.Error)
+		h.serveError(w, req, output.Error)
 		return
 	}
 
@@ -71,7 +71,7 @@ func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		h.serveNotFound(w, req)
 
 	case core.ActionNeedsSetup:
-		h.serveError(w, fmt.Errorf("page needs setup but setup not implemented in adapter"))
+		h.serveError(w, req, fmt.Errorf("page needs setup but setup not implemented in adapter"))
 
 	case core.ActionRenderClientOnlyShell,
 		core.ActionRenderStaticPrerender,
@@ -88,7 +88,7 @@ func (h *PageHandler) serveStaticFile(w http.ResponseWriter, req *http.Request, 
 		embedPath = filepath.ToSlash(embedPath)
 		data, err := h.assetsFS.ReadFile(embedPath)
 		if err != nil {
-			h.serveError(w, fmt.Errorf("failed to read static file %s: %w", embedPath, err))
+			h.serveError(w, req, fmt.Errorf("failed to read static file %s: %w", embedPath, err))
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -106,7 +106,7 @@ func (h *PageHandler) serveRouteFile(w http.ResponseWriter, req *http.Request, h
 		embedPath = filepath.ToSlash(embedPath)
 		data, err := h.assetsFS.ReadFile(embedPath)
 		if err != nil {
-			h.serveError(w, fmt.Errorf("failed to read route file %s: %w", embedPath, err))
+			h.serveError(w, req, fmt.Errorf("failed to read route file %s: %w", embedPath, err))
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -128,7 +128,16 @@ func (h *PageHandler) serveHTML(w http.ResponseWriter, html string) {
 	_, _ = w.Write([]byte(html))
 }
 
-func (h *PageHandler) serveError(w http.ResponseWriter, err error) {
+func (h *PageHandler) serveError(w http.ResponseWriter, req *http.Request, err error) {
+	if redirectErr, ok := err.(core.RedirectError); ok {
+		status := redirectErr.RedirectStatusCode()
+		if status == 0 {
+			status = http.StatusFound
+		}
+		http.Redirect(w, req, redirectErr.RedirectURL(), status)
+		return
+	}
+
 	data := core.ErrorData{
 		Message: err.Error(),
 		IsDev:   h.isDev,

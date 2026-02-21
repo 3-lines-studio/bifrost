@@ -211,7 +211,7 @@ func (a *App) ExportStaticPages(outputDir string) error {
 
 	for _, route := range a.routes {
 		config := buildPageConfig(route)
-		if config.Mode != core.ModeStaticPrerender || config.StaticDataLoader == nil {
+		if config.Mode != core.ModeStaticPrerender {
 			continue
 		}
 
@@ -222,10 +222,22 @@ func (a *App) ExportStaticPages(outputDir string) error {
 			continue
 		}
 
-		entries, err := config.StaticDataLoader(context.Background())
-		if err != nil {
-			fmt.Printf("Warning: Failed to load static data for %s: %v, skipping\n", route.Pattern, err)
-			continue
+		var entries []core.StaticPathData
+		if config.StaticDataLoader != nil {
+			var err error
+			entries, err = config.StaticDataLoader(context.Background())
+			if err != nil {
+				fmt.Printf("Warning: Failed to load static data for %s: %v, skipping\n", route.Pattern, err)
+				continue
+			}
+		} else {
+			// Static page without data loader - create single entry with empty props
+			entries = []core.StaticPathData{
+				{
+					Path:  route.Pattern,
+					Props: map[string]any{},
+				},
+			}
 		}
 
 		manifestEntry := core.ManifestEntry{

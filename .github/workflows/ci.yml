@@ -6,27 +6,36 @@ on:
   pull_request:
 
 jobs:
-  lint:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-      - uses: golangci/golangci-lint-action@v7
+
+      # Phase 1: Fast static analysis (fail fast)
+      - name: Lint
+        uses: golangci/golangci-lint-action@v7
         with:
           version: latest
 
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.26"
+      - name: Vet
+        run: go vet ./...
+
+      # Phase 2: Setup dependencies (only if Phase 1 passes)
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - run: go vet ./...
-      - run: go test ./... -race
-      - run: go build ./...
+
+      - name: Install example dependencies
+        run: cd example && bun install
+
+      # Phase 3: All tests with race detector (fail fast)
+      - name: Test All
+        run: go test ./... -race
+
+      # Phase 4: Build verification
+      - name: Build
+        run: go build ./...
