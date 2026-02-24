@@ -5,4 +5,5 @@ check:
 	cd example && /tmp/bifrost-build ./cmd/full/main.go || true
 	golangci-lint run
 	go test ./... -race
+	go test ./test/e2e/...
 	go build

@@ -6,3 +6,5 @@ bifrost
 !bifrost/
 example
 !example/
+go.work
+go.work.sum
