@@ -306,3 +306,21 @@ func TestGetSpaTemplate_FaviconExists(t *testing.T) {
 		t.Fatalf("spa template should include public/favicon.ico: %v", err)
 	}
 }
+
+func TestBifrostGitkeepExists(t *testing.T) {
+	templates := []string{"minimal", "spa", "desktop"}
+
+	for _, tmpl := range templates {
+		t.Run(tmpl, func(t *testing.T) {
+			templateFS, err := GetTemplate(tmpl)
+			if err != nil {
+				t.Fatalf("GetTemplate(%q) error = %v", tmpl, err)
+			}
+
+			_, err = fs.ReadFile(templateFS, ".bifrost/.gitkeep")
+			if err != nil {
+				t.Fatalf("%s template should include .bifrost/.gitkeep: %v", tmpl, err)
+			}
+		})
+	}
+}

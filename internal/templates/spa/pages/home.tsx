@@ -7,7 +7,7 @@ export function Head() {
 	);
 }
 
-export default function Home() {
+export function Page() {
 	return (
 		<div
 			style={{

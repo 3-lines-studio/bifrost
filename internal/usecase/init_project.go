@@ -2,6 +2,11 @@ package usecase
 
 import (
 	"fmt"
+	"io"
+	"io/fs"
+	"path/filepath"
+
+	"github.com/3-lines-studio/bifrost/internal/templates"
 )
 
 type InitInput struct {
@@ -55,8 +60,57 @@ func (s *InitService) InitProject(input InitInput) InitOutput {
 		}
 	}
 
+	templateFS, err := templates.GetTemplate(input.Template)
+	if err != nil {
+		return InitOutput{
+			Success: false,
+			Error:   fmt.Errorf("invalid template %q: %w", input.Template, err),
+		}
+	}
+
+	err = s.copyTemplateFiles(templateFS, input.ProjectDir, input.ModuleName)
+	if err != nil {
+		return InitOutput{
+			Success: false,
+			Error:   fmt.Errorf("failed to copy template files: %w", err),
+		}
+	}
+
 	s.cli.PrintSuccess("Project initialized")
 	return InitOutput{
 		Success: true,
 	}
+}
+
+func (s *InitService) copyTemplateFiles(templateFS fs.FS, projectDir string, moduleName string) error {
+	return fs.WalkDir(templateFS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
+			targetDir := filepath.Join(projectDir, path)
+			return s.fs.MkdirAll(targetDir, 0755)
+		}
+
+		content, err := templateFS.Open(path)
+		if err != nil {
+			return fmt.Errorf("failed to open template file %q: %w", path, err)
+		}
+		defer content.Close()
+
+		data, err := io.ReadAll(content)
+		if err != nil {
+			return fmt.Errorf("failed to read template file %q: %w", path, err)
+		}
+
+		targetPath, isTemplate := templates.ProcessFilename(path, templates.TemplateData{Module: moduleName})
+		targetPath = filepath.Join(projectDir, targetPath)
+
+		if isTemplate {
+			data = templates.ProcessContent(data, true, templates.TemplateData{Module: moduleName})
+		}
+
+		return s.fs.WriteFile(targetPath, data, 0644)
+	})
 }

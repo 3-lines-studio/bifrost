@@ -7,7 +7,7 @@ export function Head({ message }: { message: string }) {
   );
 }
 
-export default function Home({ message }: { message: string }) {
+export function Page({ message }: { message: string }) {
   return (
     <div style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
       <h1>{message}</h1>
