@@ -1,6 +1,14 @@
 import Layout from "@/layout/base";
 import invalid from "invalid-import";
 
+export function Head() {
+  return (
+    <>
+      <title>Error Import Test</title>
+    </>
+  );
+}
+
 export function Page() {
   invalid.call();
 

@@ -97,7 +97,7 @@ func (s *InitService) copyTemplateFiles(templateFS fs.FS, projectDir string, mod
 		if err != nil {
 			return fmt.Errorf("failed to open template file %q: %w", path, err)
 		}
-		defer content.Close()
+		defer func() { _ = content.Close() }()
 
 		data, err := io.ReadAll(content)
 		if err != nil {
