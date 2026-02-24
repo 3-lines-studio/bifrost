@@ -1,0 +1,21 @@
+import React from "react";
+import { hydrateRoot } from "react-dom/client";
+import { Page } from "COMPONENT_PATH";
+
+function getProps() {
+	const script = document.getElementById("__BIFROST_PROPS__");
+	if (script) {
+		try {
+			return JSON.parse(script.textContent || "{}");
+		} catch (e) {
+			console.error("Failed to parse props:", e);
+		}
+	}
+	return {};
+}
+
+const container = document.getElementById("app");
+if (container) {
+	const props = getProps();
+	hydrateRoot(container, React.createElement(Page, props));
+}

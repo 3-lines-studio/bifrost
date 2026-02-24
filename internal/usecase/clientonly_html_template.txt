@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TITLE_PLACEHOLDER</title>
+    <link rel="stylesheet" href="/dist/ENTRY_NAME.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script src="/dist/ENTRY_NAME.js" type="module"></script>
+  </body>
+</html>

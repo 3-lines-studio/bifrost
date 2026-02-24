@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/3-lines-studio/bifrost/internal/cli"
-	"github.com/3-lines-studio/bifrost/internal/initcmd"
+	"github.com/3-lines-studio/bifrost/internal/adapters/cli"
+	"github.com/3-lines-studio/bifrost/internal/adapters/fs"
+	"github.com/3-lines-studio/bifrost/internal/core"
+	"github.com/3-lines-studio/bifrost/internal/usecase"
 )
 
 func main() {
@@ -29,8 +31,9 @@ func main() {
 
 		if arg == "--template" {
 			if argIdx+1 >= len(os.Args) {
-				cli.PrintHeader("Bifrost Init")
-				cli.PrintError("--template requires a value")
+				output := cli.NewOutput()
+				output.PrintHeader("Bifrost Init")
+				output.PrintError("--template requires a value")
 				os.Exit(1)
 			}
 			template = os.Args[argIdx+1]
@@ -51,15 +54,39 @@ func main() {
 
 	absProjectDir, err := filepath.Abs(projectDir)
 	if err != nil {
-		cli.PrintHeader("Bifrost Init")
-		cli.PrintError("Failed to resolve project directory: %v", err)
+		output := cli.NewOutput()
+		output.PrintHeader("Bifrost Init")
+		output.PrintError("Failed to resolve project directory: %v", err)
 		os.Exit(1)
 	}
 
-	if err := initcmd.Run(absProjectDir, template); err != nil {
-		cli.PrintError("%v", err)
+	fsAdapter := fs.NewOSFileSystem()
+	output := cli.NewOutput()
+
+	initService := usecase.NewInitService(fsAdapter, output)
+
+	input := usecase.InitInput{
+		ProjectDir: absProjectDir,
+		Template:   template,
+		ModuleName: core.DeriveModuleName(absProjectDir),
+	}
+
+	result := initService.InitProject(input)
+	if result.Error != nil {
+		output.PrintError("%v", result.Error)
 		os.Exit(1)
 	}
+
+	fmt.Println()
+	output.PrintStep("", "Next steps:")
+	fmt.Println()
+	fmt.Printf("  # Install air\n")
+	fmt.Printf("  go install github.com/air-verse/air@latest\n")
+	fmt.Printf("  cd %s\n", absProjectDir)
+	fmt.Printf("  go mod tidy\n")
+	fmt.Printf("  bun install\n")
+	fmt.Printf("  make dev\n")
+	fmt.Println()
 }
 
 func isFlag(arg string) bool {
@@ -67,7 +94,8 @@ func isFlag(arg string) bool {
 }
 
 func printUsage() {
-	cli.PrintHeader("Bifrost Init")
+	output := cli.NewOutput()
+	output.PrintHeader("Bifrost Init")
 	fmt.Println()
 	fmt.Println("Usage: bifrost-init [options] <project-dir>")
 	fmt.Println()

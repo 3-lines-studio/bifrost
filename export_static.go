@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
 type staticBuildExport struct {
@@ -32,14 +34,39 @@ func exportStaticBuildData(app *App) error {
 		Pages:   make([]staticPageExport, 0),
 	}
 
+	// Build a map from component path to route pattern
+	componentToPattern := make(map[string]string)
+	for _, route := range app.routes {
+		config := buildPageConfig(route)
+		if config.Mode == core.ModeStaticPrerender {
+			componentToPattern[config.ComponentPath] = route.Pattern
+		}
+	}
+
 	for componentPath, config := range app.pageConfigs {
-		if config.StaticDataLoader == nil {
+		if config.Mode != core.ModeStaticPrerender {
 			continue
 		}
 
-		entries, err := config.StaticDataLoader(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to load static data for %s: %w", componentPath, err)
+		var entries []core.StaticPathData
+		if config.StaticDataLoader != nil {
+			var err error
+			entries, err = config.StaticDataLoader(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to load static data for %s: %w", componentPath, err)
+			}
+		} else {
+			// Static page without data loader - use route pattern with empty props
+			pattern := componentToPattern[componentPath]
+			if pattern == "" {
+				continue // Skip if no route pattern found
+			}
+			entries = []core.StaticPathData{
+				{
+					Path:  pattern,
+					Props: map[string]any{},
+				},
+			}
 		}
 
 		pageExport := staticPageExport{
