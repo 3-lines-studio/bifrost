@@ -193,7 +193,7 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
       entrypoints,
       outdir,
       target: buildTarget,
-      minify: !isSSR,
+      minify: !isDev,
       splitting: !isSSR,
       naming,
       plugins,
