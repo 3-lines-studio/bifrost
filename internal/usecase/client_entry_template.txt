@@ -1,5 +1,5 @@
 import React from "react";
-import { hydrateRoot } from "react-dom/client";
+import { hydrateRoot, createRoot } from "react-dom/client";
 import { Page } from "COMPONENT_PATH";
 
 function getProps() {
@@ -17,5 +17,11 @@ function getProps() {
 const container = document.getElementById("app");
 if (container) {
 	const props = getProps();
-	hydrateRoot(container, React.createElement(Page, props));
+	const hasServerContent = container.firstChild !== null;
+	if (hasServerContent) {
+		hydrateRoot(container, React.createElement(Page, props));
+	} else {
+		const root = createRoot(container);
+		root.render(React.createElement(Page, props));
+	}
 }

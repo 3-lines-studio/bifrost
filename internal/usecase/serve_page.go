@@ -97,6 +97,14 @@ func (s *PageService) ServePage(ctx context.Context, input ServePageInput) Serve
 				}
 			}
 			// After setup, render based on the page mode
+			if input.Config.Mode == core.ModeClientOnly {
+				html, err := s.renderClientOnlyShell(input)
+				return ServePageOutput{
+					Action: core.ActionRenderClientOnlyShell,
+					HTML:   html,
+					Error:  err,
+				}
+			}
 			if input.Config.Mode == core.ModeStaticPrerender {
 				return s.renderStaticPrerender(ctx, input)
 			}
