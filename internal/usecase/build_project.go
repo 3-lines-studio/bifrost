@@ -17,12 +17,9 @@ import (
 	"strings"
 
 	"github.com/3-lines-studio/bifrost/internal/adapters/cli"
-	"github.com/3-lines-studio/bifrost/internal/adapters/process"
+	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
-
-//go:embed ssr_entry_template.txt
-var ssrEntryTemplate string
 
 //go:embed clientonly_html_template.txt
 var clientOnlyHTMLTemplate string
@@ -47,13 +44,18 @@ type BuildService struct {
 	renderer Renderer
 	fs       FileSystem
 	cli      CLIOutput
+	adapter  core.FrameworkAdapter
 }
 
-func NewBuildService(renderer Renderer, fs FileSystem, cli CLIOutput) *BuildService {
+func NewBuildService(renderer Renderer, fs FileSystem, cli CLIOutput, adapter core.FrameworkAdapter) *BuildService {
+	if adapter == nil {
+		adapter = framework.NewReactAdapter()
+	}
 	return &BuildService{
 		renderer: renderer,
 		fs:       fs,
 		cli:      cli,
+		adapter:  adapter,
 	}
 }
 
@@ -124,7 +126,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 
 		entryName := core.EntryNameForPath(config.ComponentPath)
 		ssrEntryName := entryName + "-ssr"
-		ssrEntryPath := filepath.Join(entriesDir, ssrEntryName+".tsx")
+		ssrEntryPath := filepath.Join(entriesDir, ssrEntryName+s.adapter.EntryFileExtension())
 
 		absComponentPath := filepath.Join(input.OriginalCwd, config.ComponentPath)
 		importPath, err := s.calculateImportPath(ssrEntryPath, absComponentPath)
@@ -178,7 +180,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 
 	for _, config := range pageConfigs {
 		entryName := core.EntryNameForPath(config.ComponentPath)
-		entryPath := filepath.Join(entriesDir, entryName+".tsx")
+		entryPath := filepath.Join(entriesDir, entryName+s.adapter.EntryFileExtension())
 		entryToConfig[entryPath] = config
 
 		absComponentPath := filepath.Join(input.OriginalCwd, config.ComponentPath)
@@ -576,49 +578,17 @@ func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *c
 }
 
 func (s *BuildService) writeSSREntry(entryPath, importPath string) error {
-	content := strings.ReplaceAll(ssrEntryTemplate, "COMPONENT_PATH", importPath)
+	content := strings.ReplaceAll(s.adapter.SSREntryTemplate(), "COMPONENT_PATH", importPath)
 	return os.WriteFile(entryPath, []byte(content), 0644)
 }
 
 func (s *BuildService) writeClientOnlyEntry(entryPath, importPath string) error {
-	content := fmt.Sprintf(`import React from "react";
-import { createRoot } from "react-dom/client";
-import { Page } from "%s";
-
-const container = document.getElementById("app");
-if (container) {
-	const root = createRoot(container);
-	root.render(React.createElement(Page, {}));
-}
-`, importPath)
-
+	content := strings.ReplaceAll(s.adapter.ClientEntryTemplate(core.ModeClientOnly), "COMPONENT_PATH", importPath)
 	return os.WriteFile(entryPath, []byte(content), 0644)
 }
 
 func (s *BuildService) writeHydrationEntry(entryPath, importPath string) error {
-	content := fmt.Sprintf(`import React from "react";
-import { hydrateRoot } from "react-dom/client";
-import { Page } from "%s";
-
-function getProps() {
-	const script = document.getElementById("__BIFROST_PROPS__");
-	if (script) {
-		try {
-			return JSON.parse(script.textContent || "{}");
-		} catch (e) {
-			console.error("Failed to parse props:", e);
-		}
-	}
-	return {};
-}
-
-const container = document.getElementById("app");
-if (container) {
-	const props = getProps();
-	hydrateRoot(container, React.createElement(Page, props));
-}
-`, importPath)
-
+	content := strings.ReplaceAll(s.adapter.ClientEntryTemplate(core.ModeSSR), "COMPONENT_PATH", importPath)
 	return os.WriteFile(entryPath, []byte(content), 0644)
 }
 
@@ -629,8 +599,8 @@ func (s *BuildService) compileEmbeddedRuntime(bifrostDir string) error {
 	}
 
 	tempSourcePath := filepath.Join(runtimeDir, "renderer.ts")
-	// Use the production renderer source from the process package
-	sourceContent := process.BunRendererProdSource
+	// Use the production renderer source from the framework adapter
+	sourceContent := s.adapter.ProdRendererSource()
 
 	if err := os.WriteFile(tempSourcePath, []byte(sourceContent), 0644); err != nil {
 		return fmt.Errorf("failed to write temp source: %w", err)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
 	"github.com/3-lines-studio/bifrost/internal/adapters/process"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
@@ -17,12 +18,18 @@ type renderer struct {
 	manifest   *core.Manifest
 	ssrTempDir string
 	ssrCleanup func()
+	adapter    core.FrameworkAdapter
 }
 
-func newRenderer(assetsFS embed.FS, mode core.Mode) (*renderer, error) {
+func newRenderer(assetsFS embed.FS, mode core.Mode, adapter core.FrameworkAdapter) (*renderer, error) {
+	if adapter == nil {
+		adapter = framework.NewReactAdapter()
+	}
+
 	r := &renderer{
 		isDev:    mode == core.ModeDev,
 		assetsFS: assetsFS,
+		adapter:  adapter,
 	}
 
 	switch mode {
@@ -73,7 +80,7 @@ func (r *renderer) setupRuntimeForExport(exportDir string) error {
 	r.ssrTempDir = ssrTempDir
 	r.ssrCleanup = ssrCleanup
 
-	client, err := process.NewRenderer(core.ModeProd)
+	client, err := process.NewRenderer(core.ModeProd, r.adapter.ProdRendererSource())
 	if err != nil {
 		ssrCleanup()
 		return fmt.Errorf("failed to start bun runtime: %w", err)
@@ -144,7 +151,7 @@ func (r *renderer) setupEmbeddedRuntime() error {
 }
 
 func (r *renderer) initDevMode() (*renderer, error) {
-	client, err := process.NewRenderer(core.ModeDev)
+	client, err := process.NewRenderer(core.ModeDev, r.adapter.DevRendererSource())
 	if err != nil {
 		return nil, err
 	}

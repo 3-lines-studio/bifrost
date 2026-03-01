@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
 	adaptersfs "github.com/3-lines-studio/bifrost/internal/adapters/fs"
 	adaptershttp "github.com/3-lines-studio/bifrost/internal/adapters/http"
 	"github.com/3-lines-studio/bifrost/internal/core"
@@ -38,6 +39,13 @@ type StaticPathData = core.StaticPathData
 
 type PageOption = core.PageOption
 
+type Framework = core.Framework
+
+const (
+	React  = core.FrameworkReact
+	Svelte = core.FrameworkSvelte
+)
+
 type Route struct {
 	Pattern       string
 	ComponentPath string
@@ -55,6 +63,12 @@ func buildPageConfig(route Route) core.PageConfig {
 	return config
 }
 
+type ConfigOption = core.ConfigOption
+
+func WithFramework(fw core.Framework) ConfigOption {
+	return core.WithFramework(fw)
+}
+
 type App struct {
 	renderer    *renderer
 	routes      []Route
@@ -62,6 +76,7 @@ type App struct {
 	isDev       bool
 	manifest    *core.Manifest
 	pageConfigs map[string]*core.PageConfig
+	config      *core.Config
 }
 
 type router interface {
@@ -69,13 +84,14 @@ type router interface {
 	Handle(pattern string, handler http.Handler)
 }
 
-func New(assetsFS embed.FS, routes ...Route) *App {
+func newApp(assetsFS embed.FS, routes []Route, config *core.Config) *App {
 	mode := detectMode()
 	app := &App{
 		assetsFS:    assetsFS,
 		isDev:       mode == core.ModeDev,
 		routes:      routes,
 		pageConfigs: make(map[string]*core.PageConfig),
+		config:      config,
 	}
 
 	for _, route := range routes {
@@ -91,7 +107,7 @@ func New(assetsFS embed.FS, routes ...Route) *App {
 		app.runExportMode()
 	}
 
-	r, err := newRenderer(assetsFS, mode)
+	r, err := newRenderer(assetsFS, mode, app.getAdapter())
 	if err != nil {
 		panic(fmt.Sprintf("failed to create bifrost renderer: %v", err))
 	}
@@ -101,8 +117,33 @@ func New(assetsFS embed.FS, routes ...Route) *App {
 	return app
 }
 
+func New(assetsFS embed.FS, routes ...Route) *App {
+	config := &core.Config{
+		Framework: core.FrameworkReact,
+	}
+	return newApp(assetsFS, routes, config)
+}
+
+func NewWithFramework(assetsFS embed.FS, fw core.Framework, routes ...Route) *App {
+	config := &core.Config{
+		Framework: fw,
+	}
+	return newApp(assetsFS, routes, config)
+}
+
+func (a *App) getAdapter() core.FrameworkAdapter {
+	switch a.config.Framework {
+	case core.FrameworkSvelte:
+		return framework.NewSvelteAdapter()
+	case core.FrameworkReact:
+		return framework.NewReactAdapter()
+	default:
+		return framework.NewReactAdapter()
+	}
+}
+
 func (a *App) runExportMode() {
-	r, err := newRenderer(a.assetsFS, core.ModeExport)
+	r, err := newRenderer(a.assetsFS, core.ModeExport, a.getAdapter())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Export failed: %v\n", err)
 		os.Exit(1)
@@ -142,7 +183,7 @@ func (a *App) Wrap(api router) http.Handler {
 		staticPath := a.getStaticPath(config)
 
 		fsAdapter := adaptersfs.NewEmbedFileSystem(a.assetsFS)
-		pageService := usecase.NewPageService(a.renderer.client, fsAdapter)
+		pageService := usecase.NewPageService(a.renderer.client, fsAdapter, a.getAdapter())
 
 		handler := adaptershttp.NewPageHandler(pageService, config, a.manifest, a.assetsFS, a.isDev, staticPath)
 		api.Handle(route.Pattern, handler)

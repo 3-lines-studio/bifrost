@@ -1,0 +1,34 @@
+package main
+
+import (
+	"embed"
+	"log"
+	"net/http"
+	"os"
+
+	"github.com/3-lines-studio/bifrost"
+)
+
+//go:embed all:.bifrost
+var bifrostFS embed.FS
+
+func main() {
+	app := bifrost.NewWithFramework(bifrostFS, bifrost.Svelte,
+		bifrost.Page("/", "./pages/home.svelte",
+			bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+				return map[string]any{
+					"message": "Hello from Svelte + Bifrost!",
+				}, nil
+			}),
+		),
+	)
+	defer app.Stop()
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	log.Printf("Server starting on http://localhost:%s", port)
+	log.Fatal(http.ListenAndServe(":"+port, app.Handler()))
+}

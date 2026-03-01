@@ -1,4 +1,4 @@
-module github.com/3-lines-studio/bifrost/example
+module github.com/3-lines-studio/bifrost/example-svelte
 
 go 1.25.6
 

@@ -1,0 +1,7 @@
+import { mount } from 'svelte';
+import Component from 'COMPONENT_PATH';
+
+const container = document.getElementById('app');
+if (container) {
+	mount(Component, { target: container });
+}

@@ -6,7 +6,7 @@ dev:
 
 build:
 	rm -rf .bifrost/*
-	go run ../cmd/build ./cmd/full/main.go
+	go run ../cmd/build --framework svelte ./cmd/full/main.go
 	go build -o bifrost ./cmd/full/main.go
 	rm -rf .bifrost/*
 

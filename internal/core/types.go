@@ -78,3 +78,15 @@ type Renderer interface {
 	Render(componentPath string, props map[string]any) (RenderedPage, error)
 	Build(entrypoints []string, outdir string) error
 }
+
+type Config struct {
+	Framework Framework
+}
+
+type ConfigOption func(*Config)
+
+func WithFramework(fw Framework) ConfigOption {
+	return func(c *Config) {
+		c.Framework = fw
+	}
+}

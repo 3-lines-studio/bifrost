@@ -1,0 +1,9 @@
+import React from "react";
+import { createRoot } from "react-dom/client";
+import { Page } from "COMPONENT_PATH";
+
+const container = document.getElementById("app");
+if (container) {
+	const root = createRoot(container);
+	root.render(React.createElement(Page, {}));
+}

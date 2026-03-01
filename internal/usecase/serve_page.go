@@ -2,18 +2,15 @@ package usecase
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
-
-//go:embed client_entry_template.txt
-var clientEntryTemplate string
 
 type ServePageInput struct {
 	Config      core.PageConfig
@@ -40,12 +37,17 @@ type ServePageOutput struct {
 type PageService struct {
 	renderer Renderer
 	fs       FileSystem
+	adapter  core.FrameworkAdapter
 }
 
-func NewPageService(renderer Renderer, fs FileSystem) *PageService {
+func NewPageService(renderer Renderer, fs FileSystem, adapter core.FrameworkAdapter) *PageService {
+	if adapter == nil {
+		adapter = framework.NewReactAdapter()
+	}
 	return &PageService{
 		renderer: renderer,
 		fs:       fs,
+		adapter:  adapter,
 	}
 }
 
@@ -140,6 +142,26 @@ func (s *PageService) ServePage(ctx context.Context, input ServePageInput) Serve
 func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error) {
 	assets := core.GetAssets(input.Manifest, input.EntryName)
 
+	// In dev mode, try to render with SSR for initial content
+	if input.IsDev && s.renderer != nil {
+		ssrPath := filepath.Join(".bifrost/ssr", input.EntryName+"-ssr.js")
+		if _, err := os.Stat(ssrPath); err == nil {
+			page, err := s.renderer.Render(ssrPath, map[string]any{})
+			if err == nil {
+				return core.RenderHTMLShell(
+					page.Body,
+					map[string]any{},
+					assets.Script,
+					page.Head,
+					assets.CSS,
+					assets.Chunks,
+				)
+			}
+			// If SSR render fails, fall through to empty shell
+		}
+	}
+
+	// Production or fallback: empty shell (will be hydrated on client)
 	return core.RenderHTMLShell(
 		"",
 		map[string]any{},
@@ -248,6 +270,12 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 	renderPath := input.Config.ComponentPath
 	if !input.IsDev {
 		renderPath = core.ResolveRenderPath(input.IsDev, input.StaticPath, input.Config.ComponentPath)
+	} else if input.Config.Mode == core.ModeSSR || input.Config.Mode == core.ModeStaticPrerender {
+		// In dev mode for SSR/Static pages, check if SSR bundle exists
+		ssrPath := filepath.Join(".bifrost/ssr", input.EntryName+"-ssr.js")
+		if _, err := os.Stat(ssrPath); err == nil {
+			renderPath = ssrPath
+		}
 	}
 
 	page, err := s.renderer.Render(renderPath, props)
@@ -287,13 +315,12 @@ func (s *PageService) buildAndRender(ctx context.Context, input ServePageInput) 
 	}
 
 	outdir := filepath.Join(cwd, ".bifrost/dist")
+	ssrDir := filepath.Join(cwd, ".bifrost/ssr")
 	entryDir := filepath.Join(cwd, ".bifrost/entries")
 
 	if err := os.MkdirAll(entryDir, 0755); err != nil {
 		return fmt.Errorf("failed to create entries directory: %w", err)
 	}
-
-	entryFile := filepath.Join(entryDir, input.EntryName+".tsx")
 
 	componentPath := input.Config.ComponentPath
 	// Make path relative to project root from the entries directory
@@ -305,14 +332,48 @@ func (s *PageService) buildAndRender(ctx context.Context, input ServePageInput) 
 		componentPath = "../../" + componentPath[2:]
 	}
 
-	entryContent := strings.ReplaceAll(clientEntryTemplate, "COMPONENT_PATH", componentPath)
+	// Build client entry
+	entryFile := filepath.Join(entryDir, input.EntryName+s.adapter.EntryFileExtension())
+	clientTemplate := s.adapter.ClientEntryTemplate(input.Config.Mode)
+	clientContent := strings.ReplaceAll(clientTemplate, "COMPONENT_PATH", componentPath)
 
-	if err := os.WriteFile(entryFile, []byte(entryContent), 0644); err != nil {
-		return fmt.Errorf("failed to write entry file: %w", err)
+	if err := os.WriteFile(entryFile, []byte(clientContent), 0644); err != nil {
+		return fmt.Errorf("failed to write client entry file: %w", err)
 	}
 
-	entrypoints := []string{entryFile}
-	entryNames := []string{input.EntryName}
+	clientEntrypoints := []string{entryFile}
+	clientEntryNames := []string{input.EntryName}
 
-	return s.renderer.Build(entrypoints, outdir, entryNames)
+	if err := s.renderer.Build(clientEntrypoints, outdir, clientEntryNames); err != nil {
+		return fmt.Errorf("failed to build client entry: %w", err)
+	}
+
+	// Build SSR entry in dev mode for all page types (for initial render),
+	// or in production for SSR and StaticPrerender modes
+	shouldBuildSSR := input.IsDev ||
+		input.Config.Mode == core.ModeSSR ||
+		input.Config.Mode == core.ModeStaticPrerender
+
+	if shouldBuildSSR {
+		if err := os.MkdirAll(ssrDir, 0755); err != nil {
+			return fmt.Errorf("failed to create SSR directory: %w", err)
+		}
+
+		ssrEntryName := input.EntryName + "-ssr"
+		ssrEntryFile := filepath.Join(entryDir, ssrEntryName+s.adapter.EntryFileExtension())
+		ssrTemplate := s.adapter.SSREntryTemplate()
+		ssrContent := strings.ReplaceAll(ssrTemplate, "COMPONENT_PATH", componentPath)
+
+		if err := os.WriteFile(ssrEntryFile, []byte(ssrContent), 0644); err != nil {
+			return fmt.Errorf("failed to write SSR entry file: %w", err)
+		}
+
+		ssrEntrypoints := []string{ssrEntryFile}
+		// Build SSR with target=bun
+		if err := s.renderer.BuildSSR(ssrEntrypoints, ssrDir); err != nil {
+			return fmt.Errorf("failed to build SSR entry: %w", err)
+		}
+	}
+
+	return nil
 }

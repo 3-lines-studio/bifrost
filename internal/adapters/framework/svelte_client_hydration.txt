@@ -1,0 +1,20 @@
+import { hydrate } from 'svelte';
+import Component from 'COMPONENT_PATH';
+
+function getProps() {
+	const script = document.getElementById('__BIFROST_PROPS__');
+	if (script) {
+		try {
+			return JSON.parse(script.textContent || '{}');
+		} catch (e) {
+			console.error('Failed to parse props:', e);
+		}
+	}
+	return {};
+}
+
+const container = document.getElementById('app');
+if (container) {
+	const props = getProps();
+	hydrate(Component, { target: container, props });
+}

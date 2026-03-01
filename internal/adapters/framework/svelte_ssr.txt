@@ -1,0 +1,10 @@
+import { render as renderSvelte } from 'svelte/server';
+import Component from 'COMPONENT_PATH';
+
+export function render(props) {
+	const result = renderSvelte(Component, { props });
+	return { 
+		html: result.body, 
+		head: result.head 
+	};
+}

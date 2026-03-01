@@ -32,7 +32,7 @@ type Renderer struct {
 	cleanup func()
 }
 
-func NewRenderer(mode core.Mode) (*Renderer, error) {
+func NewRenderer(mode core.Mode, source string) (*Renderer, error) {
 	socket := filepath.Join(os.TempDir(), fmt.Sprintf("bifrost-%d.sock", os.Getpid()))
 
 	cwd, err := os.Getwd()
@@ -40,9 +40,11 @@ func NewRenderer(mode core.Mode) (*Renderer, error) {
 		return nil, fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	source := BunRendererProdSource
-	if mode == core.ModeDev {
-		source = BunRendererDevSource
+	if source == "" {
+		source = BunRendererProdSource
+		if mode == core.ModeDev {
+			source = BunRendererDevSource
+		}
 	}
 
 	cmd := exec.Command("bun", "run", "--smol", "-")
@@ -281,7 +283,7 @@ func (r *Renderer) BuildSSR(entrypoints []string, outdir string) error {
 	return nil
 }
 
-func (r *Renderer) postJSON(endpoint string, body interface{}, result interface{}) error {
+func (r *Renderer) postJSON(endpoint string, body any, result any) error {
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		return err
