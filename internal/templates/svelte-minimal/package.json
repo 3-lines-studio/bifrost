@@ -7,7 +7,8 @@
     "dev": "go run ."
   },
   "dependencies": {
-    "svelte": "^5.0.0"
+    "svelte": "^5.0.0",
+    "bun-plugin-tailwind": "^0.1.2"
   },
   "devDependencies": {
     "bun-plugin-svelte": "latest",

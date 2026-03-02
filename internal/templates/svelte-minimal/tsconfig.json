@@ -13,12 +13,11 @@
     "skipLibCheck": true,
     "allowJs": true,
     "strict": true,
-    "jsx": "react-jsx",
-    "jsxImportSource": "react",
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"],
     },
   },
   "exclude": ["node_modules", ".bifrost"],
+  "include": ["**/*.ts", "**/*.svelte"]
 }
