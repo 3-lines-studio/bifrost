@@ -4,7 +4,7 @@
 
 # Bifrost
 
-Server-side rendering for React components in Go. Bridge your Go backend with React frontends.
+Server-side rendering for React and Svelte components in Go. Bridge your Go backend with modern frontend frameworks.
 
 ## Installation
 
@@ -16,11 +16,28 @@ Requires [Bun](https://bun.sh) to be installed for development and building.
 Production binaries with SSR pages include the Bun runtime and do not require Bun to be installed on the target system.
 Static-only apps (no SSR) do not include the Bun runtime.
 
+## Framework Support
+
+Bifrost supports both React and Svelte with identical APIs:
+
+**React (default):**
+```go
+app := bifrost.New(bifrostFS, routes...)
+```
+
+**Svelte:**
+```go
+app := bifrost.NewWithFramework(bifrostFS, bifrost.Svelte, routes...)
+```
+
+Svelte components use `.svelte` files and support Svelte 5 runes (`$props()`, `$state()`, etc.). All features work identically across both frameworks.
+
 ## Features
 
-- **SSR** - Server-side render React components
+- **Multi-framework** - React and Svelte support with identical APIs
+- **SSR** - Server-side render React and Svelte components
 - **Hot Reload** - Auto-refresh in development
-- **Props Loading** - Pass data from Go to React via typed options
+- **Props Loading** - Pass data from Go to components via typed options
 - **File-based Routing** - Simple page organization
 - **Production Ready** - Strict embedded assets for deployment
 - **Self-Contained** - Single binary with embedded Bun runtime only when SSR pages are used
@@ -33,7 +50,7 @@ Bifrost has two distinct modes with strict separation:
 **Development** (`BIFROST_DEV=1`):
 
 - Hot reload on file changes
-- Source TSX files rendered directly
+- Source files (TSX/Svelte) rendered directly
 - Assets served from disk
 - Requires Bun installed on system
 
@@ -59,6 +76,7 @@ This creates a complete Bifrost project with a working SSR page and starts the d
 Use another template:
 - `go run github.com/3-lines-studio/bifrost/cmd/init@latest --template spa myapp`
 - `go run github.com/3-lines-studio/bifrost/cmd/init@latest --template desktop myapp`
+- `go run github.com/3-lines-studio/bifrost/cmd/init@latest --template svelte-minimal myapp`
 
 ### Build for Production
 
@@ -84,6 +102,16 @@ go run github.com/3-lines-studio/bifrost/cmd/doctor@latest .
 `doctor` only repairs the `.bifrost` directory (does not scaffold missing app files).
 
 ## API
+
+### Creating an App
+
+```go
+// React (default)
+app := bifrost.New(bifrostFS, pages...)
+
+// Svelte
+app := bifrost.NewWithFramework(bifrostFS, bifrost.Svelte, pages...)
+```
 
 ### Creating Pages
 
@@ -137,6 +165,21 @@ func main() {
 - `WithStatic()` - Prerender full HTML at build time + client hydration
 - `WithStaticData(fn)` - Prerender with dynamic paths from a data loader
 
+### Creating an App with Svelte
+
+```go
+// Svelte example - same API as React
+app := bifrost.NewWithFramework(bifrostFS, bifrost.Svelte,
+    bifrost.Page("/", "./pages/home.svelte",
+        bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+            return map[string]any{
+                "message": "Hello from Svelte!",
+            }, nil
+        }),
+    ),
+)
+```
+
 ### Mode Detection
 
 Bifrost determines mode by checking the `BIFROST_DEV` environment variable:
@@ -147,7 +190,7 @@ Bifrost determines mode by checking the `BIFROST_DEV` environment variable:
 In production mode:
 - `embed.FS` is **required** and validated at startup
 - SSR bundles are extracted from embedded assets
-- Source TSX files are **not** used
+- Source files are **not** used
 - Missing assets cause immediate errors
 
 ## Static Site Generation
@@ -184,7 +227,15 @@ This generates:
 
 ## Architecture
 
-Bifrost is organized into focused internal packages:
+Bifrost supports multiple frontend frameworks through a unified adapter pattern:
+
+- `internal/adapters/framework` - Framework adapters (React, Svelte)
+- `internal/types` - Shared types and contracts
+- `internal/runtime` - Bun process management and IPC
+- `internal/page` - HTTP handler orchestration
+- `internal/assets` - Manifest resolution and embedded FS
+- `internal/build` - Build pipeline and AST discovery
+- `internal/cli` - Terminal output helpers
 
 - `internal/types` - Shared types and contracts
 - `internal/runtime` - Bun process management and IPC
