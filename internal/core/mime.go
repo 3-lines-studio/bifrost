@@ -21,10 +21,17 @@ var contentTypes = map[string]string{
 	".ico":   "image/x-icon",
 }
 
-func GetContentType(path string) string {
-	ext := strings.ToLower(filepath.Ext(path))
+func GetContentType(p string) string {
+	ext := filepath.Ext(p)
 	if ct, ok := contentTypes[ext]; ok {
 		return ct
+	}
+	// Fallback: lowercase for case-insensitive match
+	lower := strings.ToLower(ext)
+	if lower != ext {
+		if ct, ok := contentTypes[lower]; ok {
+			return ct
+		}
 	}
 	return "application/octet-stream"
 }

@@ -57,13 +57,11 @@ func DecidePageAction(req PageRequest, entry *ManifestEntry) PageDecision {
 }
 
 func decideProductionAction(req PageRequest, entry *ManifestEntry) PageDecision {
-	normalizedPath := NormalizePath(req.RequestPath)
-
 	switch req.Mode {
 	case ModeClientOnly:
 		return decideClientOnlyAction(req, entry)
 	case ModeStaticPrerender:
-		return decideStaticPrerenderAction(req, entry, normalizedPath)
+		return decideStaticPrerenderAction(req, entry, NormalizePath(req.RequestPath))
 	default:
 		return PageDecision{Action: ActionRenderSSR}
 	}

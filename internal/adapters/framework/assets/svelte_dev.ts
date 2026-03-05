@@ -1,6 +1,12 @@
+import nodeFs from "fs";
+import nodePath from "path";
+
 const socket = process.env.BIFROST_SOCKET;
 const isDev =
   process.env.BIFROST_DEV === "1" || process.env.BIFROST_DEV === "true";
+
+const sveltePlugin = (await import("bun-plugin-svelte")).default;
+const tailwindPlugin = (await import("bun-plugin-tailwind")).default;
 
 interface ErrorDetail {
   message: string;
@@ -162,12 +168,7 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
   const isSSR = buildTarget === "bun";
 
   try {
-    const plugins = [(await import("bun-plugin-svelte")).default];
-    
-    // Add tailwind plugin for browser builds (not SSR)
-    if (!isSSR) {
-      plugins.push((await import("bun-plugin-tailwind")).default);
-    }
+    const plugins = isSSR ? [sveltePlugin] : [sveltePlugin, tailwindPlugin];
 
     const naming = isProduction
       ? {
@@ -190,25 +191,23 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
     });
 
     if (entryNames && entryNames.length === entrypoints.length) {
-      const fs = await import("fs");
-      const path = await import("path");
       for (let i = 0; i < entrypoints.length; i++) {
         const entryPath = entrypoints[i];
         const entryName = entryNames[i];
-        const ext = path.extname(entryPath);
-        const oldName = path.basename(entryPath, ext) + ".js";
+        const ext = nodePath.extname(entryPath);
+        const oldName = nodePath.basename(entryPath, ext) + ".js";
         const newName = entryName + ".js";
-        const oldPath = path.join(outdir, oldName);
-        const newPath = path.join(outdir, newName);
-        if (oldName !== newName && fs.existsSync(oldPath)) {
-          fs.renameSync(oldPath, newPath);
+        if (oldName !== newName) {
+          const oldPath = nodePath.join(outdir, oldName);
+          const newPath = nodePath.join(outdir, newName);
+          try { nodeFs.renameSync(oldPath, newPath); } catch {}
         }
-        const oldCssName = path.basename(entryPath, ext) + ".css";
+        const oldCssName = nodePath.basename(entryPath, ext) + ".css";
         const newCssName = entryName + ".css";
-        const oldCssPath = path.join(outdir, oldCssName);
-        const newCssPath = path.join(outdir, newCssName);
-        if (oldCssName !== newCssName && fs.existsSync(oldCssPath)) {
-          fs.renameSync(oldCssPath, newCssPath);
+        if (oldCssName !== newCssName) {
+          const oldCssPath = nodePath.join(outdir, oldCssName);
+          const newCssPath = nodePath.join(outdir, newCssName);
+          try { nodeFs.renameSync(oldCssPath, newCssPath); } catch {}
         }
       }
     }

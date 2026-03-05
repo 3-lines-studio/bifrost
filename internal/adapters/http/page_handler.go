@@ -3,8 +3,10 @@ package http
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"html"
+	"io"
 	"net/http"
 	"path"
 	"path/filepath"
@@ -43,6 +45,8 @@ func NewPageHandler(
 	}
 }
 
+var errNeedsSetup = errors.New("page needs setup but setup not implemented in adapter")
+
 func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	input := usecase.ServePageInput{
 		Config:      h.config,
@@ -69,10 +73,10 @@ func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		h.serveRouteFile(w, req, output.RoutePath)
 
 	case core.ActionNotFound:
-		h.serveNotFound(w, req)
+		http.NotFound(w, req)
 
 	case core.ActionNeedsSetup:
-		h.serveError(w, req, fmt.Errorf("page needs setup but setup not implemented in adapter"))
+		h.serveError(w, req, errNeedsSetup)
 
 	case core.ActionRenderClientOnlyShell,
 		core.ActionRenderStaticPrerender,
@@ -82,7 +86,6 @@ func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 // safeEmbedPath builds a safe embedded FS path rooted under ".bifrost".
-// Returns the cleaned embed path and true, or empty string and false if unsafe.
 func safeEmbedPath(raw string) (string, bool) {
 	if containsDotDot(strings.ReplaceAll(raw, "\\", "/")) {
 		return "", false
@@ -94,7 +97,6 @@ func safeEmbedPath(raw string) (string, bool) {
 	}
 	return path.Join(".bifrost", cleaned), true
 }
-
 
 func (h *PageHandler) serveStaticFile(w http.ResponseWriter, req *http.Request, p string) {
 	if h.assetsFS != (embed.FS{}) {
@@ -114,17 +116,7 @@ func (h *PageHandler) serveStaticFile(w http.ResponseWriter, req *http.Request, 
 	}
 
 	safePath := filepath.Join(".bifrost", filepath.FromSlash(path.Clean("/"+p)))
-	abs, err := filepath.Abs(safePath)
-	if err != nil {
-		http.NotFound(w, req)
-		return
-	}
-	root, err := filepath.Abs(".bifrost")
-	if err != nil {
-		http.NotFound(w, req)
-		return
-	}
-	if !strings.HasPrefix(abs, root+string(filepath.Separator)) && abs != root {
+	if !isPathSafe(safePath, ".bifrost") {
 		http.NotFound(w, req)
 		return
 	}
@@ -149,31 +141,17 @@ func (h *PageHandler) serveRouteFile(w http.ResponseWriter, req *http.Request, h
 	}
 
 	safePath := filepath.Join(".bifrost", filepath.FromSlash(path.Clean("/"+htmlPath)))
-	abs, err := filepath.Abs(safePath)
-	if err != nil {
-		http.NotFound(w, req)
-		return
-	}
-	root, err := filepath.Abs(".bifrost")
-	if err != nil {
-		http.NotFound(w, req)
-		return
-	}
-	if !strings.HasPrefix(abs, root+string(filepath.Separator)) && abs != root {
+	if !isPathSafe(safePath, ".bifrost") {
 		http.NotFound(w, req)
 		return
 	}
 	http.ServeFile(w, req, safePath)
 }
 
-func (h *PageHandler) serveNotFound(w http.ResponseWriter, req *http.Request) {
-	http.NotFound(w, req)
-}
-
-func (h *PageHandler) serveHTML(w http.ResponseWriter, html string) {
+func (h *PageHandler) serveHTML(w http.ResponseWriter, htmlContent string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(html))
+	_, _ = io.WriteString(w, htmlContent)
 }
 
 func (h *PageHandler) serveError(w http.ResponseWriter, req *http.Request, err error) {
@@ -195,7 +173,7 @@ func (h *PageHandler) serveError(w http.ResponseWriter, req *http.Request, err e
 	if err := core.ErrorTemplate.Execute(&buf, data); err != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte("<!doctype html><html><body><pre>" + html.EscapeString(data.Message) + "</pre></body></html>"))
+		_, _ = io.WriteString(w, "<!doctype html><html><body><pre>"+html.EscapeString(data.Message)+"</pre></body></html>")
 		return
 	}
 

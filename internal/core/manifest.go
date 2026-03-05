@@ -37,22 +37,20 @@ type Assets struct {
 }
 
 func GetAssets(man *Manifest, entryName string) Assets {
-	if man != nil && man.Entries[entryName].Script != "" {
-		entry := man.Entries[entryName]
-		return Assets{
-			Script:   entry.Script,
-			CSS:      entry.CSS,
-			Chunks:   entry.Chunks,
-			IsStatic: entry.Static,
-			SSRPath:  entry.SSR,
+	if man != nil {
+		if entry, ok := man.Entries[entryName]; ok && entry.Script != "" {
+			return Assets{
+				Script:   entry.Script,
+				CSS:      entry.CSS,
+				Chunks:   entry.Chunks,
+				IsStatic: entry.Static,
+				SSRPath:  entry.SSR,
+			}
 		}
 	}
 	return Assets{
-		Script:   "/dist/" + entryName + ".js",
-		CSS:      "/dist/" + entryName + ".css",
-		Chunks:   nil,
-		IsStatic: false,
-		SSRPath:  "",
+		Script: "/dist/" + entryName + ".js",
+		CSS:    "/dist/" + entryName + ".css",
 	}
 }
 

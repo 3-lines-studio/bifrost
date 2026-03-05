@@ -7,5 +7,5 @@ check:
 	cd example-svelte && bun i && /tmp/bifrost-build --framework svelte ./cmd/full/main.go || true
 	golangci-lint run
 	go test ./... -race
-	go test ./test/e2e/...
+	cd test/e2e && go test ./...
 	go build

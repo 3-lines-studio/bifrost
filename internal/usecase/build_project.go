@@ -8,6 +8,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -23,6 +24,12 @@ import (
 
 //go:embed clientonly_html_template.txt
 var clientOnlyHTMLTemplate string
+
+// Precompiled title extraction regexes (avoid per-call compilation).
+var (
+	titleRegex         = regexp.MustCompile(`<title>([^}]+?)</title>`)
+	titleTemplateRegex = regexp.MustCompile(`<title>\{` + "`" + `([^}]+?)` + "`" + `\}</title>`)
+)
 
 type BuildInput struct {
 	MainFile    string
@@ -59,6 +66,14 @@ func NewBuildService(renderer Renderer, fs FileSystem, cli CLIOutput, adapter co
 	}
 }
 
+// pageMetadata holds precomputed per-page data to avoid redundant calculations.
+type pageMetadata struct {
+	config           core.PageConfig
+	entryName        string
+	absComponentPath string
+	modeStr          string
+}
+
 func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) BuildOutput {
 	s.cli.PrintHeader("Bifrost Build")
 
@@ -77,10 +92,36 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		}
 	}
 
+	// Precompute per-page metadata once
+	pages := make([]pageMetadata, len(pageConfigs))
+	hasStaticPrerender := false
+	needsRuntime := false
+	for i, config := range pageConfigs {
+		entryName := core.EntryNameForPath(config.ComponentPath)
+		var modeStr string
+		switch config.Mode {
+		case core.ModeClientOnly:
+			modeStr = "client"
+		case core.ModeStaticPrerender:
+			modeStr = "static"
+			hasStaticPrerender = true
+		default:
+			modeStr = "ssr"
+		}
+		if config.Mode != core.ModeClientOnly {
+			needsRuntime = true
+		}
+		pages[i] = pageMetadata{
+			config:           config,
+			entryName:        entryName,
+			absComponentPath: filepath.Join(input.OriginalCwd, config.ComponentPath),
+			modeStr:          modeStr,
+		}
+	}
+
 	report := cli.NewBuildReport(s.cli, filepath.Join(input.OriginalCwd, ".bifrost"))
 	report.SetPageCount(len(pageConfigs))
 
-	// Create output directories
 	bifrostDir := filepath.Join(input.OriginalCwd, ".bifrost")
 	outdir := filepath.Join(bifrostDir, "dist")
 	ssrDir := filepath.Join(bifrostDir, "ssr")
@@ -102,37 +143,32 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 	}
 	report.EndStep(stepDirs, true, "")
 
-	// Copy public assets
 	publicDir := filepath.Join(input.OriginalCwd, "public")
 	publicDestDir := filepath.Join(bifrostDir, "public")
 	if err := s.copyPublicDir(publicDir, publicDestDir); err != nil {
 		report.AddWarning("Public assets", "Failed to copy public assets", []string{err.Error()})
 	}
 
-	// Initialize manifest
 	manifest := &core.Manifest{
-		Entries: make(map[string]core.ManifestEntry),
+		Entries: make(map[string]core.ManifestEntry, len(pages)),
 	}
 
-	// Build SSR bundles FIRST (for SSR and StaticPrerender pages, skip ClientOnly)
 	stepSSR := report.StartStep("Building SSR bundles")
-	var ssrEntryFiles []string
 	ssrErrors := make([]BuildError, 0)
 
-	for _, config := range pageConfigs {
-		if config.Mode == core.ModeClientOnly {
+	for i := range pages {
+		pm := &pages[i]
+		if pm.config.Mode == core.ModeClientOnly {
 			continue
 		}
 
-		entryName := core.EntryNameForPath(config.ComponentPath)
-		ssrEntryName := entryName + "-ssr"
+		ssrEntryName := pm.entryName + "-ssr"
 		ssrEntryPath := filepath.Join(entriesDir, ssrEntryName+s.adapter.EntryFileExtension())
 
-		absComponentPath := filepath.Join(input.OriginalCwd, config.ComponentPath)
-		importPath, err := s.calculateImportPath(ssrEntryPath, absComponentPath)
+		importPath, err := s.calculateImportPath(ssrEntryPath, pm.absComponentPath)
 		if err != nil {
 			ssrErrors = append(ssrErrors, BuildError{
-				Page:    config.ComponentPath,
+				Page:    pm.config.ComponentPath,
 				Message: "Failed to calculate import path",
 				Details: []string{err.Error()},
 			})
@@ -141,23 +177,21 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 
 		if err := s.writeSSREntry(ssrEntryPath, importPath); err != nil {
 			ssrErrors = append(ssrErrors, BuildError{
-				Page:    config.ComponentPath,
+				Page:    pm.config.ComponentPath,
 				Message: "Failed to write SSR entry",
 				Details: []string{err.Error()},
 			})
 			continue
 		}
-		ssrEntryFiles = append(ssrEntryFiles, ssrEntryPath)
 
-		entrypoints := []string{ssrEntryPath}
-		if err := s.renderer.BuildSSR(entrypoints, ssrDir); err != nil {
-			ssrErrors = append(ssrErrors, s.parseBuildError(entryName, err))
+		if err := s.renderer.BuildSSR([]string{ssrEntryPath}, ssrDir); err != nil {
+			ssrErrors = append(ssrErrors, s.parseBuildError(pm.entryName, err))
 			continue
 		}
 
-		manifest.Entries[entryName] = core.ManifestEntry{
-			Script: "/dist/" + entryName + ".js",
-			CSS:    "/dist/" + entryName + ".css",
+		manifest.Entries[pm.entryName] = core.ManifestEntry{
+			Script: "/dist/" + pm.entryName + ".js",
+			CSS:    "/dist/" + pm.entryName + ".css",
 			SSR:    "/ssr/" + ssrEntryName + ".js",
 			Mode:   "ssr",
 		}
@@ -172,32 +206,27 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		}
 	}
 
-	// Generate client entry files
 	stepClient := report.StartStep("Generating client entry files")
-	var clientEntryFiles []string
-	entryToConfig := make(map[string]core.PageConfig)
 	clientEntryErrors := make([]BuildError, 0)
 
-	for _, config := range pageConfigs {
-		entryName := core.EntryNameForPath(config.ComponentPath)
-		entryPath := filepath.Join(entriesDir, entryName+s.adapter.EntryFileExtension())
-		entryToConfig[entryPath] = config
+	for i := range pages {
+		pm := &pages[i]
+		entryPath := filepath.Join(entriesDir, pm.entryName+s.adapter.EntryFileExtension())
 
-		absComponentPath := filepath.Join(input.OriginalCwd, config.ComponentPath)
-		importPath, err := s.calculateImportPath(entryPath, absComponentPath)
+		importPath, err := s.calculateImportPath(entryPath, pm.absComponentPath)
 		if err != nil {
 			clientEntryErrors = append(clientEntryErrors, BuildError{
-				Page:    config.ComponentPath,
+				Page:    pm.config.ComponentPath,
 				Message: "Failed to calculate import path",
 				Details: []string{err.Error()},
 			})
 			continue
 		}
 
-		if config.Mode == core.ModeClientOnly {
+		if pm.config.Mode == core.ModeClientOnly {
 			if err := s.writeClientOnlyEntry(entryPath, importPath); err != nil {
 				clientEntryErrors = append(clientEntryErrors, BuildError{
-					Page:    entryName,
+					Page:    pm.entryName,
 					Message: "Failed to write client-only entry",
 					Details: []string{err.Error()},
 				})
@@ -206,51 +235,34 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		} else {
 			if err := s.writeHydrationEntry(entryPath, importPath); err != nil {
 				clientEntryErrors = append(clientEntryErrors, BuildError{
-					Page:    entryName,
+					Page:    pm.entryName,
 					Message: "Failed to write hydration entry",
 					Details: []string{err.Error()},
 				})
 				continue
 			}
 		}
-		clientEntryFiles = append(clientEntryFiles, entryPath)
 	}
 	report.EndStep(stepClient, len(clientEntryErrors) == 0, "")
 	for _, err := range clientEntryErrors {
 		report.AddWarning(err.Page, err.Message, err.Details)
 	}
 
-	// Build client assets
 	stepClientAssets := report.StartStep("Building client assets")
 	clientAssetErrors := make([]BuildError, 0)
 
-	for _, entryFile := range clientEntryFiles {
-		config := entryToConfig[entryFile]
-		entryName := core.EntryNameForPath(config.ComponentPath)
-
-		entryNames := []string{entryName}
-		entrypoints := []string{entryFile}
-
-		if err := s.renderer.Build(entrypoints, outdir, entryNames); err != nil {
-			clientAssetErrors = append(clientAssetErrors, s.parseBuildError(entryName, err))
+	for i := range pages {
+		pm := &pages[i]
+		entryPath := filepath.Join(entriesDir, pm.entryName+s.adapter.EntryFileExtension())
+		if err := s.renderer.Build([]string{entryPath}, outdir, []string{pm.entryName}); err != nil {
+			clientAssetErrors = append(clientAssetErrors, s.parseBuildError(pm.entryName, err))
 			continue
 		}
-
-		var modeStr string
-		switch config.Mode {
-		case core.ModeClientOnly:
-			modeStr = "client"
-		case core.ModeStaticPrerender:
-			modeStr = "static"
-		default:
-			modeStr = "ssr"
-		}
-
-		entry := manifest.Entries[entryName]
-		entry.Script = "/dist/" + entryName + ".js"
-		entry.CSS = "/dist/" + entryName + ".css"
-		entry.Mode = modeStr
-		manifest.Entries[entryName] = entry
+		entry := manifest.Entries[pm.entryName]
+		entry.Script = "/dist/" + pm.entryName + ".js"
+		entry.CSS = "/dist/" + pm.entryName + ".css"
+		entry.Mode = pm.modeStr
+		manifest.Entries[pm.entryName] = entry
 	}
 	report.EndStep(stepClientAssets, len(clientAssetErrors) == 0, "")
 	for _, err := range clientAssetErrors {
@@ -260,35 +272,34 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 	// Generate ClientOnly HTML shells
 	stepHTML := report.StartStep("Generating ClientOnly HTML shells")
 	htmlErrors := make([]BuildError, 0)
-	for _, config := range pageConfigs {
-		if config.Mode != core.ModeClientOnly {
+	for i := range pages {
+		pm := &pages[i]
+		if pm.config.Mode != core.ModeClientOnly {
 			continue
 		}
 
-		entryName := core.EntryNameForPath(config.ComponentPath)
-		absComponentPath := filepath.Join(input.OriginalCwd, config.ComponentPath)
-		title := s.extractTitleFromComponent(absComponentPath)
+		title := s.extractTitleFromComponent(pm.absComponentPath)
 
-		htmlPath := filepath.Join(pagesDir, entryName+".html")
-		if err := s.writeClientOnlyHTML(htmlPath, entryName, title); err != nil {
+		htmlPath := filepath.Join(pagesDir, pm.entryName+".html")
+		if err := s.writeClientOnlyHTML(htmlPath, pm.entryName, title); err != nil {
 			htmlErrors = append(htmlErrors, BuildError{
-				Page:    entryName,
+				Page:    pm.entryName,
 				Message: "Failed to generate HTML shell",
 				Details: []string{err.Error()},
 			})
 			continue
 		}
 
-		entry := manifest.Entries[entryName]
-		entry.HTML = "/pages/" + entryName + ".html"
-		manifest.Entries[entryName] = entry
+		entry := manifest.Entries[pm.entryName]
+		entry.HTML = "/pages/" + pm.entryName + ".html"
+		manifest.Entries[pm.entryName] = entry
 	}
 	report.EndStep(stepHTML, len(htmlErrors) == 0, "")
 	for _, err := range htmlErrors {
 		report.AddWarning(err.Page, err.Message, err.Details)
 	}
 
-	// Write manifest before export mode so export binary can read it
+	// Write manifest before export mode
 	manifestPath := filepath.Join(bifrostDir, "manifest.json")
 	manifestData, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -298,42 +309,25 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		return BuildOutput{Success: false, Error: fmt.Errorf("failed to write manifest: %w", err)}
 	}
 
-	// Build StaticPrerender pages via export mode
-	hasStaticPrerender := false
-	for _, config := range pageConfigs {
-		if config.Mode == core.ModeStaticPrerender {
-			hasStaticPrerender = true
-			break
-		}
-	}
-
+	// Only run export mode when static-prerender pages exist
 	stepExport := report.StartStep("Building StaticPrerender pages")
-	exportErr := s.runExportMode(input.OriginalCwd, bifrostDir, manifest, input.MainFile)
-	if exportErr != nil {
-		if hasStaticPrerender {
+	if hasStaticPrerender {
+		exportErr := s.runExportMode(input.OriginalCwd, bifrostDir, manifest, input.MainFile)
+		if exportErr != nil {
 			report.AddError("StaticPrerender", "Export mode failed", []string{exportErr.Error()})
-		} else {
-			report.AddWarning("StaticPrerender", "Export mode failed", []string{exportErr.Error(), "No StaticPrerender pages configured"})
 		}
-	}
-	report.EndStep(stepExport, exportErr == nil, "")
+		report.EndStep(stepExport, exportErr == nil, "")
 
-	// Re-write manifest after export mode to include static routes
-	manifestData, err = json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return BuildOutput{Success: false, Error: fmt.Errorf("failed to marshal manifest after export: %w", err)}
-	}
-	if err := os.WriteFile(manifestPath, manifestData, 0644); err != nil {
-		return BuildOutput{Success: false, Error: fmt.Errorf("failed to write manifest after export: %w", err)}
-	}
-
-	// Compile embedded runtime if needed
-	needsRuntime := false
-	for _, config := range pageConfigs {
-		if config.Mode != core.ModeClientOnly {
-			needsRuntime = true
-			break
+		// Re-write manifest only when export ran (may have added static routes)
+		manifestData, err = json.MarshalIndent(manifest, "", "  ")
+		if err != nil {
+			return BuildOutput{Success: false, Error: fmt.Errorf("failed to marshal manifest after export: %w", err)}
 		}
+		if err := os.WriteFile(manifestPath, manifestData, 0644); err != nil {
+			return BuildOutput{Success: false, Error: fmt.Errorf("failed to write manifest after export: %w", err)}
+		}
+	} else {
+		report.EndStep(stepExport, true, "")
 	}
 
 	if needsRuntime {
@@ -346,17 +340,17 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		}
 	}
 
-	// Clean up entry files
 	stepCleanup := report.StartStep("Cleaning up entry files")
-	for _, entryFile := range clientEntryFiles {
-		_ = os.Remove(entryFile)
-	}
-	for _, entryFile := range ssrEntryFiles {
-		_ = os.Remove(entryFile)
+	for i := range pages {
+		pm := &pages[i]
+		ext := s.adapter.EntryFileExtension()
+		_ = os.Remove(filepath.Join(entriesDir, pm.entryName+ext))
+		if pm.config.Mode != core.ModeClientOnly {
+			_ = os.Remove(filepath.Join(entriesDir, pm.entryName+"-ssr"+ext))
+		}
 	}
 	report.EndStep(stepCleanup, true, "")
 
-	// Render the final report
 	report.Render()
 
 	return BuildOutput{Success: !report.HasFailures()}
@@ -379,7 +373,7 @@ func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, error) {
 		}
 
 		var funcName string
-		argIndex := 1 // Component path is the second argument (index 1)
+		argIndex := 1
 
 		switch fn := callExpr.Fun.(type) {
 		case *ast.SelectorExpr:
@@ -398,7 +392,6 @@ func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, error) {
 			return true
 		}
 
-		// Extract component path (second argument)
 		firstArg := callExpr.Args[argIndex]
 		lit, ok := firstArg.(*ast.BasicLit)
 		if !ok || lit.Kind != token.STRING {
@@ -412,7 +405,6 @@ func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, error) {
 			return true
 		}
 
-		// Detect mode from options
 		mode, hasStaticDataLoader := s.detectPageMode(callExpr.Args[argIndex:])
 
 		if !seen[path] {
@@ -420,9 +412,9 @@ func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, error) {
 			configs = append(configs, core.PageConfig{
 				ComponentPath:    path,
 				Mode:             mode,
-				StaticDataLoader: nil, // Will be set at runtime
+				StaticDataLoader: nil,
 			})
-			_ = hasStaticDataLoader // Mark as used - actual loader bound at runtime
+			_ = hasStaticDataLoader
 		}
 
 		return true
@@ -483,7 +475,6 @@ func (s *BuildService) calculateImportPath(entryPath, componentPath string) (str
 		return "", err
 	}
 
-	// Ensure path starts with ./ or ../
 	if !strings.HasPrefix(relPath, ".") {
 		relPath = "./" + relPath
 	}
@@ -492,24 +483,17 @@ func (s *BuildService) calculateImportPath(entryPath, componentPath string) (str
 }
 
 func (s *BuildService) extractTitleFromComponent(componentPath string) string {
-	// Read component file
 	data, err := os.ReadFile(componentPath)
 	if err != nil {
 		return ""
 	}
 	content := string(data)
 
-	// Try to find title in Head component
-	// Pattern: <title>Content</title>
-	titleRegex := regexp.MustCompile(`<title>([^}]+?)</title>`)
 	matches := titleRegex.FindStringSubmatch(content)
 	if len(matches) > 1 {
 		return strings.TrimSpace(matches[1])
 	}
 
-	// Try to find title in Head function with template literal
-	// Pattern: <title>{`Content`}</title>
-	titleTemplateRegex := regexp.MustCompile(`<title>\{` + "`" + `([^}]+?)` + "`" + `\}</title>`)
 	matches = titleTemplateRegex.FindStringSubmatch(content)
 	if len(matches) > 1 {
 		return strings.TrimSpace(matches[1])
@@ -527,7 +511,6 @@ func (s *BuildService) writeClientOnlyHTML(htmlPath, entryName, title string) er
 }
 
 func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *core.Manifest, mainFile string) error {
-	// Build the user's binary
 	binaryPath := filepath.Join(bifrostDir, "temp-app")
 	cmd := exec.Command("go", "build", "-o", binaryPath, mainFile)
 	cmd.Dir = originalCwd
@@ -541,14 +524,12 @@ func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *c
 		return fmt.Errorf("failed to build app for export: %v\nOutput: %s", err, output)
 	}
 
-	// Make binary executable
 	if err := os.Chmod(binaryPath, 0755); err != nil {
 		return fmt.Errorf("failed to make binary executable: %w", err)
 	}
 
 	defer func() { _ = os.Remove(binaryPath) }()
 
-	// Run the binary in export mode
 	exportCmd := exec.Command(binaryPath)
 	exportCmd.Dir = originalCwd
 	exportCmd.Env = append(os.Environ(),
@@ -562,7 +543,6 @@ func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *c
 		return fmt.Errorf("export mode failed: %w", err)
 	}
 
-	// Merge export manifest into main manifest
 	exportManifestPath := filepath.Join(bifrostDir, "export-manifest.json")
 	exportData, err := os.ReadFile(exportManifestPath)
 	if err != nil {
@@ -574,7 +554,6 @@ func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *c
 		return fmt.Errorf("failed to parse export manifest: %w", err)
 	}
 
-	// Merge StaticRoutes into main manifest
 	for entryName, entry := range exportManifest.Entries {
 		if existing, ok := manifest.Entries[entryName]; ok {
 			existing.StaticRoutes = entry.StaticRoutes
@@ -584,7 +563,6 @@ func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *c
 		}
 	}
 
-	// Clean up export manifest
 	_ = os.Remove(exportManifestPath)
 
 	return nil
@@ -612,7 +590,6 @@ func (s *BuildService) compileEmbeddedRuntime(bifrostDir string) error {
 	}
 
 	tempSourcePath := filepath.Join(runtimeDir, "renderer.ts")
-	// Use the production renderer source from the framework adapter
 	sourceContent := s.adapter.ProdRendererSource()
 
 	if err := os.WriteFile(tempSourcePath, []byte(sourceContent), 0644); err != nil {
@@ -695,6 +672,7 @@ func (s *BuildService) copyPublicDir(src, dst string) error {
 	return s.copyDirRecursive(src, dst)
 }
 
+// copyDirRecursive uses streaming io.Copy instead of ReadFile/WriteFile to reduce peak memory.
 func (s *BuildService) copyDirRecursive(src, dst string) error {
 	entries, err := os.ReadDir(src)
 	if err != nil {
@@ -714,16 +692,30 @@ func (s *BuildService) copyDirRecursive(src, dst string) error {
 				return err
 			}
 		} else {
-			data, err := os.ReadFile(srcPath)
-			if err != nil {
-				return fmt.Errorf("failed to read file %s: %w", srcPath, err)
-			}
-
-			if err := os.WriteFile(dstPath, data, 0644); err != nil {
-				return fmt.Errorf("failed to write file %s: %w", dstPath, err)
+			if err := copyFileStream(srcPath, dstPath); err != nil {
+				return err
 			}
 		}
 	}
 
+	return nil
+}
+
+func copyFileStream(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("failed to read file %s: %w", src, err)
+	}
+	defer func() { _ = srcFile.Close() }()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("failed to write file %s: %w", dst, err)
+	}
+	defer func() { _ = dstFile.Close() }()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return fmt.Errorf("failed to copy file %s: %w", src, err)
+	}
 	return nil
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
 	"github.com/3-lines-studio/bifrost/internal/core"
@@ -34,10 +35,47 @@ type ServePageOutput struct {
 	Error      error
 }
 
+// singleflightGroup deduplicates concurrent dev builds for the same entry.
+type singleflightGroup struct {
+	mu sync.Mutex
+	m  map[string]*singleflightCall
+}
+
+type singleflightCall struct {
+	wg  sync.WaitGroup
+	err error
+}
+
+func (g *singleflightGroup) Do(key string, fn func() error) error {
+	g.mu.Lock()
+	if g.m == nil {
+		g.m = make(map[string]*singleflightCall)
+	}
+	if c, ok := g.m[key]; ok {
+		g.mu.Unlock()
+		c.wg.Wait()
+		return c.err
+	}
+	c := &singleflightCall{}
+	c.wg.Add(1)
+	g.m[key] = c
+	g.mu.Unlock()
+
+	c.err = fn()
+	c.wg.Done()
+
+	g.mu.Lock()
+	delete(g.m, key)
+	g.mu.Unlock()
+
+	return c.err
+}
+
 type PageService struct {
-	renderer Renderer
-	fs       FileSystem
-	adapter  core.FrameworkAdapter
+	renderer   Renderer
+	fs         FileSystem
+	adapter    core.FrameworkAdapter
+	buildGroup singleflightGroup
 }
 
 func NewPageService(renderer Renderer, fs FileSystem, adapter core.FrameworkAdapter) *PageService {
@@ -91,7 +129,9 @@ func (s *PageService) ServePage(ctx context.Context, input ServePageInput) Serve
 
 	case core.ActionNeedsSetup:
 		if input.IsDev && s.renderer != nil {
-			buildErr := s.buildAndRender(ctx, input)
+			buildErr := s.buildGroup.Do(input.EntryName, func() error {
+				return s.buildAndRender(ctx, input)
+			})
 			if buildErr != nil {
 				return ServePageOutput{
 					Action: core.ActionNeedsSetup,

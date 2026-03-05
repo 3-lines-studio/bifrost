@@ -5,6 +5,7 @@ go 1.25.6
 require (
 	github.com/3-lines-studio/bifrost v0.0.0
 	github.com/3-lines-studio/bifrost/example v0.0.0
+	github.com/3-lines-studio/bifrost/example-svelte v0.0.0
 	github.com/gkampitakis/go-snaps v0.5.19
 )
 
@@ -25,4 +26,5 @@ require (
 replace (
 	github.com/3-lines-studio/bifrost => ../..
 	github.com/3-lines-studio/bifrost/example => ../../example
+	github.com/3-lines-studio/bifrost/example-svelte => ../../example-svelte
 )

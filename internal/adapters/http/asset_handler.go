@@ -15,7 +15,6 @@ import (
 // Returns the cleaned path and false if the path is unsafe (escapes root).
 func cleanPath(raw string) (string, bool) {
 	raw = strings.ReplaceAll(raw, "\\", "/")
-	// Reject any raw input containing ".." segments before cleaning
 	if containsDotDot(raw) {
 		return "", false
 	}
@@ -27,13 +26,22 @@ func cleanPath(raw string) (string, bool) {
 	return cleaned, true
 }
 
+// containsDotDot checks for ".." path segments without allocating a slice.
 func containsDotDot(p string) bool {
-	for _, seg := range strings.Split(p, "/") {
-		if seg == ".." {
+	for {
+		idx := strings.Index(p, "..")
+		if idx < 0 {
+			return false
+		}
+		// Check that ".." is a whole segment (bounded by "/" or string edges)
+		atStart := idx == 0 || p[idx-1] == '/'
+		end := idx + 2
+		atEnd := end == len(p) || p[end] == '/'
+		if atStart && atEnd {
 			return true
 		}
+		p = p[end:]
 	}
-	return false
 }
 
 type AssetHandler struct {
@@ -62,20 +70,11 @@ func (h *AssetHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// serveFromFS uses http.ServeFile for streaming + range support instead of ReadFile.
 func (h *AssetHandler) serveFromFS(w http.ResponseWriter, req *http.Request, p string) {
 	fullPath := filepath.Join(".bifrost", p)
 
-	abs, err := filepath.Abs(fullPath)
-	if err != nil {
-		http.NotFound(w, req)
-		return
-	}
-	root, err := filepath.Abs(".bifrost")
-	if err != nil {
-		http.NotFound(w, req)
-		return
-	}
-	if !strings.HasPrefix(abs, root+string(filepath.Separator)) && abs != root {
+	if !isPathSafe(fullPath, ".bifrost") {
 		http.NotFound(w, req)
 		return
 	}
@@ -86,15 +85,9 @@ func (h *AssetHandler) serveFromFS(w http.ResponseWriter, req *http.Request, p s
 		return
 	}
 
-	data, err := os.ReadFile(fullPath)
-	if err != nil {
-		http.NotFound(w, req)
-		return
-	}
-
 	contentType := core.GetContentType(p)
 	w.Header().Set("Content-Type", contentType)
-	_, _ = w.Write(data)
+	http.ServeFile(w, req, fullPath)
 }
 
 func (h *AssetHandler) serveFromEmbed(w http.ResponseWriter, req *http.Request, p string) {
@@ -132,92 +125,63 @@ func (h *PublicHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if h.isDev {
+		h.servePublicFromFSDirect(w, req, cleaned)
+	} else {
+		h.servePublicFromEmbedDirect(w, req, cleaned)
+	}
+}
+
+// servePublicFromFSDirect merges exist-check + serve into one path to avoid double stat/open.
+func (h *PublicHandler) servePublicFromFSDirect(w http.ResponseWriter, req *http.Request, cleaned string) {
 	publicPath := filepath.Join("public", cleaned)
 
-	var exists bool
-	if h.isDev {
-		exists = h.fileExistsInFS(publicPath)
-	} else {
-		exists = h.fileExistsInEmbed(cleaned)
-	}
-
-	if !exists {
+	if !isPathSafe(publicPath, "public") {
 		h.next.ServeHTTP(w, req)
 		return
 	}
 
-	if h.isDev {
-		h.servePublicFromFS(w, req, publicPath)
-	} else {
-		h.servePublicFromEmbed(w, req, cleaned)
-	}
-}
-
-func (h *PublicHandler) fileExistsInFS(p string) bool {
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		return false
-	}
-	root, err := filepath.Abs("public")
-	if err != nil {
-		return false
-	}
-	if !strings.HasPrefix(abs, root+string(filepath.Separator)) && abs != root {
-		return false
-	}
-	info, err := os.Stat(p)
-	return err == nil && !info.IsDir()
-}
-
-func (h *PublicHandler) fileExistsInEmbed(cleaned string) bool {
-	embedPath := path.Join("public", cleaned)
-	_, err := h.assetsFS.ReadFile(embedPath)
-	return err == nil
-}
-
-func (h *PublicHandler) servePublicFromFS(w http.ResponseWriter, req *http.Request, p string) {
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		http.NotFound(w, req)
-		return
-	}
-	root, err := filepath.Abs("public")
-	if err != nil {
-		http.NotFound(w, req)
-		return
-	}
-	if !strings.HasPrefix(abs, root+string(filepath.Separator)) && abs != root {
-		http.NotFound(w, req)
-		return
-	}
-
-	info, err := os.Stat(p)
+	info, err := os.Stat(publicPath)
 	if err != nil || info.IsDir() {
-		http.NotFound(w, req)
+		h.next.ServeHTTP(w, req)
 		return
 	}
 
-	file, err := os.Open(p)
+	file, err := os.Open(publicPath)
 	if err != nil {
-		http.NotFound(w, req)
+		h.next.ServeHTTP(w, req)
 		return
 	}
 	defer func() { _ = file.Close() }()
 
-	contentType := core.GetContentType(p)
+	contentType := core.GetContentType(publicPath)
 	w.Header().Set("Content-Type", contentType)
 	http.ServeContent(w, req, info.Name(), info.ModTime(), file)
 }
 
-func (h *PublicHandler) servePublicFromEmbed(w http.ResponseWriter, req *http.Request, cleaned string) {
+// servePublicFromEmbedDirect merges exist-check + serve to avoid double ReadFile.
+func (h *PublicHandler) servePublicFromEmbedDirect(w http.ResponseWriter, req *http.Request, cleaned string) {
 	embedPath := path.Join("public", cleaned)
 	data, err := h.assetsFS.ReadFile(embedPath)
 	if err != nil {
-		http.NotFound(w, req)
+		h.next.ServeHTTP(w, req)
 		return
 	}
 
 	contentType := core.GetContentType(cleaned)
 	w.Header().Set("Content-Type", contentType)
 	_, _ = w.Write(data)
+}
+
+// isPathSafe checks that the resolved absolute path stays under root.
+func isPathSafe(p, root string) bool {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return false
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	return abs == absRoot || strings.HasPrefix(abs, absRoot+string(filepath.Separator))
 }

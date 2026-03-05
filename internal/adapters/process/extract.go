@@ -49,8 +49,12 @@ func HasEmbeddedRuntime(assetsFS embed.FS) bool {
 		runtimePath += ".exe"
 	}
 
-	_, err := assetsFS.ReadFile(runtimePath)
-	return err == nil
+	f, err := assetsFS.Open(runtimePath)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
 }
 
 func ExtractSSRBundles(assetsFS embed.FS, manifest *core.Manifest) (string, func(), error) {

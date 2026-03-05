@@ -23,8 +23,12 @@ func (fs *EmbedFileSystem) ReadDir(path string) ([]iofs.DirEntry, error) {
 }
 
 func (fs *EmbedFileSystem) FileExists(path string) bool {
-	_, err := fs.fs.ReadFile(path)
-	return err == nil
+	f, err := fs.fs.Open(path)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
 }
 
 func (fs *EmbedFileSystem) WriteFile(path string, data []byte, perm iofs.FileMode) error {

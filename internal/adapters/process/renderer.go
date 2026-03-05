@@ -86,12 +86,7 @@ func NewRenderer(mode core.Mode, source string) (*Renderer, error) {
 		return nil, err
 	}
 
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialer.DialContext(ctx, "unix", socket)
-		},
-	}
+	transport := newUnixTransport(socket)
 
 	return &Renderer{
 		cmd:    cmd,
@@ -119,12 +114,7 @@ func NewRendererFromExecutable(executablePath string, cleanup func()) (*Renderer
 		return nil, err
 	}
 
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialer.DialContext(ctx, "unix", socket)
-		},
-	}
+	transport := newUnixTransport(socket)
 
 	return &Renderer{
 		cmd:     cmd,
@@ -132,6 +122,19 @@ func NewRendererFromExecutable(executablePath string, cleanup func()) (*Renderer
 		client:  &http.Client{Transport: transport, Timeout: buildTimeout},
 		cleanup: cleanup,
 	}, nil
+}
+
+func newUnixTransport(socket string) *http.Transport {
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "unix", socket)
+		},
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+		DisableCompression:  true,
+	}
 }
 
 func (r *Renderer) Stop() error {
