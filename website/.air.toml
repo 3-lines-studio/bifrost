@@ -1,0 +1,12 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/main ."
+bin = "./tmp/main"
+delay = 500
+include_ext = ["go", "svelte", "css", "md"]
+exclude_dir = ["tmp", "node_modules", ".bifrost"]
+
+[misc]
+clean_on_exit = true

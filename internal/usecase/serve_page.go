@@ -175,6 +175,8 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePageInput) ServePageOutput {
 	requestPath := core.NormalizePath(input.RequestPath)
 
+	renderPath := s.resolveRenderPath(input)
+
 	if input.Config.StaticDataLoader != nil {
 		entries, err := input.Config.StaticDataLoader(ctx)
 		if err != nil {
@@ -207,7 +209,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 			}
 		}
 
-		page, err := s.renderer.Render(input.Config.ComponentPath, props)
+		page, err := s.renderer.Render(renderPath, props)
 		if err != nil {
 			return ServePageOutput{
 				Action: core.ActionRenderStaticPrerender,
@@ -231,7 +233,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 		}
 	}
 
-	page, err := s.renderer.Render(input.Config.ComponentPath, map[string]any{})
+	page, err := s.renderer.Render(renderPath, map[string]any{})
 	if err != nil {
 		return ServePageOutput{
 			Action: core.ActionRenderStaticPrerender,
@@ -267,16 +269,7 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 		}
 	}
 
-	renderPath := input.Config.ComponentPath
-	if !input.IsDev {
-		renderPath = core.ResolveRenderPath(input.IsDev, input.StaticPath, input.Config.ComponentPath)
-	} else if input.Config.Mode == core.ModeSSR || input.Config.Mode == core.ModeStaticPrerender {
-		// In dev mode for SSR/Static pages, check if SSR bundle exists
-		ssrPath := filepath.Join(".bifrost/ssr", input.EntryName+"-ssr.js")
-		if _, err := os.Stat(ssrPath); err == nil {
-			renderPath = ssrPath
-		}
-	}
+	renderPath := s.resolveRenderPath(input)
 
 	page, err := s.renderer.Render(renderPath, props)
 	if err != nil {
@@ -293,6 +286,17 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 		Props:  props,
 		Error:  err,
 	}
+}
+
+func (s *PageService) resolveRenderPath(input ServePageInput) string {
+	if !input.IsDev {
+		return core.ResolveRenderPath(input.IsDev, input.StaticPath, input.Config.ComponentPath)
+	}
+	ssrPath := filepath.Join(".bifrost/ssr", input.EntryName+"-ssr.js")
+	if _, err := os.Stat(ssrPath); err == nil {
+		return ssrPath
+	}
+	return input.Config.ComponentPath
 }
 
 func (s *PageService) renderPageHTML(input ServePageInput, props map[string]any, page core.RenderedPage) (string, error) {
