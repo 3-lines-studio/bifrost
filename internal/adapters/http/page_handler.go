@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -80,12 +81,28 @@ func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (h *PageHandler) serveStaticFile(w http.ResponseWriter, req *http.Request, path string) {
+// safeEmbedPath builds a safe embedded FS path rooted under ".bifrost".
+// Returns the cleaned embed path and true, or empty string and false if unsafe.
+func safeEmbedPath(raw string) (string, bool) {
+	if containsDotDot(strings.ReplaceAll(raw, "\\", "/")) {
+		return "", false
+	}
+	cleaned := path.Clean("/" + raw)
+	cleaned = strings.TrimPrefix(cleaned, "/")
+	if cleaned == "" || cleaned == "." {
+		return "", false
+	}
+	return path.Join(".bifrost", cleaned), true
+}
+
+
+func (h *PageHandler) serveStaticFile(w http.ResponseWriter, req *http.Request, p string) {
 	if h.assetsFS != (embed.FS{}) {
-		// Convert path to embedded FS format (e.g., "/pages/file.html" -> ".bifrost/pages/file.html")
-		embedPath := ".bifrost" + path
-		embedPath = strings.TrimPrefix(embedPath, "/")
-		embedPath = filepath.ToSlash(embedPath)
+		embedPath, ok := safeEmbedPath(p)
+		if !ok {
+			h.serveError(w, req, fmt.Errorf("invalid static file path: %s", p))
+			return
+		}
 		data, err := h.assetsFS.ReadFile(embedPath)
 		if err != nil {
 			h.serveError(w, req, fmt.Errorf("failed to read static file %s: %w", embedPath, err))
@@ -96,14 +113,31 @@ func (h *PageHandler) serveStaticFile(w http.ResponseWriter, req *http.Request, 
 		return
 	}
 
-	http.ServeFile(w, req, path)
+	safePath := filepath.Join(".bifrost", filepath.FromSlash(path.Clean("/"+p)))
+	abs, err := filepath.Abs(safePath)
+	if err != nil {
+		http.NotFound(w, req)
+		return
+	}
+	root, err := filepath.Abs(".bifrost")
+	if err != nil {
+		http.NotFound(w, req)
+		return
+	}
+	if !strings.HasPrefix(abs, root+string(filepath.Separator)) && abs != root {
+		http.NotFound(w, req)
+		return
+	}
+	http.ServeFile(w, req, safePath)
 }
 
 func (h *PageHandler) serveRouteFile(w http.ResponseWriter, req *http.Request, htmlPath string) {
 	if h.assetsFS != (embed.FS{}) {
-		embedPath := ".bifrost" + htmlPath
-		embedPath = strings.TrimPrefix(embedPath, "/")
-		embedPath = filepath.ToSlash(embedPath)
+		embedPath, ok := safeEmbedPath(htmlPath)
+		if !ok {
+			h.serveError(w, req, fmt.Errorf("invalid route file path: %s", htmlPath))
+			return
+		}
 		data, err := h.assetsFS.ReadFile(embedPath)
 		if err != nil {
 			h.serveError(w, req, fmt.Errorf("failed to read route file %s: %w", embedPath, err))
@@ -114,8 +148,22 @@ func (h *PageHandler) serveRouteFile(w http.ResponseWriter, req *http.Request, h
 		return
 	}
 
-	fullPath := filepath.Join(".bifrost", htmlPath)
-	http.ServeFile(w, req, fullPath)
+	safePath := filepath.Join(".bifrost", filepath.FromSlash(path.Clean("/"+htmlPath)))
+	abs, err := filepath.Abs(safePath)
+	if err != nil {
+		http.NotFound(w, req)
+		return
+	}
+	root, err := filepath.Abs(".bifrost")
+	if err != nil {
+		http.NotFound(w, req)
+		return
+	}
+	if !strings.HasPrefix(abs, root+string(filepath.Separator)) && abs != root {
+		http.NotFound(w, req)
+		return
+	}
+	http.ServeFile(w, req, safePath)
 }
 
 func (h *PageHandler) serveNotFound(w http.ResponseWriter, req *http.Request) {

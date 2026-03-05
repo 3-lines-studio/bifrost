@@ -299,11 +299,24 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 	}
 
 	// Build StaticPrerender pages via export mode
-	stepExport := report.StartStep("Building StaticPrerender pages")
-	if err := s.runExportMode(input.OriginalCwd, bifrostDir, manifest, input.MainFile); err != nil {
-		report.AddWarning("StaticPrerender", "Export mode failed", []string{err.Error(), "StaticPrerender pages may not be available"})
+	hasStaticPrerender := false
+	for _, config := range pageConfigs {
+		if config.Mode == core.ModeStaticPrerender {
+			hasStaticPrerender = true
+			break
+		}
 	}
-	report.EndStep(stepExport, err == nil, "")
+
+	stepExport := report.StartStep("Building StaticPrerender pages")
+	exportErr := s.runExportMode(input.OriginalCwd, bifrostDir, manifest, input.MainFile)
+	if exportErr != nil {
+		if hasStaticPrerender {
+			report.AddError("StaticPrerender", "Export mode failed", []string{exportErr.Error()})
+		} else {
+			report.AddWarning("StaticPrerender", "Export mode failed", []string{exportErr.Error(), "No StaticPrerender pages configured"})
+		}
+	}
+	report.EndStep(stepExport, exportErr == nil, "")
 
 	// Re-write manifest after export mode to include static routes
 	manifestData, err = json.MarshalIndent(manifest, "", "  ")

@@ -89,6 +89,11 @@ func decideStaticPrerenderAction(req PageRequest, entry *ManifestEntry, normaliz
 	if req.StaticPath != "" {
 		return PageDecision{Action: ActionServeStaticFile, StaticPath: req.StaticPath}
 	}
+	// In production without manifest/static routes, this is a missing asset.
+	// In dev mode this function is not called (dev takes the ActionNeedsSetup path).
+	if !req.IsDev {
+		return PageDecision{Action: ActionNotFound}
+	}
 	return PageDecision{Action: ActionRenderStaticPrerender}
 }
 

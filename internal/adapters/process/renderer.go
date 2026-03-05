@@ -3,7 +3,9 @@ package process
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -15,6 +17,12 @@ import (
 	"time"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
+)
+
+const (
+	renderTimeout = 30 * time.Second
+	buildTimeout  = 120 * time.Second
+	socketTimeout = 10 * time.Second
 )
 
 var (
@@ -32,8 +40,22 @@ type Renderer struct {
 	cleanup func()
 }
 
+func uniqueSocketPath() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	id := hex.EncodeToString(b[:])
+	return filepath.Join(os.TempDir(), fmt.Sprintf("bifrost-%d-%s.sock", os.Getpid(), id))
+}
+
+func removeStaleSocket(path string) {
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		_ = os.Remove(path)
+	}
+}
+
 func NewRenderer(mode core.Mode, source string) (*Renderer, error) {
-	socket := filepath.Join(os.TempDir(), fmt.Sprintf("bifrost-%d.sock", os.Getpid()))
+	socket := uniqueSocketPath()
+	removeStaleSocket(socket)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -58,26 +80,29 @@ func NewRenderer(mode core.Mode, source string) (*Renderer, error) {
 		return nil, fmt.Errorf("failed to start bun: %w", err)
 	}
 
-	if err := waitForSocket(socket, 5*time.Second); err != nil {
+	if err := waitForSocket(socket, socketTimeout); err != nil {
 		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
 		return nil, err
 	}
 
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return net.Dial("unix", socket)
+			return dialer.DialContext(ctx, "unix", socket)
 		},
 	}
 
 	return &Renderer{
 		cmd:    cmd,
 		socket: socket,
-		client: &http.Client{Transport: transport},
+		client: &http.Client{Transport: transport, Timeout: buildTimeout},
 	}, nil
 }
 
 func NewRendererFromExecutable(executablePath string, cleanup func()) (*Renderer, error) {
-	socket := filepath.Join(os.TempDir(), fmt.Sprintf("bifrost-%d.sock", os.Getpid()))
+	socket := uniqueSocketPath()
+	removeStaleSocket(socket)
 
 	cmd := exec.Command(executablePath)
 	cmd.Env = append(os.Environ(), "BIFROST_SOCKET="+socket)
@@ -88,27 +113,34 @@ func NewRendererFromExecutable(executablePath string, cleanup func()) (*Renderer
 		return nil, fmt.Errorf("failed to start embedded runtime: %w", err)
 	}
 
-	if err := waitForSocket(socket, 5*time.Second); err != nil {
+	if err := waitForSocket(socket, socketTimeout); err != nil {
 		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
 		return nil, err
 	}
 
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return net.Dial("unix", socket)
+			return dialer.DialContext(ctx, "unix", socket)
 		},
 	}
 
 	return &Renderer{
 		cmd:     cmd,
 		socket:  socket,
-		client:  &http.Client{Transport: transport},
+		client:  &http.Client{Transport: transport, Timeout: buildTimeout},
 		cleanup: cleanup,
 	}, nil
 }
 
 func (r *Renderer) Stop() error {
+	if r.cmd == nil || r.cmd.Process == nil {
+		return nil
+	}
 	err := r.cmd.Process.Kill()
+	_, _ = r.cmd.Process.Wait()
+	_ = os.Remove(r.socket)
 	if r.cleanup != nil {
 		r.cleanup()
 	}
@@ -120,6 +152,9 @@ func (r *Renderer) Render(path string, props map[string]any) (core.RenderedPage,
 		"path":  path,
 		"props": props,
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
+	defer cancel()
 
 	var result struct {
 		HTML  string `json:"html"`
@@ -134,7 +169,7 @@ func (r *Renderer) Render(path string, props map[string]any) (core.RenderedPage,
 		} `json:"error"`
 	}
 
-	if err := r.postJSON("/render", reqBody, &result); err != nil {
+	if err := r.postJSON(ctx, "/render", reqBody, &result); err != nil {
 		return core.RenderedPage{}, err
 	}
 
@@ -174,6 +209,9 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 		return fmt.Errorf("missing outdir")
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), buildTimeout)
+	defer cancel()
+
 	reqBody := map[string]any{
 		"entrypoints": entrypoints,
 		"outdir":      outdir,
@@ -197,7 +235,7 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 		} `json:"error"`
 	}
 
-	if err := r.postJSON("/build", reqBody, &result); err != nil {
+	if err := r.postJSON(ctx, "/build", reqBody, &result); err != nil {
 		return err
 	}
 
@@ -233,6 +271,9 @@ func (r *Renderer) BuildSSR(entrypoints []string, outdir string) error {
 		return fmt.Errorf("missing outdir")
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), buildTimeout)
+	defer cancel()
+
 	reqBody := map[string]any{
 		"entrypoints": entrypoints,
 		"outdir":      outdir,
@@ -256,7 +297,7 @@ func (r *Renderer) BuildSSR(entrypoints []string, outdir string) error {
 		} `json:"error"`
 	}
 
-	if err := r.postJSON("/build", reqBody, &result); err != nil {
+	if err := r.postJSON(ctx, "/build", reqBody, &result); err != nil {
 		return err
 	}
 
@@ -283,13 +324,13 @@ func (r *Renderer) BuildSSR(entrypoints []string, outdir string) error {
 	return nil
 }
 
-func (r *Renderer) postJSON(endpoint string, body any, result any) error {
+func (r *Renderer) postJSON(ctx context.Context, endpoint string, body any, result any) error {
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest("POST", "http://localhost"+endpoint, bytes.NewReader(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://localhost"+endpoint, bytes.NewReader(jsonBody))
 	if err != nil {
 		return err
 	}
@@ -304,13 +345,17 @@ func (r *Renderer) postJSON(endpoint string, body any, result any) error {
 	return json.NewDecoder(resp.Body).Decode(result)
 }
 
-func waitForSocket(path string, timeout time.Duration) error {
+// waitForSocket probes the socket by attempting a connection rather than
+// just checking file existence, so we know Bun is actually listening.
+func waitForSocket(socketPath string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
+		conn, err := net.DialTimeout("unix", socketPath, 500*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
 			return nil
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
-	return fmt.Errorf("timeout waiting for bun socket at %s", path)
+	return fmt.Errorf("timeout waiting for bun socket at %s", socketPath)
 }

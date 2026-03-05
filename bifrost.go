@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
 	adaptersfs "github.com/3-lines-studio/bifrost/internal/adapters/fs"
@@ -298,7 +300,28 @@ func (a *App) ExportStaticPages(outputDir string) error {
 			}
 
 			html := renderFullHTML(page, entryName, entry.Props)
-			htmlPath := filepath.Join(pagesDir, entry.Path, "index.html")
+
+			cleanedRoutePath := path.Clean("/" + entry.Path)
+			if strings.Contains(cleanedRoutePath, "..") {
+				fmt.Printf("Warning: Unsafe route path %s, skipping\n", entry.Path)
+				continue
+			}
+
+			htmlPath := filepath.Join(pagesDir, filepath.FromSlash(cleanedRoutePath), "index.html")
+			absHTML, err := filepath.Abs(htmlPath)
+			if err != nil {
+				fmt.Printf("Warning: Failed to resolve path for %s: %v, skipping\n", entry.Path, err)
+				continue
+			}
+			absPages, err := filepath.Abs(pagesDir)
+			if err != nil {
+				fmt.Printf("Warning: Failed to resolve pages dir: %v, skipping\n", err)
+				continue
+			}
+			if !strings.HasPrefix(absHTML, absPages+string(filepath.Separator)) {
+				fmt.Printf("Warning: Route path %s escapes output directory, skipping\n", entry.Path)
+				continue
+			}
 
 			if err := os.MkdirAll(filepath.Dir(htmlPath), 0755); err != nil {
 				fmt.Printf("Warning: Failed to create directory for %s: %v, skipping\n", entry.Path, err)
@@ -311,7 +334,7 @@ func (a *App) ExportStaticPages(outputDir string) error {
 			}
 
 			normalizedPath := core.NormalizePath(entry.Path)
-			manifestEntry.StaticRoutes[normalizedPath] = "/pages/routes" + entry.Path + "/index.html"
+			manifestEntry.StaticRoutes[normalizedPath] = "/pages/routes" + cleanedRoutePath + "/index.html"
 		}
 
 		exportManifest.Entries[entryName] = manifestEntry
@@ -329,11 +352,12 @@ func (a *App) ExportStaticPages(outputDir string) error {
 
 // renderFullHTML generates a complete HTML page from rendered content
 func renderFullHTML(page core.RenderedPage, entryName string, props map[string]any) string {
-	// Build props JSON
 	propsJSON := "{}"
 	if len(props) > 0 {
-		data, _ := json.Marshal(props)
-		propsJSON = string(data)
+		data, err := json.Marshal(props)
+		if err == nil {
+			propsJSON = strings.ReplaceAll(string(data), "</", "<\\/")
+		}
 	}
 
 	// Generate HTML shell with rendered content
