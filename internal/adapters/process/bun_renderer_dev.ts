@@ -6,6 +6,7 @@ const isDev =
   process.env.BIFROST_DEV === "1" || process.env.BIFROST_DEV === "true";
 
 const tailwindPlugin = (await import("bun-plugin-tailwind")).default;
+const reactCompiler = (await import("../framework/assets/react_compiler_plugin")).default;
 
 interface ErrorDetail {
   message: string;
@@ -182,7 +183,7 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
   const isSSR = buildTarget === "bun";
 
   try {
-    const plugins = isSSR ? [] : [tailwindPlugin];
+    const plugins = isSSR ? [reactCompiler] : [reactCompiler, tailwindPlugin];
 
     const naming = isProduction
       ? {

@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "dependencies": {
+    "@babel/core": "^7.26.0",
+    "babel-plugin-react-compiler": "^1.0.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "@types/react": "^19.2.10",
