@@ -16,5 +16,5 @@ function getProps() {
 const container = document.getElementById('app');
 if (container) {
 	const props = getProps();
-	hydrate(Component, { target: container, props });
+	hydrate(Component, { target: container, props, recover: true, intro: false });
 }

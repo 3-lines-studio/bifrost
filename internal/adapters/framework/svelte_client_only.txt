@@ -3,5 +3,6 @@ import Component from 'COMPONENT_PATH';
 
 const container = document.getElementById('app');
 if (container) {
+	container.innerHTML = '';
 	mount(Component, { target: container });
 }
