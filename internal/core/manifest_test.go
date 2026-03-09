@@ -30,8 +30,23 @@ func TestHasSSREntries_StaticWithSSRBundle(t *testing.T) {
 			},
 		},
 	}
-	if !HasSSREntries(man) {
-		t.Error("expected HasSSREntries=true for static page with SSR bundle")
+	if HasSSREntries(man) {
+		t.Error("expected HasSSREntries=false for static page (no runtime needed)")
+	}
+}
+
+func TestHasSSRBundles_StaticWithSSRBundle(t *testing.T) {
+	man := &Manifest{
+		Entries: map[string]ManifestEntry{
+			"pages-product-entry": {
+				Script: "/dist/pages-product-entry.js",
+				Mode:   "static",
+				SSR:    "/ssr/pages-product-entry-ssr.js",
+			},
+		},
+	}
+	if !HasSSRBundles(man) {
+		t.Error("expected HasSSRBundles=true for static page with SSR bundle")
 	}
 }
 
@@ -65,6 +80,36 @@ func TestHasSSREntries_EmptyEntries(t *testing.T) {
 	}
 }
 
+func TestHasSSRBundles_NilManifest(t *testing.T) {
+	if HasSSRBundles(nil) {
+		t.Error("expected HasSSRBundles=false for nil manifest")
+	}
+}
+
+func TestHasSSRBundles_EmptyEntries(t *testing.T) {
+	man := &Manifest{
+		Entries: map[string]ManifestEntry{},
+	}
+	if HasSSRBundles(man) {
+		t.Error("expected HasSSRBundles=false for empty entries")
+	}
+}
+
+func TestHasSSRBundles_ClientOnlyNoSSR(t *testing.T) {
+	man := &Manifest{
+		Entries: map[string]ManifestEntry{
+			"pages-about-entry": {
+				Script: "/dist/pages-about-entry.js",
+				Mode:   "client",
+				SSR:    "",
+			},
+		},
+	}
+	if HasSSRBundles(man) {
+		t.Error("expected HasSSRBundles=false for client-only page without SSR bundle")
+	}
+}
+
 func TestHasSSREntries_MixedModes(t *testing.T) {
 	man := &Manifest{
 		Entries: map[string]ManifestEntry{
@@ -79,8 +124,27 @@ func TestHasSSREntries_MixedModes(t *testing.T) {
 			},
 		},
 	}
-	if !HasSSREntries(man) {
-		t.Error("expected HasSSREntries=true when any entry has SSR bundle")
+	if HasSSREntries(man) {
+		t.Error("expected HasSSREntries=false when no SSR mode pages exist")
+	}
+}
+
+func TestHasSSRBundles_MixedModes(t *testing.T) {
+	man := &Manifest{
+		Entries: map[string]ManifestEntry{
+			"client-page": {
+				Script: "/dist/client.js",
+				Mode:   "client",
+			},
+			"static-page": {
+				Script: "/dist/static.js",
+				Mode:   "static",
+				SSR:    "/ssr/static-ssr.js",
+			},
+		},
+	}
+	if !HasSSRBundles(man) {
+		t.Error("expected HasSSRBundles=true when any entry has SSR bundle")
 	}
 }
 

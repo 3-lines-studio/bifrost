@@ -54,7 +54,9 @@ func (r *renderer) initExportMode() (*renderer, error) {
 	}
 	r.manifest = man
 
-	if core.HasSSREntries(man) {
+	// Use HasSSRBundles for build-time operations
+	// Static pages need SSR bundles for prerendering during export
+	if core.HasSSRBundles(man) {
 		if err := r.setupRuntimeForExport(exportDir); err != nil {
 			return nil, err
 		}

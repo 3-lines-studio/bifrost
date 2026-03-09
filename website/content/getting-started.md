@@ -30,12 +30,7 @@ Choose a template that fits your use case:
 
 - **minimal** (default) — React SSR app with a single page
 - **spa** — Single-page application with client-only rendering
-- **svelte-minimal** — Svelte SSR app
 - **desktop** — Desktop application template
-
-```bash
-go run github.com/3-lines-studio/bifrost/cmd/init@latest --template svelte-minimal myapp
-```
 
 ## Project Structure
 
@@ -44,7 +39,7 @@ A Bifrost project follows a simple layout:
 ```
 myapp/
 ├── main.go           # Go server with route definitions
-├── pages/            # Page components (.tsx or .svelte)
+├── pages/            # Page components (.tsx)
 │   ├── home.tsx
 │   └── about.tsx
 ├── components/       # Shared components

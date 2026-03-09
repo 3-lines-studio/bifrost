@@ -182,3 +182,177 @@ body {
   background-color: var(--color-code-bg);
   font-weight: 600;
 }
+
+/* One Dark syntax highlighting theme */
+.chroma {
+  color: #abb2bf;
+  background-color: var(--color-code-bg);
+}
+
+.chroma .err {
+  color: #e06c75;
+}
+
+.chroma .lntd {
+  vertical-align: top;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.chroma .lntable {
+  border-spacing: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.chroma .hl {
+  background-color: #3e4451;
+}
+
+.chroma .lnt {
+  color: #5c6370;
+  padding: 0 0.5rem;
+}
+
+.chroma .ln {
+  color: #5c6370;
+}
+
+/* Comments */
+.chroma .c,
+.chroma .ch,
+.chroma .cm,
+.chroma .c1,
+.chroma .cs,
+.chroma .cp,
+.chroma .cpf {
+  color: #5c6370;
+  font-style: italic;
+}
+
+/* Keywords */
+.chroma .k,
+.chroma .kc,
+.chroma .kd,
+.chroma .kn,
+.chroma .kp,
+.chroma .kr,
+.chroma .kt {
+  color: #c678dd;
+}
+
+/* Names */
+.chroma .n,
+.chroma .na,
+.chroma .nc,
+.chroma .nd,
+.chroma .ne,
+.chroma .nf,
+.chroma .nx {
+  color: #61afef;
+}
+
+/* Variables */
+.chroma .nv,
+.chroma .vc,
+.chroma .vg,
+.chroma .vi,
+.chroma .vm {
+  color: #e06c75;
+}
+
+/* Strings */
+.chroma .s,
+.chroma .sa,
+.chroma .sb,
+.chroma .sc,
+.chroma .dl,
+.chroma .sd,
+.chroma .s2,
+.chroma .se,
+.chroma .sh,
+.chroma .si,
+.chroma .sx,
+.chroma .sr,
+.chroma .s1,
+.chroma .ss {
+  color: #98c379;
+}
+
+/* Numbers */
+.chroma .m,
+.chroma .mb,
+.chroma .mf,
+.chroma .mh,
+.chroma .mi,
+.chroma .il,
+.chroma .mo {
+  color: #d19a66;
+}
+
+/* Operators */
+.chroma .o,
+.chroma .ow {
+  color: #56b6c2;
+}
+
+/* Builtins */
+.chroma .bp {
+  color: #e06c75;
+}
+
+/* Preprocessors */
+.chroma .cp {
+  color: #c678dd;
+}
+
+/* Generics */
+.chroma .go {
+  color: #5c6370;
+}
+
+.chroma .gp {
+  color: #c678dd;
+}
+
+/* Tags */
+.chroma .nt {
+  color: #e06c75;
+}
+
+/* Attributes */
+.chroma .na {
+  color: #d19a66;
+}
+
+/* Attribute values */
+.chroma .s {
+  color: #98c379;
+}
+
+/* Punctuation */
+.chroma .p {
+  color: #abb2bf;
+}
+
+/* Functions */
+.chroma .nb {
+  color: #d19a66;
+}
+
+.chroma .nf {
+  color: #61afef;
+}
+
+/* Special */
+.chroma .fm {
+  color: #61afef;
+}
+
+/* Inline code with language specifier */
+.prose pre code {
+  display: block;
+  padding: 0;
+}

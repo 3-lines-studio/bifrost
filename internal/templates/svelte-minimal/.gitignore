@@ -1,4 +1,0 @@
-node_modules/
-.bifrost/*
-!.bifrost/.gitkeep
-tmp/

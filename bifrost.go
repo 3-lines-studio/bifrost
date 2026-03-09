@@ -44,8 +44,7 @@ type PageOption = core.PageOption
 type Framework = core.Framework
 
 const (
-	React  = core.FrameworkReact
-	Svelte = core.FrameworkSvelte
+	React = core.FrameworkReact
 )
 
 type Route struct {
@@ -134,14 +133,7 @@ func NewWithFramework(assetsFS embed.FS, fw core.Framework, routes ...Route) *Ap
 }
 
 func (a *App) getAdapter() core.FrameworkAdapter {
-	switch a.config.Framework {
-	case core.FrameworkSvelte:
-		return framework.NewSvelteAdapter()
-	case core.FrameworkReact:
-		return framework.NewReactAdapter()
-	default:
-		return framework.NewReactAdapter()
-	}
+	return framework.NewReactAdapter()
 }
 
 func (a *App) runExportMode() {

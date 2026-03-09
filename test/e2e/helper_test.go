@@ -237,8 +237,7 @@ func normalizeHTML(html string) string {
 
 	html = regexp.MustCompile(`id="[^"]*-[a-f0-9]{6,}"`).ReplaceAllString(html, `id="[ID]"`)
 
-	// Strip Svelte hydration comment markers (non-deterministic placement)
-	// Matches: <!--x0ths6-->, <!--[-->, <!--]-->, etc.
+	// Strip hydration comment markers (non-deterministic placement)
 	html = regexp.MustCompile(`<!--[^>]*-->`).ReplaceAllString(html, "")
 
 	html = regexp.MustCompile(`\s+`).ReplaceAllString(html, " ")

@@ -29,7 +29,7 @@ func BenchmarkRenderHTMLShell_WithChunks(b *testing.B) {
 func BenchmarkRenderHTMLShell_LargeProps(b *testing.B) {
 	b.ReportAllocs()
 	props := make(map[string]any, 50)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		props["key_"+string(rune('a'+i%26))] = "value_" + string(rune('a'+i%26))
 	}
 	for i := 0; i < b.N; i++ {

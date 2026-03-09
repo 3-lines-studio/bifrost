@@ -54,15 +54,30 @@ func GetAssets(man *Manifest, entryName string) Assets {
 	}
 }
 
-// HasSSREntries returns true if any manifest entry requires the SSR runtime,
-// either because its mode is "ssr" or because it has an SSR bundle path
-// (static prerender pages use SSR bundles during export).
+// HasSSREntries returns true if any manifest entry requires the SSR runtime
+// at production time (mode="ssr"). Static pages with SSR bundles (mode="static")
+// do NOT need runtime in production as they are pre-rendered at build time.
 func HasSSREntries(man *Manifest) bool {
 	if man == nil {
 		return false
 	}
 	for _, entry := range man.Entries {
-		if entry.Mode == "ssr" || entry.SSR != "" {
+		if entry.Mode == "ssr" {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSSRBundles returns true if any manifest entry has an SSR bundle.
+// This is used for build-time operations (export mode) where static pages
+// need SSR bundles for prerendering, but don't need runtime in production.
+func HasSSRBundles(man *Manifest) bool {
+	if man == nil {
+		return false
+	}
+	for _, entry := range man.Entries {
+		if entry.SSR != "" {
 			return true
 		}
 	}

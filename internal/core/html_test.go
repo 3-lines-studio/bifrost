@@ -83,11 +83,11 @@ func TestRenderHTMLShell_ScriptBreakoutEscaped(t *testing.T) {
 		t.Fatal("could not find props script tag")
 	}
 	propsSection := html[propsStart:]
-	closingTag := strings.Index(propsSection, "</script>")
-	if closingTag == -1 {
+	before, _, ok := strings.Cut(propsSection, "</script>")
+	if !ok {
 		t.Fatal("could not find closing </script> for props")
 	}
-	propsContent := propsSection[:closingTag]
+	propsContent := before
 	if strings.Contains(propsContent, "<script>") {
 		t.Error("XSS: unexpected <script> inside props JSON block")
 	}

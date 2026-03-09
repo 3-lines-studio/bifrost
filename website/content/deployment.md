@@ -12,12 +12,6 @@ The build command prepares all frontend assets for production:
 go run github.com/3-lines-studio/bifrost/cmd/build@latest main.go
 ```
 
-For Svelte apps, specify the framework:
-
-```bash
-go run github.com/3-lines-studio/bifrost/cmd/build@latest --framework svelte main.go
-```
-
 The build pipeline:
 
 1. Scans your Go source for `Page()` calls

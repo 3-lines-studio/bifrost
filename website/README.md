@@ -1,6 +1,6 @@
 # Bifrost Website
 
-The official Bifrost documentation site, built with Bifrost + Svelte.
+The official Bifrost documentation site, built with Bifrost + React.
 
 ## Development
 

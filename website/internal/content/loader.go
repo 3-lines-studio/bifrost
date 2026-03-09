@@ -8,7 +8,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/alecthomas/chroma/v2/formatters/html"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark-highlighting/v2"
 	meta "github.com/yuin/goldmark-meta"
 	"github.com/yuin/goldmark/parser"
 )
@@ -42,7 +44,16 @@ func (l *Loader) LoadAll() ([]Page, error) {
 	}
 
 	md := goldmark.New(
-		goldmark.WithExtensions(meta.Meta),
+		goldmark.WithExtensions(
+			meta.Meta,
+			highlighting.NewHighlighting(
+				highlighting.WithStyle("one-dark"),
+				highlighting.WithFormatOptions(
+					html.WithClasses(true),
+					html.WithLineNumbers(false),
+				),
+			),
+		),
 	)
 
 	var pages []Page

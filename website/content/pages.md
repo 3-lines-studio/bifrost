@@ -110,15 +110,4 @@ return map[string]any{
 }, nil
 ```
 
-```svelte
-<!-- Svelte component -->
-<script lang="ts">
-  let { title, count, items }: {
-    title: string;
-    count: number;
-    items: string[];
-  } = $props();
-</script>
-```
-
 Props are serialized as JSON. Keep them minimal — pass only what the component needs.

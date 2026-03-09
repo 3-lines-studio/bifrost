@@ -4,15 +4,12 @@ type Framework int
 
 const (
 	FrameworkReact Framework = iota
-	FrameworkSvelte
 )
 
 func (f Framework) String() string {
 	switch f {
 	case FrameworkReact:
 		return "react"
-	case FrameworkSvelte:
-		return "svelte"
 	default:
 		return "unknown"
 	}
@@ -20,8 +17,6 @@ func (f Framework) String() string {
 
 func FrameworkFromString(s string) Framework {
 	switch s {
-	case "svelte":
-		return FrameworkSvelte
 	case "react":
 		fallthrough
 	default:

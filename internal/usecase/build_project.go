@@ -108,7 +108,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		default:
 			modeStr = "ssr"
 		}
-		if config.Mode != core.ModeClientOnly {
+		if config.Mode == core.ModeSSR {
 			needsRuntime = true
 		}
 		pages[i] = pageMetadata{
@@ -309,14 +309,40 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		return BuildOutput{Success: false, Error: fmt.Errorf("failed to write manifest: %w", err)}
 	}
 
+	// Compile runtime if needed for SSR pages (runtime) or static pages (export)
+	// - SSR pages need runtime at production time
+	// - Static pages need runtime at build time (for prerendering)
+	shouldCompileRuntime := needsRuntime || hasStaticPrerender
+
+	if shouldCompileRuntime {
+		stepRuntime := report.StartStep("Compiling Bun runtime")
+		if err := s.compileEmbeddedRuntime(bifrostDir); err != nil {
+			report.AddError("Runtime", "Failed to compile embedded runtime", []string{err.Error()})
+			report.EndStep(stepRuntime, false, "")
+			return BuildOutput{Success: false, Error: fmt.Errorf("runtime compilation failed: %w", err)}
+		}
+		report.EndStep(stepRuntime, true, "")
+	}
+
 	// Only run export mode when static-prerender pages exist
 	stepExport := report.StartStep("Building StaticPrerender pages")
 	if hasStaticPrerender {
 		exportErr := s.runExportMode(input.OriginalCwd, bifrostDir, manifest, input.MainFile)
 		if exportErr != nil {
 			report.AddError("StaticPrerender", "Export mode failed", []string{exportErr.Error()})
+			report.EndStep(stepExport, false, "")
+			return BuildOutput{Success: false, Error: fmt.Errorf("export mode failed: %w", exportErr)}
 		}
-		report.EndStep(stepExport, exportErr == nil, "")
+		report.EndStep(stepExport, true, "")
+
+		// For static-only apps, remove runtime after export to reduce binary size
+		// Static apps don't need runtime at production time (pages are pre-rendered)
+		if !needsRuntime {
+			runtimeDir := filepath.Join(bifrostDir, "runtime")
+			if err := os.RemoveAll(runtimeDir); err != nil {
+				report.AddWarning("Cleanup", "Failed to remove runtime directory", []string{err.Error()})
+			}
+		}
 
 		// Re-write manifest only when export ran (may have added static routes)
 		manifestData, err = json.MarshalIndent(manifest, "", "  ")
@@ -328,16 +354,6 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		}
 	} else {
 		report.EndStep(stepExport, true, "")
-	}
-
-	if needsRuntime {
-		stepRuntime := report.StartStep("Compiling embedded Bun runtime")
-		if err := s.compileEmbeddedRuntime(bifrostDir); err != nil {
-			report.AddWarning("Runtime", "Failed to compile embedded runtime", []string{err.Error(), "Production binary will require Bun to be installed"})
-			report.EndStep(stepRuntime, false, "")
-		} else {
-			report.EndStep(stepRuntime, true, "")
-		}
 	}
 
 	stepCleanup := report.StartStep("Cleaning up entry files")

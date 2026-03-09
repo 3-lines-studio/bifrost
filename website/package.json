@@ -7,13 +7,17 @@
     "dev": "BIFROST_DEV=1 go run ."
   },
   "dependencies": {
-    "svelte": "^5.53.6",
+    "@babel/core": "^7.29.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "bun-plugin-tailwind": "^0.1.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "tailwindcss": "^4.2.1"
   },
   "devDependencies": {
-    "bun-plugin-svelte": "^0.0.6",
-    "bun-plugin-tailwind": "^0.1.2",
-    "@types/bun": "^1.3.9",
+    "@types/bun": "^1.3.10",
     "typescript": "^5.9.3"
   }
 }

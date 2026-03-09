@@ -18,7 +18,7 @@ func main() {
 	loader := content.NewLoader("content")
 
 	routes := []bifrost.Route{
-		bifrost.Page("/{$}", "./pages/home.svelte",
+		bifrost.Page("/{$}", "./pages/home.tsx",
 			bifrost.WithStaticData(func(ctx context.Context) ([]bifrost.StaticPathData, error) {
 				pages, err := loader.LoadAll()
 				if err != nil {
@@ -35,7 +35,7 @@ func main() {
 				}, nil
 			}),
 		),
-		bifrost.Page("/docs/{slug...}", "./pages/docs.svelte",
+		bifrost.Page("/docs/{slug...}", "./pages/docs.tsx",
 			bifrost.WithStaticData(func(ctx context.Context) ([]bifrost.StaticPathData, error) {
 				pages, err := loader.LoadAll()
 				if err != nil {
@@ -60,7 +60,7 @@ func main() {
 		),
 	}
 
-	app := bifrost.NewWithFramework(bifrostFS, bifrost.Svelte, routes...)
+	app := bifrost.New(bifrostFS, routes...)
 	defer app.Stop()
 
 	port := os.Getenv("PORT")

@@ -62,14 +62,7 @@ func parseFlags(args []string) (mainFile string, fw core.Framework, remaining []
 }
 
 func getAdapter(fw core.Framework) core.FrameworkAdapter {
-	switch fw {
-	case core.FrameworkSvelte:
-		return framework.NewSvelteAdapter()
-	case core.FrameworkReact:
-		return framework.NewReactAdapter()
-	default:
-		return framework.NewReactAdapter()
-	}
+	return framework.NewReactAdapter()
 }
 
 func main() {
@@ -84,7 +77,7 @@ func main() {
 		output.PrintStep("", "Example: bifrost-build ./main.go")
 		fmt.Println()
 		output.PrintStep("", "Flags:")
-		output.PrintStep("", "  -f, --framework <name>  Framework to use (react, svelte)")
+		output.PrintStep("", "  -f, --framework <name>  Framework to use (react)")
 		os.Exit(1)
 	}
 
