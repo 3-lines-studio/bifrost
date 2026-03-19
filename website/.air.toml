@@ -5,7 +5,7 @@ tmp_dir = "tmp"
 cmd = "go build -o ./tmp/main ."
 bin = "./tmp/main"
 delay = 500
-include_ext = ["go", "svelte", "css", "md"]
+include_ext = ["go", "tsx", "ts", "css", "md"]
 exclude_dir = ["tmp", "node_modules", ".bifrost"]
 
 [misc]
