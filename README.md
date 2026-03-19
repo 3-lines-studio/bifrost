@@ -181,7 +181,7 @@ bifrost-build main.go
 
 This generates:
 
-- `.bifrost/dist/` - Client JS/CSS bundles
+- `.bifrost/dist/` - Client JS/CSS bundles (content-hashed filenames so deploys bust browser/CDN caches)
 - `.bifrost/ssr/` - Server bundles for SSR pages only
 - `.bifrost/pages/` - Static HTML files:
   - Client-only: empty shell HTML

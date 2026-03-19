@@ -28,6 +28,13 @@ func ParseManifest(data []byte) (*Manifest, error) {
 	return &m, nil
 }
 
+// ClientBuildResult is the Bun /build response for one client entry (hashed paths in production).
+type ClientBuildResult struct {
+	Script string   `json:"script"`
+	CSS    string   `json:"css,omitempty"`
+	Chunks []string `json:"chunks,omitempty"`
+}
+
 type Assets struct {
 	Script   string
 	CSS      string

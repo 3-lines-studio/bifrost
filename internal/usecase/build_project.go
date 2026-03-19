@@ -254,13 +254,15 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 	for i := range pages {
 		pm := &pages[i]
 		entryPath := filepath.Join(entriesDir, pm.entryName+s.adapter.EntryFileExtension())
-		if err := s.renderer.Build([]string{entryPath}, outdir, []string{pm.entryName}); err != nil {
+		built, err := s.renderer.Build([]string{entryPath}, outdir, []string{pm.entryName})
+		if err != nil {
 			clientAssetErrors = append(clientAssetErrors, s.parseBuildError(pm.entryName, err))
 			continue
 		}
 		entry := manifest.Entries[pm.entryName]
-		entry.Script = "/dist/" + pm.entryName + ".js"
-		entry.CSS = "/dist/" + pm.entryName + ".css"
+		entry.Script = built.Script
+		entry.CSS = built.CSS
+		entry.Chunks = built.Chunks
 		entry.Mode = pm.modeStr
 		manifest.Entries[pm.entryName] = entry
 	}
@@ -280,8 +282,9 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 
 		title := s.extractTitleFromComponent(pm.absComponentPath)
 
+		mentry := manifest.Entries[pm.entryName]
 		htmlPath := filepath.Join(pagesDir, pm.entryName+".html")
-		if err := s.writeClientOnlyHTML(htmlPath, pm.entryName, title); err != nil {
+		if err := s.writeClientOnlyHTML(htmlPath, title, mentry.Script, mentry.CSS, mentry.Chunks); err != nil {
 			htmlErrors = append(htmlErrors, BuildError{
 				Page:    pm.entryName,
 				Message: "Failed to generate HTML shell",
@@ -518,11 +521,24 @@ func (s *BuildService) extractTitleFromComponent(componentPath string) string {
 	return ""
 }
 
-func (s *BuildService) writeClientOnlyHTML(htmlPath, entryName, title string) error {
+func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, css string, chunks []string) error {
+	var chunkLines strings.Builder
+	for _, c := range chunks {
+		chunkLines.WriteString(`    <script src="`)
+		chunkLines.WriteString(c)
+		chunkLines.WriteString(`" type="module" defer></script>
+`)
+	}
+	cssLink := ""
+	if css != "" {
+		cssLink = `    <link rel="stylesheet" href="` + css + `" />
+`
+	}
 	html := clientOnlyHTMLTemplate
 	html = strings.ReplaceAll(html, "TITLE_PLACEHOLDER", title)
-	html = strings.ReplaceAll(html, "ENTRY_NAME", entryName)
-
+	html = strings.ReplaceAll(html, "CSS_LINK_PLACEHOLDER", cssLink)
+	html = strings.ReplaceAll(html, "CHUNK_SCRIPTS_PLACEHOLDER", chunkLines.String())
+	html = strings.ReplaceAll(html, "SCRIPT_SRC_PLACEHOLDER", script)
 	return os.WriteFile(htmlPath, []byte(html), 0644)
 }
 

@@ -388,7 +388,7 @@ func (s *PageService) buildAndRender(ctx context.Context, input ServePageInput) 
 	clientEntrypoints := []string{entryFile}
 	clientEntryNames := []string{input.EntryName}
 
-	if err := s.renderer.Build(clientEntrypoints, outdir, clientEntryNames); err != nil {
+	if _, err := s.renderer.Build(clientEntrypoints, outdir, clientEntryNames); err != nil {
 		return fmt.Errorf("failed to build client entry: %w", err)
 	}
 

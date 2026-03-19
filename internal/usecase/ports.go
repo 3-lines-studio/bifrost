@@ -7,7 +7,7 @@ import (
 
 type Renderer interface {
 	Render(componentPath string, props map[string]any) (core.RenderedPage, error)
-	Build(entrypoints []string, outdir string, entryNames []string) error
+	Build(entrypoints []string, outdir string, entryNames []string) (core.ClientBuildResult, error)
 	BuildSSR(entrypoints []string, outdir string) error
 }
 

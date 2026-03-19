@@ -53,7 +53,9 @@ func removeStaleSocket(path string) {
 	}
 }
 
-func NewRenderer(mode core.Mode, source string) (*Renderer, error) {
+// NewRenderer starts the Bun render/build subprocess. Pass extraEnv as "KEY=value"
+// pairs (e.g. "BIFROST_PROD=1" for bifrost-build) — omit for dev on-demand builds.
+func NewRenderer(mode core.Mode, source string, extraEnv ...string) (*Renderer, error) {
 	socket := uniqueSocketPath()
 	removeStaleSocket(socket)
 
@@ -71,7 +73,8 @@ func NewRenderer(mode core.Mode, source string) (*Renderer, error) {
 
 	cmd := exec.Command("bun", "run", "--smol", "-")
 	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), "BIFROST_SOCKET="+socket)
+	env := append(os.Environ(), "BIFROST_SOCKET="+socket)
+	cmd.Env = append(env, extraEnv...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = strings.NewReader(source)
@@ -203,13 +206,14 @@ func (r *Renderer) Render(path string, props map[string]any) (core.RenderedPage,
 	}, nil
 }
 
-func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []string) error {
+func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []string) (core.ClientBuildResult, error) {
+	var zero core.ClientBuildResult
 	if len(entrypoints) == 0 {
-		return fmt.Errorf("missing entrypoints")
+		return zero, fmt.Errorf("missing entrypoints")
 	}
 
 	if outdir == "" {
-		return fmt.Errorf("missing outdir")
+		return zero, fmt.Errorf("missing outdir")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), buildTimeout)
@@ -222,8 +226,9 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 	}
 
 	var result struct {
-		OK    bool `json:"ok"`
-		Error *struct {
+		OK      bool                              `json:"ok"`
+		Entries map[string]core.ClientBuildResult `json:"entries"`
+		Error   *struct {
 			Message string `json:"message"`
 			Stack   string `json:"stack"`
 			Errors  []struct {
@@ -239,7 +244,7 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 	}
 
 	if err := r.postJSON(ctx, "/build", reqBody, &result); err != nil {
-		return err
+		return zero, err
 	}
 
 	if result.Error != nil {
@@ -255,14 +260,25 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 				errorDetails.WriteString("\n")
 			}
 		}
-		return fmt.Errorf("build failed: %s", errorDetails.String())
+		return zero, fmt.Errorf("build failed: %s", errorDetails.String())
 	}
 
 	if !result.OK {
-		return fmt.Errorf("build failed for entrypoints %v -> %s", entrypoints, outdir)
+		return zero, fmt.Errorf("build failed for entrypoints %v -> %s", entrypoints, outdir)
 	}
 
-	return nil
+	if len(entryNames) != 1 {
+		return zero, fmt.Errorf("expected exactly one entry name, got %d", len(entryNames))
+	}
+	name := entryNames[0]
+	built, ok := result.Entries[name]
+	if !ok || built.Script == "" {
+		return core.ClientBuildResult{
+			Script: "/dist/" + name + ".js",
+			CSS:    "/dist/" + name + ".css",
+		}, nil
+	}
+	return built, nil
 }
 
 func (r *Renderer) BuildSSR(entrypoints []string, outdir string) error {

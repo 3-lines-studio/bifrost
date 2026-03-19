@@ -101,7 +101,7 @@ func main() {
 	output := cli.NewOutput()
 	adapter := getAdapter(fw)
 
-	runtime, err := process.NewRenderer(core.ModeDev, adapter.DevRendererSource())
+	runtime, err := process.NewRenderer(core.ModeDev, adapter.DevRendererSource(), "BIFROST_PROD=1")
 	if err != nil {
 		output.PrintHeader("Bifrost Build")
 		output.PrintError("Failed to initialize build engine: %v", err)

@@ -20,13 +20,88 @@ interface ErrorDetail {
   referrer?: string;
 }
 
+interface BuildEntryResult {
+  script: string;
+  css: string;
+  chunks: string[];
+}
+
 interface Result {
   ok?: boolean;
+  entries?: Record<string, BuildEntryResult>;
   error?: {
     message: string;
     stack?: string;
     errors?: ErrorDetail[];
   };
+}
+
+function entryStemMatchesJs(base: string, stem: string): boolean {
+  return (
+    base === `${stem}.js` ||
+    (base.startsWith(`${stem}-`) && base.endsWith(".js"))
+  );
+}
+
+function entryStemMatchesCss(base: string, stem: string): boolean {
+  return (
+    base === `${stem}.css` ||
+    (base.startsWith(`${stem}-`) && base.endsWith(".css"))
+  );
+}
+
+function collectChunkURLs(
+  outputs: Awaited<ReturnType<typeof Bun.build>>["outputs"],
+): string[] {
+  return outputs
+    .filter((o) => o.kind === "chunk" && o.path.endsWith(".js"))
+    .map((o) => "/dist/" + nodePath.basename(o.path))
+    .sort();
+}
+
+function buildEntriesPayload(
+  buildResult: Awaited<ReturnType<typeof Bun.build>>,
+  entrypoints: string[],
+  entryNames: string[],
+  isProduction: boolean,
+): Record<string, BuildEntryResult> {
+  if (!entryNames || entryNames.length !== entrypoints.length) {
+    return {};
+  }
+  const chunks = collectChunkURLs(buildResult.outputs);
+  const out: Record<string, BuildEntryResult> = {};
+  for (let i = 0; i < entrypoints.length; i++) {
+    const entryName = entryNames[i]!;
+    const stem = nodePath.basename(
+      entrypoints[i]!,
+      nodePath.extname(entrypoints[i]!),
+    );
+    let script: string;
+    let css: string;
+    if (isProduction) {
+      const ep = buildResult.outputs.find(
+        (o) =>
+          o.kind === "entry-point" &&
+          o.path.endsWith(".js") &&
+          entryStemMatchesJs(nodePath.basename(o.path), stem),
+      );
+      if (!ep) {
+        throw new Error(`No entry-point .js output for entry stem "${stem}"`);
+      }
+      script = "/dist/" + nodePath.basename(ep.path);
+      const cssArt = buildResult.outputs.find(
+        (o) =>
+          o.path.endsWith(".css") &&
+          entryStemMatchesCss(nodePath.basename(o.path), stem),
+      );
+      css = cssArt ? "/dist/" + nodePath.basename(cssArt.path) : "";
+    } else {
+      script = "/dist/" + entryName + ".js";
+      css = "/dist/" + entryName + ".css";
+    }
+    out[entryName] = { script, css, chunks };
+  }
+  return out;
 }
 
 interface RenderResult {
@@ -176,16 +251,17 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
     return createError("Missing outdir");
   }
 
-  const isProduction =
-    process.env.BIFROST_PROD === "1" || process.env.BIFROST_PROD === "true";
-
   const buildTarget = target === "bun" ? "bun" : "browser";
   const isSSR = buildTarget === "bun";
+  const hashClientAssets =
+    (process.env.BIFROST_PROD === "1" ||
+      process.env.BIFROST_PROD === "true") &&
+    !isSSR;
 
   try {
     const plugins = isSSR ? [reactCompiler] : [reactCompiler, tailwindPlugin];
 
-    const naming = isProduction
+    const naming = hashClientAssets
       ? {
           entry: "[name]-[hash].[ext]",
           chunk: "[name]-[hash].[ext]",
@@ -204,28 +280,6 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
       naming,
       plugins,
     });
-
-    if (entryNames && entryNames.length === entrypoints.length) {
-      for (let i = 0; i < entrypoints.length; i++) {
-        const entryPath = entrypoints[i];
-        const entryName = entryNames[i];
-        const ext = nodePath.extname(entryPath);
-        const oldName = nodePath.basename(entryPath, ext) + ".js";
-        const newName = entryName + ".js";
-        if (oldName !== newName) {
-          const oldPath = nodePath.join(outdir, oldName);
-          const newPath = nodePath.join(outdir, newName);
-          try { nodeFs.renameSync(oldPath, newPath); } catch {}
-        }
-        const oldCssName = nodePath.basename(entryPath, ext) + ".css";
-        const newCssName = entryName + ".css";
-        if (oldCssName !== newCssName) {
-          const oldCssPath = nodePath.join(outdir, oldCssName);
-          const newCssPath = nodePath.join(outdir, newCssName);
-          try { nodeFs.renameSync(oldCssPath, newCssPath); } catch {}
-        }
-      }
-    }
 
     if (!result.success) {
       const errors = result.logs
@@ -247,7 +301,46 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
       return createError("Build failed", { errors });
     }
 
-    const response: Result = { ok: true };
+    if (!hashClientAssets && entryNames && entryNames.length === entrypoints.length) {
+      for (let i = 0; i < entrypoints.length; i++) {
+        const entryPath = entrypoints[i];
+        const entryName = entryNames[i];
+        const ext = nodePath.extname(entryPath);
+        const oldName = nodePath.basename(entryPath, ext) + ".js";
+        const newName = entryName + ".js";
+        if (oldName !== newName) {
+          const oldPath = nodePath.join(outdir, oldName);
+          const newPath = nodePath.join(outdir, newName);
+          try {
+            nodeFs.renameSync(oldPath, newPath);
+          } catch {}
+        }
+        const oldCssName = nodePath.basename(entryPath, ext) + ".css";
+        const newCssName = entryName + ".css";
+        if (oldCssName !== newCssName) {
+          const oldCssPath = nodePath.join(outdir, oldCssName);
+          const newCssPath = nodePath.join(outdir, newCssName);
+          try {
+            nodeFs.renameSync(oldCssPath, newCssPath);
+          } catch {}
+        }
+      }
+    }
+
+    let entries: Record<string, BuildEntryResult>;
+    try {
+      entries = buildEntriesPayload(
+        result,
+        entrypoints,
+        entryNames ?? [],
+        hashClientAssets,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return createError(`Build output mapping failed: ${message}`, err as Error);
+    }
+
+    const response: Result = { ok: true, entries };
     return new Response(JSON.stringify(response) + "\n");
   } catch (err) {
     return createError("Build failed", err);

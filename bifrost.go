@@ -278,6 +278,7 @@ func (a *App) ExportStaticPages(outputDir string) error {
 		manifestEntry := core.ManifestEntry{
 			Script:       a.manifest.Entries[entryName].Script,
 			CSS:          a.manifest.Entries[entryName].CSS,
+			Chunks:       a.manifest.Entries[entryName].Chunks,
 			Mode:         "static",
 			StaticRoutes: make(map[string]string),
 		}
@@ -291,7 +292,11 @@ func (a *App) ExportStaticPages(outputDir string) error {
 				continue
 			}
 
-			html := renderFullHTML(page, entryName, entry.Props)
+			html, err := core.RenderHTMLShell(page.Body, entry.Props, manifestEntry.Script, page.Head, manifestEntry.CSS, manifestEntry.Chunks)
+			if err != nil {
+				fmt.Printf("Warning: Failed to build HTML for %s: %v, skipping\n", entry.Path, err)
+				continue
+			}
 
 			cleanedRoutePath := path.Clean("/" + entry.Path)
 			if strings.Contains(cleanedRoutePath, "..") {
@@ -340,40 +345,6 @@ func (a *App) ExportStaticPages(outputDir string) error {
 
 	manifestPath := filepath.Join(outputDir, "export-manifest.json")
 	return os.WriteFile(manifestPath, manifestData, 0644)
-}
-
-// renderFullHTML generates a complete HTML page from rendered content
-func renderFullHTML(page core.RenderedPage, entryName string, props map[string]any) string {
-	propsJSON := "{}"
-	if len(props) > 0 {
-		data, err := json.Marshal(props)
-		if err == nil {
-			propsJSON = strings.ReplaceAll(string(data), "</", "<\\/")
-		}
-	}
-
-	// Generate HTML shell with rendered content
-	html := fmt.Sprintf(`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />%s
-    <link rel="stylesheet" href="/dist/%s.css" />
-  </head>
-  <body>
-    <div id="app">%s</div>
-    <script id="__BIFROST_PROPS__" type="application/json">%s</script>
-    <script src="/dist/%s.js" type="module" defer></script>
-  </body>
-</html>`,
-		page.Head,
-		entryName,
-		page.Body,
-		propsJSON,
-		entryName,
-	)
-
-	return html
 }
 
 func Page(pattern string, componentPath string, opts ...PageOption) Route {
