@@ -4,15 +4,18 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"html"
 	"strings"
 )
 
 var emptyPropsJSON = []byte("{}")
 
-func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, headHTML string, cssHref string, chunks []string) (string, error) {
+func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, headHTML string, cssHref string, chunks []string, htmlLang string) (string, error) {
 	if scriptSrc == "" {
 		return "", errors.New("missing script src")
 	}
+
+	langAttr := SanitizeHTMLLang(htmlLang)
 
 	hasCustomTitle := false
 	if headHTML != "" {
@@ -51,7 +54,9 @@ func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, he
 	var sb strings.Builder
 	sb.Grow(capacity)
 
-	sb.WriteString("<!doctype html>\n<html lang=\"en\">\n  <head>\n    ")
+	sb.WriteString("<!doctype html>\n<html lang=\"")
+	sb.WriteString(html.EscapeString(langAttr))
+	sb.WriteString("\">\n  <head>\n    ")
 	sb.WriteString(`<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />`)
 
 	if !hasCustomTitle {

@@ -5,5 +5,5 @@ import { Page } from "COMPONENT_PATH";
 const container = document.getElementById("app");
 if (container) {
 	const root = createRoot(container);
-	root.render(React.createElement(Page, {}));
+	root.render(BIFROST_CLIENT_ROOT);
 }

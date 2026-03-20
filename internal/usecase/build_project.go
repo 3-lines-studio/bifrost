@@ -77,7 +77,7 @@ type pageMetadata struct {
 func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) BuildOutput {
 	s.cli.PrintHeader("Bifrost Build")
 
-	pageConfigs, err := s.scanPages(input.MainFile)
+	pageConfigs, fileDefaultHTMLLang, err := s.scanPages(input.MainFile)
 	if err != nil {
 		return BuildOutput{
 			Success: false,
@@ -177,7 +177,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 			continue
 		}
 
-		if err := s.writeSSREntry(ssrEntryPath, importPath); err != nil {
+		if err := s.writeSSREntry(ssrEntryPath, importPath, pm.config.SuppressHydrationWarningRoot); err != nil {
 			ssrFailed[pm.entryName] = struct{}{}
 			ssrErrors = append(ssrErrors, BuildError{
 				Page:    pm.config.ComponentPath,
@@ -228,7 +228,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		}
 
 		if pm.config.Mode == core.ModeClientOnly {
-			if err := s.writeClientOnlyEntry(entryPath, importPath); err != nil {
+			if err := s.writeClientOnlyEntry(entryPath, importPath, pm.config.SuppressHydrationWarningRoot); err != nil {
 				clientEntryErrors = append(clientEntryErrors, BuildError{
 					Page:    pm.entryName,
 					Message: "Failed to write client-only entry",
@@ -237,7 +237,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 				continue
 			}
 		} else {
-			if err := s.writeHydrationEntry(entryPath, importPath); err != nil {
+			if err := s.writeHydrationEntry(entryPath, importPath, pm.config.SuppressHydrationWarningRoot); err != nil {
 				clientEntryErrors = append(clientEntryErrors, BuildError{
 					Page:    pm.entryName,
 					Message: "Failed to write hydration entry",
@@ -314,7 +314,12 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 
 		mentry := manifest.Entries[pm.entryName]
 		htmlPath := filepath.Join(pagesDir, pm.entryName+".html")
-		if err := s.writeClientOnlyHTML(htmlPath, title, mentry.Script, mentry.CSS, mentry.Chunks); err != nil {
+		lang := pm.config.HTMLLang
+		if lang == "" {
+			lang = fileDefaultHTMLLang
+		}
+		lang = core.SanitizeHTMLLang(lang)
+		if err := s.writeClientOnlyHTML(htmlPath, title, mentry.Script, mentry.CSS, mentry.Chunks, lang); err != nil {
 			htmlErrors = append(htmlErrors, BuildError{
 				Page:    pm.entryName,
 				Message: "Failed to generate HTML shell",
@@ -405,12 +410,67 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 	return BuildOutput{Success: !report.HasFailures()}
 }
 
-func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, error) {
+func callExprSimpleName(call *ast.CallExpr) string {
+	switch fn := call.Fun.(type) {
+	case *ast.SelectorExpr:
+		if fn.Sel != nil {
+			return fn.Sel.Name
+		}
+	case *ast.Ident:
+		return fn.Name
+	}
+	return ""
+}
+
+func scanDefaultHTMLLang(f *ast.File) string {
+	var lang string
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if callExprSimpleName(call) != "WithDefaultHTMLLang" || len(call.Args) < 1 {
+			return true
+		}
+		if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+			if u, err := strconv.Unquote(lit.Value); err == nil {
+				lang = u
+			}
+		}
+		return true
+	})
+	return lang
+}
+
+func parsePageBuildOptions(args []ast.Expr) (htmlLang string, suppressRoot bool) {
+	for _, arg := range args {
+		call, ok := arg.(*ast.CallExpr)
+		if !ok {
+			continue
+		}
+		switch callExprSimpleName(call) {
+		case "WithHTMLLang":
+			if len(call.Args) < 1 {
+				continue
+			}
+			if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				htmlLang, _ = strconv.Unquote(lit.Value)
+			}
+		case "WithSuppressHydrationWarningRoot":
+			suppressRoot = true
+		}
+	}
+	return htmlLang, suppressRoot
+}
+
+func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, string, error) {
 	fset := token.NewFileSet()
 	node, err := parser.ParseFile(fset, mainFile, nil, parser.ParseComments)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
+
+	defaultHTMLLang := scanDefaultHTMLLang(node)
 
 	var configs []core.PageConfig
 	seen := make(map[string]bool)
@@ -456,12 +516,20 @@ func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, error) {
 
 		mode, hasStaticDataLoader := s.detectPageMode(callExpr.Args[argIndex:])
 
+		var optArgs []ast.Expr
+		if len(callExpr.Args) > 2 {
+			optArgs = callExpr.Args[2:]
+		}
+		htmlLang, suppressRoot := parsePageBuildOptions(optArgs)
+
 		if !seen[path] {
 			seen[path] = true
 			configs = append(configs, core.PageConfig{
-				ComponentPath:    path,
-				Mode:             mode,
-				StaticDataLoader: nil,
+				ComponentPath:                path,
+				Mode:                         mode,
+				HTMLLang:                     htmlLang,
+				SuppressHydrationWarningRoot: suppressRoot,
+				StaticDataLoader:             nil,
 			})
 			_ = hasStaticDataLoader
 		}
@@ -469,7 +537,7 @@ func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, error) {
 		return true
 	})
 
-	return configs, nil
+	return configs, defaultHTMLLang, nil
 }
 
 func (s *BuildService) detectPageMode(args []ast.Expr) (core.PageMode, bool) {
@@ -551,7 +619,7 @@ func (s *BuildService) extractTitleFromComponent(componentPath string) string {
 	return ""
 }
 
-func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, css string, chunks []string) error {
+func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, css string, chunks []string, htmlLang string) error {
 	var chunkLines strings.Builder
 	for _, c := range chunks {
 		chunkLines.WriteString(`    <script src="`)
@@ -577,6 +645,7 @@ func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, css string, 
 	modulePreload.WriteString(`" />
 `)
 	html := clientOnlyHTMLTemplate
+	html = strings.ReplaceAll(html, "LANG_PLACEHOLDER", htmlLang)
 	html = strings.ReplaceAll(html, "TITLE_PLACEHOLDER", title)
 	html = strings.ReplaceAll(html, "CSS_LINK_PLACEHOLDER", cssLink)
 	html = strings.ReplaceAll(html, "MODULEPRELOAD_PLACEHOLDER", modulePreload.String())
@@ -643,18 +712,18 @@ func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *c
 	return nil
 }
 
-func (s *BuildService) writeSSREntry(entryPath, importPath string) error {
-	content := strings.ReplaceAll(s.adapter.SSREntryTemplate(), "COMPONENT_PATH", importPath)
+func (s *BuildService) writeSSREntry(entryPath, importPath string, suppressHydrationRoot bool) error {
+	content := strings.ReplaceAll(s.adapter.SSREntryTemplate(suppressHydrationRoot), "COMPONENT_PATH", importPath)
 	return os.WriteFile(entryPath, []byte(content), 0644)
 }
 
-func (s *BuildService) writeClientOnlyEntry(entryPath, importPath string) error {
-	content := strings.ReplaceAll(s.adapter.ClientEntryTemplate(core.ModeClientOnly), "COMPONENT_PATH", importPath)
+func (s *BuildService) writeClientOnlyEntry(entryPath, importPath string, suppressHydrationRoot bool) error {
+	content := strings.ReplaceAll(s.adapter.ClientEntryTemplate(core.ModeClientOnly, suppressHydrationRoot), "COMPONENT_PATH", importPath)
 	return os.WriteFile(entryPath, []byte(content), 0644)
 }
 
-func (s *BuildService) writeHydrationEntry(entryPath, importPath string) error {
-	content := strings.ReplaceAll(s.adapter.ClientEntryTemplate(core.ModeSSR), "COMPONENT_PATH", importPath)
+func (s *BuildService) writeHydrationEntry(entryPath, importPath string, suppressHydrationRoot bool) error {
+	content := strings.ReplaceAll(s.adapter.ClientEntryTemplate(core.ModeSSR, suppressHydrationRoot), "COMPONENT_PATH", importPath)
 	return os.WriteFile(entryPath, []byte(content), 0644)
 }
 

@@ -132,6 +132,17 @@ func NewWithFramework(assetsFS embed.FS, fw core.Framework, routes ...Route) *Ap
 	return newApp(assetsFS, routes, config)
 }
 
+// NewWithOptions constructs an app and applies ConfigOption values (e.g. WithDefaultHTMLLang).
+func NewWithOptions(assetsFS embed.FS, opts []ConfigOption, routes ...Route) *App {
+	config := &core.Config{
+		Framework: core.FrameworkReact,
+	}
+	for _, o := range opts {
+		o(config)
+	}
+	return newApp(assetsFS, routes, config)
+}
+
 func (a *App) getAdapter() core.FrameworkAdapter {
 	return framework.NewReactAdapter()
 }
@@ -172,6 +183,11 @@ func (a *App) Wrap(api router) http.Handler {
 		panic("bifrost: nil router passed to Wrap; use app.Handler()")
 	}
 
+	defaultLang := ""
+	if a.config != nil {
+		defaultLang = a.config.DefaultHTMLLang
+	}
+
 	for _, route := range a.routes {
 		config := buildPageConfig(route)
 		staticPath := a.getStaticPath(config)
@@ -179,7 +195,7 @@ func (a *App) Wrap(api router) http.Handler {
 		fsAdapter := adaptersfs.NewEmbedFileSystem(a.assetsFS)
 		pageService := usecase.NewPageService(a.renderer.client, fsAdapter, a.getAdapter())
 
-		handler := adaptershttp.NewPageHandler(pageService, config, a.manifest, a.assetsFS, a.isDev, staticPath)
+		handler := adaptershttp.NewPageHandler(pageService, config, a.manifest, a.assetsFS, a.isDev, staticPath, defaultLang)
 		api.Handle(route.Pattern, handler)
 	}
 
@@ -286,13 +302,19 @@ func (a *App) ExportStaticPages(outputDir string) error {
 		for _, entry := range entries {
 			fmt.Printf("Exporting %s...\n", entry.Path)
 
-			page, err := a.renderer.client.Render(ssrBundlePath, entry.Props)
+			appDefault := ""
+			if a.config != nil {
+				appDefault = a.config.DefaultHTMLLang
+			}
+			lang, propsForReact := core.ResolveHTMLLang(appDefault, config.HTMLLang, entry.Props)
+
+			page, err := a.renderer.client.Render(ssrBundlePath, propsForReact)
 			if err != nil {
 				fmt.Printf("Warning: Failed to render %s: %v, skipping\n", entry.Path, err)
 				continue
 			}
 
-			html, err := core.RenderHTMLShell(page.Body, entry.Props, manifestEntry.Script, page.Head, manifestEntry.CSS, manifestEntry.Chunks)
+			html, err := core.RenderHTMLShell(page.Body, propsForReact, manifestEntry.Script, page.Head, manifestEntry.CSS, manifestEntry.Chunks, lang)
 			if err != nil {
 				fmt.Printf("Warning: Failed to build HTML for %s: %v, skipping\n", entry.Path, err)
 				continue
@@ -369,6 +391,21 @@ func WithStatic() PageOption {
 
 func WithStaticData(loader core.StaticDataLoader) PageOption {
 	return core.WithStaticData(loader)
+}
+
+// PropHTMLLang is the reserved loader/static-data key for document language (see WithHTMLLang / WithDefaultHTMLLang).
+const PropHTMLLang = core.PropHTMLLang
+
+func WithDefaultHTMLLang(lang string) ConfigOption {
+	return core.WithDefaultHTMLLang(lang)
+}
+
+func WithHTMLLang(lang string) PageOption {
+	return core.WithHTMLLang(lang)
+}
+
+func WithSuppressHydrationWarningRoot() PageOption {
+	return core.WithSuppressHydrationWarningRoot()
 }
 
 func createAssetHandler(router router, app *App) http.Handler {

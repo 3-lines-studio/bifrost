@@ -17,5 +17,5 @@ function getProps() {
 const container = document.getElementById("app");
 if (container) {
 	const props = getProps();
-	hydrateRoot(container, React.createElement(Page, props));
+	hydrateRoot(container, BIFROST_CLIENT_ROOT);
 }

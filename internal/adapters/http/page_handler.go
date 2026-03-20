@@ -17,13 +17,14 @@ import (
 )
 
 type PageHandler struct {
-	service    *usecase.PageService
-	config     core.PageConfig
-	manifest   *core.Manifest
-	assetsFS   embed.FS
-	isDev      bool
-	entryName  string
-	staticPath string
+	service         *usecase.PageService
+	config          core.PageConfig
+	manifest        *core.Manifest
+	assetsFS        embed.FS
+	isDev           bool
+	entryName       string
+	staticPath      string
+	defaultHTMLLang string
 }
 
 func NewPageHandler(
@@ -33,15 +34,17 @@ func NewPageHandler(
 	assetsFS embed.FS,
 	isDev bool,
 	staticPath string,
+	defaultHTMLLang string,
 ) http.Handler {
 	return &PageHandler{
-		service:    service,
-		config:     config,
-		manifest:   manifest,
-		assetsFS:   assetsFS,
-		isDev:      isDev,
-		entryName:  core.EntryNameForPath(config.ComponentPath),
-		staticPath: staticPath,
+		service:         service,
+		config:          config,
+		manifest:        manifest,
+		assetsFS:        assetsFS,
+		isDev:           isDev,
+		entryName:       core.EntryNameForPath(config.ComponentPath),
+		staticPath:      staticPath,
+		defaultHTMLLang: defaultHTMLLang,
 	}
 }
 
@@ -49,13 +52,14 @@ var errNeedsSetup = errors.New("page needs setup but setup not implemented in ad
 
 func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	input := usecase.ServePageInput{
-		Config:      h.config,
-		IsDev:       h.isDev,
-		Manifest:    h.manifest,
-		EntryName:   h.entryName,
-		StaticPath:  h.staticPath,
-		RequestPath: req.URL.Path,
-		Request:     req,
+		Config:          h.config,
+		DefaultHTMLLang: h.defaultHTMLLang,
+		IsDev:           h.isDev,
+		Manifest:        h.manifest,
+		EntryName:       h.entryName,
+		StaticPath:      h.staticPath,
+		RequestPath:     req.URL.Path,
+		Request:         req,
 	}
 
 	output := h.service.ServePage(req.Context(), input)

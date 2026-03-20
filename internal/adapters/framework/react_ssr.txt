@@ -4,7 +4,7 @@ import { Page, Head } from "COMPONENT_PATH";
 
 export function render(props) {
 	const pageEl = React.createElement(Page, props);
-	const html = renderToString(pageEl);
+	const html = renderToString(BIFROST_SSR_PAGE_WRAP);
 	
 	let head = "";
 	if (Head) {
