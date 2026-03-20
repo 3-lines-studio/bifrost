@@ -11,6 +11,7 @@ func TestRenderHTMLShell_Basic(t *testing.T) {
 		map[string]any{"name": "World"},
 		"/dist/page.js",
 		"<title>Test</title>",
+		".hero{display:block}",
 		"/dist/page.css",
 		nil,
 		"en",
@@ -40,11 +41,14 @@ func TestRenderHTMLShell_Basic(t *testing.T) {
 	if !strings.Contains(html, `href="/dist/page.css"`) {
 		t.Error("expected CSS href in output")
 	}
-	if !strings.Contains(html, `media="print"`) || !strings.Contains(html, `onload="this.media='all'"`) {
-		t.Error("expected non-blocking stylesheet attributes")
+	if !strings.Contains(html, `<style data-bifrost-critical>.hero{display:block}</style>`) {
+		t.Error("expected inline critical CSS in output")
 	}
-	if !strings.Contains(html, "<noscript><link rel=\"stylesheet\"") {
-		t.Error("expected noscript stylesheet fallback")
+	if !strings.Contains(html, `<link rel="stylesheet" href="/dist/page.css" />`) {
+		t.Error("expected stylesheet link in output")
+	}
+	if strings.Contains(html, `media="print"`) || strings.Contains(html, `onload="this.media='all'"`) {
+		t.Error("did not expect deferred stylesheet loading")
 	}
 	if !strings.Contains(html, "<title>Test</title>") {
 		t.Error("expected custom title in output")
@@ -52,14 +56,14 @@ func TestRenderHTMLShell_Basic(t *testing.T) {
 }
 
 func TestRenderHTMLShell_MissingScript(t *testing.T) {
-	_, err := RenderHTMLShell("", nil, "", "", "", nil, "")
+	_, err := RenderHTMLShell("", nil, "", "", "", "", nil, "")
 	if err == nil {
 		t.Error("expected error for missing script src")
 	}
 }
 
 func TestRenderHTMLShell_DefaultTitle(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", nil, "")
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -69,7 +73,7 @@ func TestRenderHTMLShell_DefaultTitle(t *testing.T) {
 }
 
 func TestRenderHTMLShell_CustomTitleSuppressesDefault(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "<title>My App</title>", "", nil, "")
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "<title>My App</title>", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -82,7 +86,7 @@ func TestRenderHTMLShell_CustomTitleSuppressesDefault(t *testing.T) {
 }
 
 func TestRenderHTMLShell_CustomLang(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", nil, "fr-CA")
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "fr-CA")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -92,7 +96,7 @@ func TestRenderHTMLShell_CustomLang(t *testing.T) {
 }
 
 func TestRenderHTMLShell_InvalidLangFallsBack(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", nil, `en"><script`)
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, `en"><script`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,6 +110,7 @@ func TestRenderHTMLShell_ScriptBreakoutEscaped(t *testing.T) {
 		"",
 		map[string]any{"xss": "</script><script>alert(1)</script>"},
 		"/dist/page.js",
+		"",
 		"",
 		"",
 		nil,
@@ -138,6 +143,7 @@ func TestRenderHTMLShell_WithChunks(t *testing.T) {
 		"/dist/page.js",
 		"",
 		"",
+		"",
 		[]string{"/dist/chunk-a.js", "/dist/chunk-b.js"},
 		"en",
 	)
@@ -166,11 +172,31 @@ func TestRenderHTMLShell_WithChunks(t *testing.T) {
 }
 
 func TestRenderHTMLShell_NilProps(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", nil, "")
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(html, `{}`) {
 		t.Error("expected empty JSON object for nil props")
+	}
+}
+
+func TestRenderStyleTags_StylesheetOnly(t *testing.T) {
+	html := RenderStyleTags("", "/dist/page.css")
+	if html != `<link rel="stylesheet" href="/dist/page.css" />` {
+		t.Fatalf("unexpected output: %q", html)
+	}
+	if strings.Contains(html, "data-bifrost-critical") {
+		t.Fatal("did not expect critical style tag")
+	}
+}
+
+func TestRenderStyleTags_CriticalOnly(t *testing.T) {
+	html := RenderStyleTags(".hero{display:block}", "")
+	if !strings.Contains(html, `data-bifrost-critical`) {
+		t.Fatal("expected critical style tag")
+	}
+	if strings.Contains(html, `rel="stylesheet"`) {
+		t.Fatal("did not expect stylesheet link")
 	}
 }

@@ -10,7 +10,7 @@ import (
 
 var emptyPropsJSON = []byte("{}")
 
-func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, headHTML string, cssHref string, chunks []string, htmlLang string) (string, error) {
+func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, headHTML string, criticalCSS string, cssHref string, chunks []string, htmlLang string) (string, error) {
 	if scriptSrc == "" {
 		return "", errors.New("missing script src")
 	}
@@ -40,11 +40,8 @@ func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, he
 
 	// Pre-calculate approximate capacity
 	const staticLen = 250 // fixed HTML structure overhead
-	capacity := staticLen + len(bodyHTML) + len(propsJSON) + len(scriptSrc) + len(headHTML) + len(cssHref)
-	if cssHref != "" {
-		// non-blocking link + duplicate href inside noscript
-		capacity += len(cssHref) + 120
-	}
+	styleTags := RenderStyleTags(criticalCSS, cssHref)
+	capacity := staticLen + len(bodyHTML) + len(propsJSON) + len(scriptSrc) + len(headHTML) + len(styleTags)
 	for _, chunk := range chunks {
 		capacity += 55 + len(chunk) // <script src="..." type="module" defer></script>\n
 		capacity += 36 + len(chunk) // <link rel="modulepreload" href="..." />
@@ -65,13 +62,8 @@ func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, he
 	if headHTML != "" {
 		sb.WriteString(headHTML)
 	}
-	if cssHref != "" {
-		// Not render-blocking for screen; see https://web.dev/articles/defer-non-critical-css
-		sb.WriteString(`<link rel="stylesheet" href="`)
-		sb.WriteString(cssHref)
-		sb.WriteString(`" media="print" onload="this.media='all'" /><noscript><link rel="stylesheet" href="`)
-		sb.WriteString(cssHref)
-		sb.WriteString(`" /></noscript>`)
+	if styleTags != "" {
+		sb.WriteString(styleTags)
 	}
 
 	// Discover module graph during head parse instead of after body scan (shorter critical path).
@@ -101,6 +93,50 @@ func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, he
 	sb.WriteString("\" type=\"module\" defer></script>\n  </body>\n</html>\n")
 
 	return sb.String(), nil
+}
+
+func RenderStyleTags(criticalCSS string, cssHref string) string {
+	if criticalCSS == "" && cssHref == "" {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.Grow(len(criticalCSS) + len(cssHref) + 120)
+
+	if criticalCSS != "" {
+		sb.WriteString(`<style data-bifrost-critical>`)
+		sb.WriteString(sanitizeInlineStyleText(criticalCSS))
+		sb.WriteString(`</style>`)
+	}
+	if cssHref != "" {
+		sb.WriteString(`<link rel="stylesheet" href="`)
+		sb.WriteString(cssHref)
+		sb.WriteString(`" />`)
+	}
+	return sb.String()
+}
+
+func sanitizeInlineStyleText(css string) string {
+	lower := strings.ToLower(css)
+	if !strings.Contains(lower, "</style") {
+		return css
+	}
+
+	var sb strings.Builder
+	sb.Grow(len(css) + 8)
+
+	start := 0
+	for {
+		idx := strings.Index(lower[start:], "</style")
+		if idx == -1 {
+			sb.WriteString(css[start:])
+			return sb.String()
+		}
+		idx += start
+		sb.WriteString(css[start:idx])
+		sb.WriteString(`<\/style`)
+		start = idx + len("</style")
+	}
 }
 
 // containsTitle does a case-insensitive check for "<title" without allocating a lowercased copy.

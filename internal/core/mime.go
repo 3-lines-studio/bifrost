@@ -13,6 +13,7 @@ var contentTypes = map[string]string{
 	".jpg":   "image/jpeg",
 	".jpeg":  "image/jpeg",
 	".gif":   "image/gif",
+	".webp":  "image/webp",
 	".svg":   "image/svg+xml",
 	".woff":  "font/woff",
 	".woff2": "font/woff2",

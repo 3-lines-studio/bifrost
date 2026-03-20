@@ -32,8 +32,7 @@ type PageConfig struct {
 	Mode                         PageMode
 	PropsLoader                  PropsLoader
 	StaticDataLoader             StaticDataLoader
-	HTMLLang                     string
-	SuppressHydrationWarningRoot bool
+	HTMLLang string
 }
 
 type PageOption func(*PageConfig)
@@ -66,12 +65,6 @@ func WithStaticData(loader StaticDataLoader) PageOption {
 func WithHTMLLang(lang string) PageOption {
 	return func(c *PageConfig) {
 		c.HTMLLang = lang
-	}
-}
-
-func WithSuppressHydrationWarningRoot() PageOption {
-	return func(c *PageConfig) {
-		c.SuppressHydrationWarningRoot = true
 	}
 }
 

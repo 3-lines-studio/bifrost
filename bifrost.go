@@ -293,6 +293,7 @@ func (a *App) ExportStaticPages(outputDir string) error {
 
 		manifestEntry := core.ManifestEntry{
 			Script:       a.manifest.Entries[entryName].Script,
+			CriticalCSS:  a.manifest.Entries[entryName].CriticalCSS,
 			CSS:          a.manifest.Entries[entryName].CSS,
 			Chunks:       a.manifest.Entries[entryName].Chunks,
 			Mode:         "static",
@@ -314,7 +315,17 @@ func (a *App) ExportStaticPages(outputDir string) error {
 				continue
 			}
 
-			html, err := core.RenderHTMLShell(page.Body, propsForReact, manifestEntry.Script, page.Head, manifestEntry.CSS, manifestEntry.Chunks, lang)
+			criticalCSS := manifestEntry.CriticalCSS
+			if manifestEntry.CSS != "" {
+				cssPath := filepath.Join(outputDir, filepath.FromSlash(strings.TrimPrefix(manifestEntry.CSS, "/")))
+				if cssBytes, err := os.ReadFile(cssPath); err == nil {
+					if extracted := core.ExtractCriticalCSS(page.Head+page.Body, string(cssBytes), core.DefaultCriticalCSSMaxBytes); extracted != "" {
+						criticalCSS = extracted
+					}
+				}
+			}
+
+			html, err := core.RenderHTMLShell(page.Body, propsForReact, manifestEntry.Script, page.Head, criticalCSS, manifestEntry.CSS, manifestEntry.Chunks, lang)
 			if err != nil {
 				fmt.Printf("Warning: Failed to build HTML for %s: %v, skipping\n", entry.Path, err)
 				continue
@@ -402,10 +413,6 @@ func WithDefaultHTMLLang(lang string) ConfigOption {
 
 func WithHTMLLang(lang string) PageOption {
 	return core.WithHTMLLang(lang)
-}
-
-func WithSuppressHydrationWarningRoot() PageOption {
-	return core.WithSuppressHydrationWarningRoot()
 }
 
 func createAssetHandler(router router, app *App) http.Handler {

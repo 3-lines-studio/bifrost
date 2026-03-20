@@ -42,15 +42,11 @@ func (a *ReactAdapter) EntryFileExtension() string {
 	return ".tsx"
 }
 
-func (a *ReactAdapter) SSREntryTemplate(suppressHydrationWarningRoot bool) string {
-	wrap := "pageEl"
-	if suppressHydrationWarningRoot {
-		wrap = `React.createElement('div', { suppressHydrationWarning: true, style: { display: 'contents' } }, pageEl)`
-	}
-	return strings.ReplaceAll(reactSSRTemplate, "BIFROST_SSR_PAGE_WRAP", wrap)
+func (a *ReactAdapter) SSREntryTemplate() string {
+	return strings.ReplaceAll(reactSSRTemplate, "BIFROST_SSR_PAGE_WRAP", "pageEl")
 }
 
-func (a *ReactAdapter) ClientEntryTemplate(mode core.PageMode, suppressHydrationWarningRoot bool) string {
+func (a *ReactAdapter) ClientEntryTemplate(mode core.PageMode) string {
 	var tmpl string
 	switch mode {
 	case core.ModeClientOnly:
@@ -61,14 +57,8 @@ func (a *ReactAdapter) ClientEntryTemplate(mode core.PageMode, suppressHydration
 	var root string
 	if mode == core.ModeClientOnly {
 		root = `React.createElement(Page, {})`
-		if suppressHydrationWarningRoot {
-			root = `React.createElement('div', { suppressHydrationWarning: true, style: { display: 'contents' } }, React.createElement(Page, {}))`
-		}
 	} else {
 		root = `React.createElement(Page, props)`
-		if suppressHydrationWarningRoot {
-			root = `React.createElement('div', { suppressHydrationWarning: true, style: { display: 'contents' } }, React.createElement(Page, props))`
-		}
 	}
 	return strings.ReplaceAll(tmpl, "BIFROST_CLIENT_ROOT", root)
 }

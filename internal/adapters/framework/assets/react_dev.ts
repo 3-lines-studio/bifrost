@@ -21,6 +21,7 @@ interface ErrorDetail {
 
 interface BuildEntryResult {
   script: string;
+  criticalCSS: string;
   css: string;
   chunks: string[];
 }
@@ -170,7 +171,7 @@ function buildEntriesPayload(
       entryAbs = nodePath.resolve(nodePath.join(outdir, entryName + ".js"));
     }
     const chunks = collectChunksForEntry(buildResult, entryAbs);
-    out[entryName] = { script, css, chunks };
+    out[entryName] = { script, criticalCSS: "", css, chunks };
   }
   return out;
 }

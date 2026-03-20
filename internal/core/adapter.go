@@ -28,8 +28,8 @@ type FrameworkAdapter interface {
 	Name() string
 	FileExtension() string
 	EntryFileExtension() string
-	SSREntryTemplate(suppressHydrationWarningRoot bool) string
-	ClientEntryTemplate(mode PageMode, suppressHydrationWarningRoot bool) string
+	SSREntryTemplate() string
+	ClientEntryTemplate(mode PageMode) string
 	DevRendererSource() string
 	ProdRendererSource() string
 	BuildPlugins() []string

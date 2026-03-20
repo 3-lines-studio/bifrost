@@ -177,7 +177,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 			continue
 		}
 
-		if err := s.writeSSREntry(ssrEntryPath, importPath, pm.config.SuppressHydrationWarningRoot); err != nil {
+		if err := s.writeSSREntry(ssrEntryPath, importPath); err != nil {
 			ssrFailed[pm.entryName] = struct{}{}
 			ssrErrors = append(ssrErrors, BuildError{
 				Page:    pm.config.ComponentPath,
@@ -228,7 +228,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		}
 
 		if pm.config.Mode == core.ModeClientOnly {
-			if err := s.writeClientOnlyEntry(entryPath, importPath, pm.config.SuppressHydrationWarningRoot); err != nil {
+			if err := s.writeClientOnlyEntry(entryPath, importPath); err != nil {
 				clientEntryErrors = append(clientEntryErrors, BuildError{
 					Page:    pm.entryName,
 					Message: "Failed to write client-only entry",
@@ -237,7 +237,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 				continue
 			}
 		} else {
-			if err := s.writeHydrationEntry(entryPath, importPath, pm.config.SuppressHydrationWarningRoot); err != nil {
+			if err := s.writeHydrationEntry(entryPath, importPath); err != nil {
 				clientEntryErrors = append(clientEntryErrors, BuildError{
 					Page:    pm.entryName,
 					Message: "Failed to write hydration entry",
@@ -290,6 +290,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 			}
 			entry := manifest.Entries[pm.entryName]
 			entry.Script = built.Script
+			entry.CriticalCSS = built.CriticalCSS
 			entry.CSS = built.CSS
 			entry.Chunks = built.Chunks
 			entry.Mode = pm.modeStr
@@ -300,6 +301,8 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 	for _, err := range clientAssetErrors {
 		report.AddError(err.Page, err.Message, err.Details)
 	}
+
+	s.populateCriticalCSS(ctx, bifrostDir, pages, manifest)
 
 	// Generate ClientOnly HTML shells
 	stepHTML := report.StartStep("Generating ClientOnly HTML shells")
@@ -319,7 +322,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 			lang = fileDefaultHTMLLang
 		}
 		lang = core.SanitizeHTMLLang(lang)
-		if err := s.writeClientOnlyHTML(htmlPath, title, mentry.Script, mentry.CSS, mentry.Chunks, lang); err != nil {
+		if err := s.writeClientOnlyHTML(htmlPath, title, mentry.Script, mentry.CriticalCSS, mentry.CSS, mentry.Chunks, lang); err != nil {
 			htmlErrors = append(htmlErrors, BuildError{
 				Page:    pm.entryName,
 				Message: "Failed to generate HTML shell",
@@ -442,7 +445,7 @@ func scanDefaultHTMLLang(f *ast.File) string {
 	return lang
 }
 
-func parsePageBuildOptions(args []ast.Expr) (htmlLang string, suppressRoot bool) {
+func parsePageBuildOptions(args []ast.Expr) (htmlLang string) {
 	for _, arg := range args {
 		call, ok := arg.(*ast.CallExpr)
 		if !ok {
@@ -456,11 +459,9 @@ func parsePageBuildOptions(args []ast.Expr) (htmlLang string, suppressRoot bool)
 			if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
 				htmlLang, _ = strconv.Unquote(lit.Value)
 			}
-		case "WithSuppressHydrationWarningRoot":
-			suppressRoot = true
 		}
 	}
-	return htmlLang, suppressRoot
+	return htmlLang
 }
 
 func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, string, error) {
@@ -520,16 +521,15 @@ func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, string, er
 		if len(callExpr.Args) > 2 {
 			optArgs = callExpr.Args[2:]
 		}
-		htmlLang, suppressRoot := parsePageBuildOptions(optArgs)
+		htmlLang := parsePageBuildOptions(optArgs)
 
 		if !seen[path] {
 			seen[path] = true
 			configs = append(configs, core.PageConfig{
-				ComponentPath:                path,
-				Mode:                         mode,
-				HTMLLang:                     htmlLang,
-				SuppressHydrationWarningRoot: suppressRoot,
-				StaticDataLoader:             nil,
+				ComponentPath:    path,
+				Mode:             mode,
+				HTMLLang:         htmlLang,
+				StaticDataLoader: nil,
 			})
 			_ = hasStaticDataLoader
 		}
@@ -619,7 +619,7 @@ func (s *BuildService) extractTitleFromComponent(componentPath string) string {
 	return ""
 }
 
-func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, css string, chunks []string, htmlLang string) error {
+func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, criticalCSS, css string, chunks []string, htmlLang string) error {
 	var chunkLines strings.Builder
 	for _, c := range chunks {
 		chunkLines.WriteString(`    <script src="`)
@@ -627,11 +627,10 @@ func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, css string, 
 		chunkLines.WriteString(`" type="module" defer></script>
 `)
 	}
+	styleTags := core.RenderStyleTags(criticalCSS, css)
 	cssLink := ""
-	if css != "" {
-		cssLink = `    <link rel="stylesheet" href="` + css + `" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="` + css + `" /></noscript>
-`
+	if styleTags != "" {
+		cssLink = "    " + strings.ReplaceAll(styleTags, "><", ">\n    <") + "\n"
 	}
 	var modulePreload strings.Builder
 	for _, c := range chunks {
@@ -712,18 +711,18 @@ func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *c
 	return nil
 }
 
-func (s *BuildService) writeSSREntry(entryPath, importPath string, suppressHydrationRoot bool) error {
-	content := strings.ReplaceAll(s.adapter.SSREntryTemplate(suppressHydrationRoot), "COMPONENT_PATH", importPath)
+func (s *BuildService) writeSSREntry(entryPath, importPath string) error {
+	content := strings.ReplaceAll(s.adapter.SSREntryTemplate(), "COMPONENT_PATH", importPath)
 	return os.WriteFile(entryPath, []byte(content), 0644)
 }
 
-func (s *BuildService) writeClientOnlyEntry(entryPath, importPath string, suppressHydrationRoot bool) error {
-	content := strings.ReplaceAll(s.adapter.ClientEntryTemplate(core.ModeClientOnly, suppressHydrationRoot), "COMPONENT_PATH", importPath)
+func (s *BuildService) writeClientOnlyEntry(entryPath, importPath string) error {
+	content := strings.ReplaceAll(s.adapter.ClientEntryTemplate(core.ModeClientOnly), "COMPONENT_PATH", importPath)
 	return os.WriteFile(entryPath, []byte(content), 0644)
 }
 
-func (s *BuildService) writeHydrationEntry(entryPath, importPath string, suppressHydrationRoot bool) error {
-	content := strings.ReplaceAll(s.adapter.ClientEntryTemplate(core.ModeSSR, suppressHydrationRoot), "COMPONENT_PATH", importPath)
+func (s *BuildService) writeHydrationEntry(entryPath, importPath string) error {
+	content := strings.ReplaceAll(s.adapter.ClientEntryTemplate(core.ModeSSR), "COMPONENT_PATH", importPath)
 	return os.WriteFile(entryPath, []byte(content), 0644)
 }
 

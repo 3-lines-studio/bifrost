@@ -6,6 +6,7 @@ import (
 
 type ManifestEntry struct {
 	Script       string            `json:"script"`
+	CriticalCSS  string            `json:"criticalCSS,omitempty"`
 	CSS          string            `json:"css,omitempty"`
 	Chunks       []string          `json:"chunks,omitempty"`
 	Static       bool              `json:"static,omitempty"`
@@ -30,28 +31,31 @@ func ParseManifest(data []byte) (*Manifest, error) {
 
 // ClientBuildResult is the Bun /build response for one client entry (hashed paths in production).
 type ClientBuildResult struct {
-	Script string   `json:"script"`
-	CSS    string   `json:"css,omitempty"`
-	Chunks []string `json:"chunks,omitempty"`
+	Script      string   `json:"script"`
+	CriticalCSS string   `json:"criticalCSS,omitempty"`
+	CSS         string   `json:"css,omitempty"`
+	Chunks      []string `json:"chunks,omitempty"`
 }
 
 type Assets struct {
-	Script   string
-	CSS      string
-	Chunks   []string
-	IsStatic bool
-	SSRPath  string
+	Script      string
+	CriticalCSS string
+	CSS         string
+	Chunks      []string
+	IsStatic    bool
+	SSRPath     string
 }
 
 func GetAssets(man *Manifest, entryName string) Assets {
 	if man != nil {
 		if entry, ok := man.Entries[entryName]; ok && entry.Script != "" {
 			return Assets{
-				Script:   entry.Script,
-				CSS:      entry.CSS,
-				Chunks:   entry.Chunks,
-				IsStatic: entry.Static,
-				SSRPath:  entry.SSR,
+				Script:      entry.Script,
+				CriticalCSS: entry.CriticalCSS,
+				CSS:         entry.CSS,
+				Chunks:      entry.Chunks,
+				IsStatic:    entry.Static,
+				SSRPath:     entry.SSR,
 			}
 		}
 	}

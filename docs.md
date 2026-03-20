@@ -172,9 +172,6 @@ func WithStaticData(loader StaticDataLoader) PageOption
 
 // Document <html lang> for this route (overridden by loader key below)
 func WithHTMLLang(lang string) PageOption
-
-// Wrap Page in SSR + client bundles with suppressHydrationWarning (display:contents); see React docs for limits
-func WithSuppressHydrationWarningRoot() PageOption
 ```
 
 **App options** (use `NewWithOptions(assets, []bifrost.ConfigOption{...}, pages...)`):

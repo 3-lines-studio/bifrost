@@ -195,6 +195,7 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 					map[string]any{},
 					assets.Script,
 					page.Head,
+					assets.CriticalCSS,
 					assets.CSS,
 					assets.Chunks,
 					lang,
@@ -211,6 +212,7 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 		map[string]any{},
 		assets.Script,
 		"",
+		assets.CriticalCSS,
 		assets.CSS,
 		assets.Chunks,
 		lang,
@@ -358,6 +360,7 @@ func (s *PageService) renderPageHTML(input ServePageInput, props map[string]any,
 		props,
 		assets.Script,
 		page.Head,
+		assets.CriticalCSS,
 		assets.CSS,
 		assets.Chunks,
 		htmlLang,
@@ -390,7 +393,7 @@ func (s *PageService) buildAndRender(ctx context.Context, input ServePageInput) 
 
 	// Build client entry
 	entryFile := filepath.Join(entryDir, input.EntryName+s.adapter.EntryFileExtension())
-	clientTemplate := s.adapter.ClientEntryTemplate(input.Config.Mode, input.Config.SuppressHydrationWarningRoot)
+	clientTemplate := s.adapter.ClientEntryTemplate(input.Config.Mode)
 	clientContent := strings.ReplaceAll(clientTemplate, "COMPONENT_PATH", componentPath)
 
 	if err := os.WriteFile(entryFile, []byte(clientContent), 0644); err != nil {
@@ -417,7 +420,7 @@ func (s *PageService) buildAndRender(ctx context.Context, input ServePageInput) 
 
 		ssrEntryName := input.EntryName + "-ssr"
 		ssrEntryFile := filepath.Join(entryDir, ssrEntryName+s.adapter.EntryFileExtension())
-		ssrTemplate := s.adapter.SSREntryTemplate(input.Config.SuppressHydrationWarningRoot)
+		ssrTemplate := s.adapter.SSREntryTemplate()
 		ssrContent := strings.ReplaceAll(ssrTemplate, "COMPONENT_PATH", componentPath)
 
 		if err := os.WriteFile(ssrEntryFile, []byte(ssrContent), 0644); err != nil {
