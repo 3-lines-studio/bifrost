@@ -206,14 +206,17 @@ func (r *Renderer) Render(path string, props map[string]any) (core.RenderedPage,
 	}, nil
 }
 
-func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []string) (core.ClientBuildResult, error) {
-	var zero core.ClientBuildResult
+func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
 	if len(entrypoints) == 0 {
-		return zero, fmt.Errorf("missing entrypoints")
+		return nil, fmt.Errorf("missing entrypoints")
 	}
 
 	if outdir == "" {
-		return zero, fmt.Errorf("missing outdir")
+		return nil, fmt.Errorf("missing outdir")
+	}
+
+	if len(entryNames) != len(entrypoints) {
+		return nil, fmt.Errorf("entryNames length %d does not match entrypoints length %d", len(entryNames), len(entrypoints))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), buildTimeout)
@@ -244,7 +247,7 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 	}
 
 	if err := r.postJSON(ctx, "/build", reqBody, &result); err != nil {
-		return zero, err
+		return nil, err
 	}
 
 	if result.Error != nil {
@@ -260,25 +263,32 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 				errorDetails.WriteString("\n")
 			}
 		}
-		return zero, fmt.Errorf("build failed: %s", errorDetails.String())
+		return nil, fmt.Errorf("build failed: %s", errorDetails.String())
 	}
 
 	if !result.OK {
-		return zero, fmt.Errorf("build failed for entrypoints %v -> %s", entrypoints, outdir)
+		return nil, fmt.Errorf("build failed for entrypoints %v -> %s", entrypoints, outdir)
 	}
 
-	if len(entryNames) != 1 {
-		return zero, fmt.Errorf("expected exactly one entry name, got %d", len(entryNames))
+	if result.Entries == nil {
+		return nil, fmt.Errorf("build returned no entries")
 	}
-	name := entryNames[0]
-	built, ok := result.Entries[name]
-	if !ok || built.Script == "" {
-		return core.ClientBuildResult{
-			Script: "/dist/" + name + ".js",
-			CSS:    "/dist/" + name + ".css",
-		}, nil
+
+	out := make(map[string]core.ClientBuildResult, len(entryNames))
+	for _, name := range entryNames {
+		built, ok := result.Entries[name]
+		if !ok {
+			return nil, fmt.Errorf("missing build result for entry %q", name)
+		}
+		if built.Script == "" {
+			built = core.ClientBuildResult{
+				Script: "/dist/" + name + ".js",
+				CSS:    "/dist/" + name + ".css",
+			}
+		}
+		out[name] = built
 	}
-	return built, nil
+	return out, nil
 }
 
 func (r *Renderer) BuildSSR(entrypoints []string, outdir string) error {

@@ -38,9 +38,15 @@ func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, he
 	// Pre-calculate approximate capacity
 	const staticLen = 250 // fixed HTML structure overhead
 	capacity := staticLen + len(bodyHTML) + len(propsJSON) + len(scriptSrc) + len(headHTML) + len(cssHref)
+	if cssHref != "" {
+		// non-blocking link + duplicate href inside noscript
+		capacity += len(cssHref) + 120
+	}
 	for _, chunk := range chunks {
 		capacity += 55 + len(chunk) // <script src="..." type="module" defer></script>\n
+		capacity += 36 + len(chunk) // <link rel="modulepreload" href="..." />
 	}
+	capacity += 36 + len(scriptSrc) // modulepreload for entry
 
 	var sb strings.Builder
 	sb.Grow(capacity)
@@ -55,10 +61,23 @@ func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, he
 		sb.WriteString(headHTML)
 	}
 	if cssHref != "" {
+		// Not render-blocking for screen; see https://web.dev/articles/defer-non-critical-css
 		sb.WriteString(`<link rel="stylesheet" href="`)
 		sb.WriteString(cssHref)
+		sb.WriteString(`" media="print" onload="this.media='all'" /><noscript><link rel="stylesheet" href="`)
+		sb.WriteString(cssHref)
+		sb.WriteString(`" /></noscript>`)
+	}
+
+	// Discover module graph during head parse instead of after body scan (shorter critical path).
+	for _, chunk := range chunks {
+		sb.WriteString(`<link rel="modulepreload" href="`)
+		sb.WriteString(chunk)
 		sb.WriteString(`" />`)
 	}
+	sb.WriteString(`<link rel="modulepreload" href="`)
+	sb.WriteString(scriptSrc)
+	sb.WriteString(`" />`)
 
 	sb.WriteString("\n  </head>\n  <body>\n    <div id=\"app\">")
 	sb.WriteString(bodyHTML)

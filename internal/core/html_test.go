@@ -26,8 +26,24 @@ func TestRenderHTMLShell_Basic(t *testing.T) {
 	if !strings.Contains(html, `src="/dist/page.js"`) {
 		t.Error("expected script src in output")
 	}
+	head, _, ok := strings.Cut(html, "</head>")
+	if !ok {
+		t.Fatal("expected </head>")
+	}
+	if !strings.Contains(head, `rel="modulepreload"`) || !strings.Contains(head, `href="/dist/page.js"`) {
+		t.Error("expected modulepreload for entry script in head")
+	}
+	if strings.Contains(head, `href="/dist/chunk`) {
+		t.Error("did not expect chunk modulepreload without chunks")
+	}
 	if !strings.Contains(html, `href="/dist/page.css"`) {
 		t.Error("expected CSS href in output")
+	}
+	if !strings.Contains(html, `media="print"`) || !strings.Contains(html, `onload="this.media='all'"`) {
+		t.Error("expected non-blocking stylesheet attributes")
+	}
+	if !strings.Contains(html, "<noscript><link rel=\"stylesheet\"") {
+		t.Error("expected noscript stylesheet fallback")
 	}
 	if !strings.Contains(html, "<title>Test</title>") {
 		t.Error("expected custom title in output")
@@ -110,6 +126,19 @@ func TestRenderHTMLShell_WithChunks(t *testing.T) {
 	}
 	if !strings.Contains(html, `src="/dist/chunk-b.js"`) {
 		t.Error("expected chunk-b script in output")
+	}
+	head, _, ok := strings.Cut(html, "</head>")
+	if !ok {
+		t.Fatal("expected </head>")
+	}
+	if !strings.Contains(head, `modulepreload" href="/dist/chunk-a.js"`) {
+		t.Error("expected modulepreload for chunk-a in head")
+	}
+	if !strings.Contains(head, `modulepreload" href="/dist/chunk-b.js"`) {
+		t.Error("expected modulepreload for chunk-b in head")
+	}
+	if !strings.Contains(head, `modulepreload" href="/dist/page.js"`) {
+		t.Error("expected modulepreload for entry in head")
 	}
 }
 

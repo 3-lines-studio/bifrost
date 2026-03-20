@@ -58,16 +58,84 @@ function collectChunkURLs(
     .sort();
 }
 
+function resolveMetaOutputKey(
+  metaOutputs: NonNullable<Bun.BuildMetafile["outputs"]>,
+  filePath: string,
+): string | undefined {
+  const want = nodePath.resolve(filePath);
+  for (const k of Object.keys(metaOutputs)) {
+    if (nodePath.resolve(k) === want) return k;
+  }
+  const base = nodePath.basename(filePath);
+  for (const k of Object.keys(metaOutputs)) {
+    if (nodePath.basename(k) === base) return k;
+  }
+  return undefined;
+}
+
+function artifactForChunkImport(
+  buildResult: Awaited<ReturnType<typeof Bun.build>>,
+  impPath: string,
+): (typeof buildResult.outputs)[number] | undefined {
+  const resolvedImp = nodePath.resolve(impPath);
+  let art = buildResult.outputs.find(
+    (o) => nodePath.resolve(o.path) === resolvedImp,
+  );
+  if (art) return art;
+  const base = nodePath.basename(impPath);
+  return buildResult.outputs.find(
+    (o) => o.kind === "chunk" && nodePath.basename(o.path) === base,
+  );
+}
+
+/** Chunks reachable from this entry only (correct for multi-entry shared vendor builds). */
+function collectChunksForEntry(
+  buildResult: Awaited<ReturnType<typeof Bun.build>>,
+  entryJsAbsPath: string,
+): string[] {
+  const meta = buildResult.metafile;
+  if (!meta?.outputs) {
+    return collectChunkURLs(buildResult.outputs);
+  }
+  const metaOutputs = meta.outputs;
+  const startKey = resolveMetaOutputKey(metaOutputs, entryJsAbsPath);
+  if (!startKey) {
+    return collectChunkURLs(buildResult.outputs);
+  }
+
+  const seen = new Set<string>();
+  const hrefs: string[] = [];
+
+  function visit(metaKey: string) {
+    if (seen.has(metaKey)) return;
+    seen.add(metaKey);
+    const node = metaOutputs[metaKey];
+    if (!node?.imports) return;
+    for (const imp of node.imports) {
+      const impPath = imp.path;
+      if (!impPath.endsWith(".js")) continue;
+      const art = artifactForChunkImport(buildResult, impPath);
+      if (!art || art.kind !== "chunk") continue;
+      hrefs.push("/dist/" + nodePath.basename(art.path));
+      const childKey = resolveMetaOutputKey(metaOutputs, art.path);
+      if (childKey) visit(childKey);
+    }
+  }
+
+  visit(startKey);
+  return [...new Set(hrefs)].sort();
+}
+
 function buildEntriesPayload(
   buildResult: Awaited<ReturnType<typeof Bun.build>>,
   entrypoints: string[],
   entryNames: string[],
   isProduction: boolean,
+  outdir: string,
 ): Record<string, BuildEntryResult> {
   if (!entryNames || entryNames.length !== entrypoints.length) {
     return {};
   }
-  const chunks = collectChunkURLs(buildResult.outputs);
   const out: Record<string, BuildEntryResult> = {};
   for (let i = 0; i < entrypoints.length; i++) {
     const entryName = entryNames[i]!;
@@ -77,6 +145,7 @@ function buildEntriesPayload(
     );
     let script: string;
     let css: string;
+    let entryAbs: string;
     if (isProduction) {
       const ep = buildResult.outputs.find(
         (o) =>
@@ -88,6 +157,7 @@ function buildEntriesPayload(
         throw new Error(`No entry-point .js output for entry stem "${stem}"`);
       }
       script = "/dist/" + nodePath.basename(ep.path);
+      entryAbs = nodePath.resolve(ep.path);
       const cssArt = buildResult.outputs.find(
         (o) =>
           o.path.endsWith(".css") &&
@@ -97,7 +167,9 @@ function buildEntriesPayload(
     } else {
       script = "/dist/" + entryName + ".js";
       css = "/dist/" + entryName + ".css";
+      entryAbs = nodePath.resolve(nodePath.join(outdir, entryName + ".js"));
     }
+    const chunks = collectChunksForEntry(buildResult, entryAbs);
     out[entryName] = { script, css, chunks };
   }
   return out;
@@ -279,6 +351,10 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
       splitting: !isSSR,
       naming,
       plugins,
+      metafile: true,
+      ...(!isDev
+        ? { define: { "process.env.NODE_ENV": '"production"' } }
+        : {}),
     });
 
     if (!result.success) {
@@ -334,6 +410,7 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
         entrypoints,
         entryNames ?? [],
         hashClientAssets,
+        outdir,
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TITLE_PLACEHOLDER</title>
 CSS_LINK_PLACEHOLDER
+MODULEPRELOAD_PLACEHOLDER
   </head>
   <body>
     <div id="app"></div>

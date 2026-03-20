@@ -155,6 +155,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 
 	stepSSR := report.StartStep("Building SSR bundles")
 	ssrErrors := make([]BuildError, 0)
+	ssrFailed := make(map[string]struct{})
 
 	for i := range pages {
 		pm := &pages[i]
@@ -167,6 +168,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 
 		importPath, err := s.calculateImportPath(ssrEntryPath, pm.absComponentPath)
 		if err != nil {
+			ssrFailed[pm.entryName] = struct{}{}
 			ssrErrors = append(ssrErrors, BuildError{
 				Page:    pm.config.ComponentPath,
 				Message: "Failed to calculate import path",
@@ -176,6 +178,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		}
 
 		if err := s.writeSSREntry(ssrEntryPath, importPath); err != nil {
+			ssrFailed[pm.entryName] = struct{}{}
 			ssrErrors = append(ssrErrors, BuildError{
 				Page:    pm.config.ComponentPath,
 				Message: "Failed to write SSR entry",
@@ -185,6 +188,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		}
 
 		if err := s.renderer.BuildSSR([]string{ssrEntryPath}, ssrDir); err != nil {
+			ssrFailed[pm.entryName] = struct{}{}
 			ssrErrors = append(ssrErrors, s.parseBuildError(pm.entryName, err))
 			continue
 		}
@@ -251,20 +255,46 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 	stepClientAssets := report.StartStep("Building client assets")
 	clientAssetErrors := make([]BuildError, 0)
 
+	entryPaths := make([]string, 0, len(pages))
+	entryNames := make([]string, 0, len(pages))
 	for i := range pages {
 		pm := &pages[i]
-		entryPath := filepath.Join(entriesDir, pm.entryName+s.adapter.EntryFileExtension())
-		built, err := s.renderer.Build([]string{entryPath}, outdir, []string{pm.entryName})
-		if err != nil {
-			clientAssetErrors = append(clientAssetErrors, s.parseBuildError(pm.entryName, err))
+		if _, skip := ssrFailed[pm.entryName]; skip {
 			continue
 		}
-		entry := manifest.Entries[pm.entryName]
-		entry.Script = built.Script
-		entry.CSS = built.CSS
-		entry.Chunks = built.Chunks
-		entry.Mode = pm.modeStr
-		manifest.Entries[pm.entryName] = entry
+		entryPaths = append(entryPaths, filepath.Join(entriesDir, pm.entryName+s.adapter.EntryFileExtension()))
+		entryNames = append(entryNames, pm.entryName)
+	}
+
+	if len(entryPaths) > 0 {
+		builtMap, batchErr := s.renderer.Build(entryPaths, outdir, entryNames)
+		if batchErr != nil {
+			// One invalid entry fails the whole graph; retry per page so other routes still build.
+			builtMap = make(map[string]core.ClientBuildResult)
+			for i := range pages {
+				pm := &pages[i]
+				ep := filepath.Join(entriesDir, pm.entryName+s.adapter.EntryFileExtension())
+				one, err := s.renderer.Build([]string{ep}, outdir, []string{pm.entryName})
+				if err != nil {
+					clientAssetErrors = append(clientAssetErrors, s.parseBuildError(pm.entryName, err))
+					continue
+				}
+				builtMap[pm.entryName] = one[pm.entryName]
+			}
+		}
+		for i := range pages {
+			pm := &pages[i]
+			built, ok := builtMap[pm.entryName]
+			if !ok {
+				continue
+			}
+			entry := manifest.Entries[pm.entryName]
+			entry.Script = built.Script
+			entry.CSS = built.CSS
+			entry.Chunks = built.Chunks
+			entry.Mode = pm.modeStr
+			manifest.Entries[pm.entryName] = entry
+		}
 	}
 	report.EndStep(stepClientAssets, len(clientAssetErrors) == 0, "")
 	for _, err := range clientAssetErrors {
@@ -531,12 +561,25 @@ func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, css string, 
 	}
 	cssLink := ""
 	if css != "" {
-		cssLink = `    <link rel="stylesheet" href="` + css + `" />
+		cssLink = `    <link rel="stylesheet" href="` + css + `" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="` + css + `" /></noscript>
 `
 	}
+	var modulePreload strings.Builder
+	for _, c := range chunks {
+		modulePreload.WriteString(`    <link rel="modulepreload" href="`)
+		modulePreload.WriteString(c)
+		modulePreload.WriteString(`" />
+`)
+	}
+	modulePreload.WriteString(`    <link rel="modulepreload" href="`)
+	modulePreload.WriteString(script)
+	modulePreload.WriteString(`" />
+`)
 	html := clientOnlyHTMLTemplate
 	html = strings.ReplaceAll(html, "TITLE_PLACEHOLDER", title)
 	html = strings.ReplaceAll(html, "CSS_LINK_PLACEHOLDER", cssLink)
+	html = strings.ReplaceAll(html, "MODULEPRELOAD_PLACEHOLDER", modulePreload.String())
 	html = strings.ReplaceAll(html, "CHUNK_SCRIPTS_PLACEHOLDER", chunkLines.String())
 	html = strings.ReplaceAll(html, "SCRIPT_SRC_PLACEHOLDER", script)
 	return os.WriteFile(htmlPath, []byte(html), 0644)
