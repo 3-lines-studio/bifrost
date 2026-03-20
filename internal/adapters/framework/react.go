@@ -2,6 +2,8 @@ package framework
 
 import (
 	_ "embed"
+	"strings"
+
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
@@ -40,17 +42,35 @@ func (a *ReactAdapter) EntryFileExtension() string {
 	return ".tsx"
 }
 
-func (a *ReactAdapter) SSREntryTemplate() string {
-	return reactSSRTemplate
+func (a *ReactAdapter) SSREntryTemplate(suppressHydrationWarningRoot bool) string {
+	wrap := "pageEl"
+	if suppressHydrationWarningRoot {
+		wrap = `React.createElement('div', { suppressHydrationWarning: true, style: { display: 'contents' } }, pageEl)`
+	}
+	return strings.ReplaceAll(reactSSRTemplate, "BIFROST_SSR_PAGE_WRAP", wrap)
 }
 
-func (a *ReactAdapter) ClientEntryTemplate(mode core.PageMode) string {
+func (a *ReactAdapter) ClientEntryTemplate(mode core.PageMode, suppressHydrationWarningRoot bool) string {
+	var tmpl string
 	switch mode {
 	case core.ModeClientOnly:
-		return reactClientOnlyTemplate
+		tmpl = reactClientOnlyTemplate
 	default:
-		return reactClientHydrationTemplate
+		tmpl = reactClientHydrationTemplate
 	}
+	var root string
+	if mode == core.ModeClientOnly {
+		root = `React.createElement(Page, {})`
+		if suppressHydrationWarningRoot {
+			root = `React.createElement('div', { suppressHydrationWarning: true, style: { display: 'contents' } }, React.createElement(Page, {}))`
+		}
+	} else {
+		root = `React.createElement(Page, props)`
+		if suppressHydrationWarningRoot {
+			root = `React.createElement('div', { suppressHydrationWarning: true, style: { display: 'contents' } }, React.createElement(Page, props))`
+		}
+	}
+	return strings.ReplaceAll(tmpl, "BIFROST_CLIENT_ROOT", root)
 }
 
 func (a *ReactAdapter) DevRendererSource() string {

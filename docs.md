@@ -130,9 +130,11 @@ Strict validation causes panic on:
 
 ```go
 func New(assetsFS embed.FS, pages ...Route) *App
+
+func NewWithOptions(assetsFS embed.FS, opts []ConfigOption, pages ...Route) *App
 ```
 
-Creates a new Bifrost application. Must be stopped with `app.Stop()` when done.
+Creates a new Bifrost application. Must be stopped with `app.Stop()` when done. Use `NewWithOptions` for app-wide settings such as `WithDefaultHTMLLang`.
 
 **Parameters:**
 
@@ -167,7 +169,21 @@ func WithStatic() PageOption
 
 // Static prerender with dynamic paths
 func WithStaticData(loader StaticDataLoader) PageOption
+
+// Document <html lang> for this route (overridden by loader key below)
+func WithHTMLLang(lang string) PageOption
+
+// Wrap Page in SSR + client bundles with suppressHydrationWarning (display:contents); see React docs for limits
+func WithSuppressHydrationWarningRoot() PageOption
 ```
+
+**App options** (use `NewWithOptions(assets, []bifrost.ConfigOption{...}, pages...)`):
+
+```go
+func WithDefaultHTMLLang(lang string) ConfigOption
+```
+
+**Document language:** precedence is loader/static-data field `bifrost.PropHTMLLang` (`"__bifrost_html_lang"`) → `WithHTMLLang` → `WithDefaultHTMLLang` → `"en"`. The reserved key is stripped before props reach React.
 
 **Props Loader:**
 

@@ -28,10 +28,12 @@ type StaticPathData struct {
 type StaticDataLoader func(context.Context) ([]StaticPathData, error)
 
 type PageConfig struct {
-	ComponentPath    string
-	Mode             PageMode
-	PropsLoader      PropsLoader
-	StaticDataLoader StaticDataLoader
+	ComponentPath                string
+	Mode                         PageMode
+	PropsLoader                  PropsLoader
+	StaticDataLoader             StaticDataLoader
+	HTMLLang                     string
+	SuppressHydrationWarningRoot bool
 }
 
 type PageOption func(*PageConfig)
@@ -61,6 +63,18 @@ func WithStaticData(loader StaticDataLoader) PageOption {
 	}
 }
 
+func WithHTMLLang(lang string) PageOption {
+	return func(c *PageConfig) {
+		c.HTMLLang = lang
+	}
+}
+
+func WithSuppressHydrationWarningRoot() PageOption {
+	return func(c *PageConfig) {
+		c.SuppressHydrationWarningRoot = true
+	}
+}
+
 type RenderedPage struct {
 	Body string
 	Head string
@@ -80,7 +94,8 @@ type Renderer interface {
 }
 
 type Config struct {
-	Framework Framework
+	Framework         Framework
+	DefaultHTMLLang   string
 }
 
 type ConfigOption func(*Config)
@@ -88,5 +103,11 @@ type ConfigOption func(*Config)
 func WithFramework(fw Framework) ConfigOption {
 	return func(c *Config) {
 		c.Framework = fw
+	}
+}
+
+func WithDefaultHTMLLang(lang string) ConfigOption {
+	return func(c *Config) {
+		c.DefaultHTMLLang = lang
 	}
 }

@@ -14,15 +14,16 @@ import (
 )
 
 type ServePageInput struct {
-	Config      core.PageConfig
-	IsDev       bool
-	Mode        core.Mode
-	Manifest    *core.Manifest
-	EntryName   string
-	StaticPath  string
-	RequestPath string
-	HasRenderer bool
-	Request     *http.Request
+	Config          core.PageConfig
+	DefaultHTMLLang string
+	IsDev           bool
+	Mode            core.Mode
+	Manifest        *core.Manifest
+	EntryName       string
+	StaticPath      string
+	RequestPath     string
+	HasRenderer     bool
+	Request         *http.Request
 }
 
 type ServePageOutput struct {
@@ -188,6 +189,7 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 		if _, err := os.Stat(ssrPath); err == nil {
 			page, err := s.renderer.Render(ssrPath, map[string]any{})
 			if err == nil {
+				lang, _ := core.ResolveHTMLLang(input.DefaultHTMLLang, input.Config.HTMLLang, nil)
 				return core.RenderHTMLShell(
 					page.Body,
 					map[string]any{},
@@ -195,6 +197,7 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 					page.Head,
 					assets.CSS,
 					assets.Chunks,
+					lang,
 				)
 			}
 			// If SSR render fails, fall through to empty shell
@@ -202,6 +205,7 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 	}
 
 	// Production or fallback: empty shell (will be hydrated on client)
+	lang, _ := core.ResolveHTMLLang(input.DefaultHTMLLang, input.Config.HTMLLang, nil)
 	return core.RenderHTMLShell(
 		"",
 		map[string]any{},
@@ -209,6 +213,7 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 		"",
 		assets.CSS,
 		assets.Chunks,
+		lang,
 	)
 }
 
@@ -242,6 +247,8 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 			}
 		}
 
+		lang, propsForReact := core.ResolveHTMLLang(input.DefaultHTMLLang, input.Config.HTMLLang, props)
+
 		if s.renderer == nil {
 			return ServePageOutput{
 				Action: core.ActionRenderStaticPrerender,
@@ -249,7 +256,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 			}
 		}
 
-		page, err := s.renderer.Render(renderPath, props)
+		page, err := s.renderer.Render(renderPath, propsForReact)
 		if err != nil {
 			return ServePageOutput{
 				Action: core.ActionRenderStaticPrerender,
@@ -257,11 +264,11 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 			}
 		}
 
-		html, err := s.renderPageHTML(input, props, page)
+		html, err := s.renderPageHTML(input, propsForReact, page, lang)
 		return ServePageOutput{
 			Action: core.ActionRenderStaticPrerender,
 			HTML:   html,
-			Props:  props,
+			Props:  propsForReact,
 			Error:  err,
 		}
 	}
@@ -273,7 +280,9 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 		}
 	}
 
-	page, err := s.renderer.Render(renderPath, map[string]any{})
+	lang, propsForReact := core.ResolveHTMLLang(input.DefaultHTMLLang, input.Config.HTMLLang, map[string]any{})
+
+	page, err := s.renderer.Render(renderPath, propsForReact)
 	if err != nil {
 		return ServePageOutput{
 			Action: core.ActionRenderStaticPrerender,
@@ -281,7 +290,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 		}
 	}
 
-	html, err := s.renderPageHTML(input, map[string]any{}, page)
+	html, err := s.renderPageHTML(input, propsForReact, page, lang)
 	return ServePageOutput{
 		Action: core.ActionRenderStaticPrerender,
 		HTML:   html,
@@ -302,6 +311,8 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 		}
 	}
 
+	lang, propsForReact := core.ResolveHTMLLang(input.DefaultHTMLLang, input.Config.HTMLLang, props)
+
 	if s.renderer == nil {
 		return ServePageOutput{
 			Action: core.ActionRenderSSR,
@@ -311,7 +322,7 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 
 	renderPath := s.resolveRenderPath(input)
 
-	page, err := s.renderer.Render(renderPath, props)
+	page, err := s.renderer.Render(renderPath, propsForReact)
 	if err != nil {
 		return ServePageOutput{
 			Action: core.ActionRenderSSR,
@@ -319,11 +330,11 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 		}
 	}
 
-	html, err := s.renderPageHTML(input, props, page)
+	html, err := s.renderPageHTML(input, propsForReact, page, lang)
 	return ServePageOutput{
 		Action: core.ActionRenderSSR,
 		HTML:   html,
-		Props:  props,
+		Props:  propsForReact,
 		Error:  err,
 	}
 }
@@ -339,7 +350,7 @@ func (s *PageService) resolveRenderPath(input ServePageInput) string {
 	return input.Config.ComponentPath
 }
 
-func (s *PageService) renderPageHTML(input ServePageInput, props map[string]any, page core.RenderedPage) (string, error) {
+func (s *PageService) renderPageHTML(input ServePageInput, props map[string]any, page core.RenderedPage, htmlLang string) (string, error) {
 	assets := core.GetAssets(input.Manifest, input.EntryName)
 
 	return core.RenderHTMLShell(
@@ -349,6 +360,7 @@ func (s *PageService) renderPageHTML(input ServePageInput, props map[string]any,
 		page.Head,
 		assets.CSS,
 		assets.Chunks,
+		htmlLang,
 	)
 }
 
@@ -378,7 +390,7 @@ func (s *PageService) buildAndRender(ctx context.Context, input ServePageInput) 
 
 	// Build client entry
 	entryFile := filepath.Join(entryDir, input.EntryName+s.adapter.EntryFileExtension())
-	clientTemplate := s.adapter.ClientEntryTemplate(input.Config.Mode)
+	clientTemplate := s.adapter.ClientEntryTemplate(input.Config.Mode, input.Config.SuppressHydrationWarningRoot)
 	clientContent := strings.ReplaceAll(clientTemplate, "COMPONENT_PATH", componentPath)
 
 	if err := os.WriteFile(entryFile, []byte(clientContent), 0644); err != nil {
@@ -405,7 +417,7 @@ func (s *PageService) buildAndRender(ctx context.Context, input ServePageInput) 
 
 		ssrEntryName := input.EntryName + "-ssr"
 		ssrEntryFile := filepath.Join(entryDir, ssrEntryName+s.adapter.EntryFileExtension())
-		ssrTemplate := s.adapter.SSREntryTemplate()
+		ssrTemplate := s.adapter.SSREntryTemplate(input.Config.SuppressHydrationWarningRoot)
 		ssrContent := strings.ReplaceAll(ssrTemplate, "COMPONENT_PATH", componentPath)
 
 		if err := os.WriteFile(ssrEntryFile, []byte(ssrContent), 0644); err != nil {

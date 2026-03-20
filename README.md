@@ -142,6 +142,10 @@ func main() {
 - `WithClient()` - Create a static page with client-side hydration only (empty shell)
 - `WithStatic()` - Prerender full HTML at build time + client hydration
 - `WithStaticData(fn)` - Prerender with dynamic paths from a data loader
+- `WithHTMLLang(lang)` - Set `<html lang>` (overridden by `bifrost.PropHTMLLang` in loader/static props)
+- `WithSuppressHydrationWarningRoot()` - Wrap the page root with `suppressHydrationWarning` in SSR and client entries (see React docs)
+
+Use `NewWithOptions(fs, []bifrost.ConfigOption{bifrost.WithDefaultHTMLLang("de")}, pages...)` for an app-wide default language.
 
 ### Mode Detection
 
