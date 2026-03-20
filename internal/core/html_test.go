@@ -15,6 +15,7 @@ func TestRenderHTMLShell_Basic(t *testing.T) {
 		"/dist/page.css",
 		nil,
 		"en",
+		"",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -56,14 +57,14 @@ func TestRenderHTMLShell_Basic(t *testing.T) {
 }
 
 func TestRenderHTMLShell_MissingScript(t *testing.T) {
-	_, err := RenderHTMLShell("", nil, "", "", "", "", nil, "")
+	_, err := RenderHTMLShell("", nil, "", "", "", "", nil, "", "")
 	if err == nil {
 		t.Error("expected error for missing script src")
 	}
 }
 
 func TestRenderHTMLShell_DefaultTitle(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "")
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -73,7 +74,7 @@ func TestRenderHTMLShell_DefaultTitle(t *testing.T) {
 }
 
 func TestRenderHTMLShell_CustomTitleSuppressesDefault(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "<title>My App</title>", "", "", nil, "")
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "<title>My App</title>", "", "", nil, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestRenderHTMLShell_CustomTitleSuppressesDefault(t *testing.T) {
 }
 
 func TestRenderHTMLShell_CustomLang(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "fr-CA")
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "fr-CA", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestRenderHTMLShell_CustomLang(t *testing.T) {
 }
 
 func TestRenderHTMLShell_InvalidLangFallsBack(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, `en"><script`)
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, `en"><script`, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -114,6 +115,7 @@ func TestRenderHTMLShell_ScriptBreakoutEscaped(t *testing.T) {
 		"",
 		"",
 		nil,
+		"",
 		"",
 	)
 	if err != nil {
@@ -146,6 +148,7 @@ func TestRenderHTMLShell_WithChunks(t *testing.T) {
 		"",
 		[]string{"/dist/chunk-a.js", "/dist/chunk-b.js"},
 		"en",
+		"",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -172,12 +175,32 @@ func TestRenderHTMLShell_WithChunks(t *testing.T) {
 }
 
 func TestRenderHTMLShell_NilProps(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "")
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(html, `{}`) {
 		t.Error("expected empty JSON object for nil props")
+	}
+}
+
+func TestRenderHTMLShell_CustomClass(t *testing.T) {
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "en", "dark")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(html, `<html lang="en" class="dark">`) {
+		t.Error("expected html class on document element")
+	}
+}
+
+func TestRenderHTMLShell_ClassEscaped(t *testing.T) {
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "en", `dark" onclick="alert(1)`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(html, `class="dark&#34; onclick=&#34;alert(1)"`) {
+		t.Error("expected escaped html class")
 	}
 }
 

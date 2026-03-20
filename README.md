@@ -143,6 +143,7 @@ func main() {
 - `WithStatic()` - Prerender full HTML at build time + client hydration
 - `WithStaticData(fn)` - Prerender with dynamic paths from a data loader
 - `WithHTMLLang(lang)` - Set `<html lang>` (overridden by `bifrost.PropHTMLLang` in loader/static props)
+- `WithHTMLClass(class)` - Set `<html class>` (overridden by `bifrost.PropHTMLClass` in loader/static props)
 
 Use `NewWithOptions(fs, []bifrost.ConfigOption{bifrost.WithDefaultHTMLLang("de")}, pages...)` for an app-wide default language.
 

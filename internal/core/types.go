@@ -28,11 +28,12 @@ type StaticPathData struct {
 type StaticDataLoader func(context.Context) ([]StaticPathData, error)
 
 type PageConfig struct {
-	ComponentPath                string
-	Mode                         PageMode
-	PropsLoader                  PropsLoader
-	StaticDataLoader             StaticDataLoader
-	HTMLLang string
+	ComponentPath    string
+	Mode             PageMode
+	PropsLoader      PropsLoader
+	StaticDataLoader StaticDataLoader
+	HTMLLang         string
+	HTMLClass        string
 }
 
 type PageOption func(*PageConfig)
@@ -68,6 +69,12 @@ func WithHTMLLang(lang string) PageOption {
 	}
 }
 
+func WithHTMLClass(class string) PageOption {
+	return func(c *PageConfig) {
+		c.HTMLClass = class
+	}
+}
+
 type RenderedPage struct {
 	Body string
 	Head string
@@ -87,8 +94,8 @@ type Renderer interface {
 }
 
 type Config struct {
-	Framework         Framework
-	DefaultHTMLLang   string
+	Framework       Framework
+	DefaultHTMLLang string
 }
 
 type ConfigOption func(*Config)

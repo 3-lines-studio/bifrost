@@ -8,6 +8,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	stdhtml "html"
 	"io"
 	"log/slog"
 	"os"
@@ -322,7 +323,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 			lang = fileDefaultHTMLLang
 		}
 		lang = core.SanitizeHTMLLang(lang)
-		if err := s.writeClientOnlyHTML(htmlPath, title, mentry.Script, mentry.CriticalCSS, mentry.CSS, mentry.Chunks, lang); err != nil {
+		if err := s.writeClientOnlyHTML(htmlPath, title, mentry.Script, mentry.CriticalCSS, mentry.CSS, mentry.Chunks, lang, pm.config.HTMLClass); err != nil {
 			htmlErrors = append(htmlErrors, BuildError{
 				Page:    pm.entryName,
 				Message: "Failed to generate HTML shell",
@@ -445,7 +446,7 @@ func scanDefaultHTMLLang(f *ast.File) string {
 	return lang
 }
 
-func parsePageBuildOptions(args []ast.Expr) (htmlLang string) {
+func parsePageBuildOptions(args []ast.Expr) (htmlLang string, htmlClass string) {
 	for _, arg := range args {
 		call, ok := arg.(*ast.CallExpr)
 		if !ok {
@@ -459,9 +460,16 @@ func parsePageBuildOptions(args []ast.Expr) (htmlLang string) {
 			if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
 				htmlLang, _ = strconv.Unquote(lit.Value)
 			}
+		case "WithHTMLClass":
+			if len(call.Args) < 1 {
+				continue
+			}
+			if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				htmlClass, _ = strconv.Unquote(lit.Value)
+			}
 		}
 	}
-	return htmlLang
+	return htmlLang, htmlClass
 }
 
 func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, string, error) {
@@ -521,7 +529,7 @@ func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, string, er
 		if len(callExpr.Args) > 2 {
 			optArgs = callExpr.Args[2:]
 		}
-		htmlLang := parsePageBuildOptions(optArgs)
+		htmlLang, htmlClass := parsePageBuildOptions(optArgs)
 
 		if !seen[path] {
 			seen[path] = true
@@ -529,6 +537,7 @@ func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, string, er
 				ComponentPath:    path,
 				Mode:             mode,
 				HTMLLang:         htmlLang,
+				HTMLClass:        htmlClass,
 				StaticDataLoader: nil,
 			})
 			_ = hasStaticDataLoader
@@ -619,7 +628,7 @@ func (s *BuildService) extractTitleFromComponent(componentPath string) string {
 	return ""
 }
 
-func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, criticalCSS, css string, chunks []string, htmlLang string) error {
+func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, criticalCSS, css string, chunks []string, htmlLang string, htmlClass string) error {
 	var chunkLines strings.Builder
 	for _, c := range chunks {
 		chunkLines.WriteString(`    <script src="`)
@@ -643,8 +652,13 @@ func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, criticalCSS,
 	modulePreload.WriteString(script)
 	modulePreload.WriteString(`" />
 `)
+	classAttr := ""
+	if sanitizedClass := core.SanitizeHTMLClass(htmlClass); sanitizedClass != "" {
+		classAttr = ` class="` + stdhtml.EscapeString(sanitizedClass) + `"`
+	}
 	html := clientOnlyHTMLTemplate
 	html = strings.ReplaceAll(html, "LANG_PLACEHOLDER", htmlLang)
+	html = strings.ReplaceAll(html, "HTML_CLASS_PLACEHOLDER", classAttr)
 	html = strings.ReplaceAll(html, "TITLE_PLACEHOLDER", title)
 	html = strings.ReplaceAll(html, "CSS_LINK_PLACEHOLDER", cssLink)
 	html = strings.ReplaceAll(html, "MODULEPRELOAD_PLACEHOLDER", modulePreload.String())

@@ -48,3 +48,49 @@ func TestResolveHTMLLang_NilProps(t *testing.T) {
 		t.Fatal("expected nil propsForReact when props nil")
 	}
 }
+
+func TestResolveHTMLDocumentAttrs_ClassPrecedence(t *testing.T) {
+	props := map[string]any{
+		PropHTMLClass: "dark  contrast",
+		"title":       "x",
+	}
+	lang, class, out := ResolveHTMLDocumentAttrs("en", "fr", "light", props)
+	if lang != "fr" {
+		t.Fatalf("expected page lang, got %q", lang)
+	}
+	if class != "dark contrast" {
+		t.Fatalf("expected loader class, got %q", class)
+	}
+	if _, ok := out[PropHTMLClass]; ok {
+		t.Fatal("reserved html class key should be stripped")
+	}
+	if out["title"] != "x" {
+		t.Fatal("other props preserved")
+	}
+}
+
+func TestResolveHTMLDocumentAttrs_PageClassFallback(t *testing.T) {
+	lang, class, out := ResolveHTMLDocumentAttrs("", "es", " dark ", map[string]any{"k": 1})
+	if lang != "es" {
+		t.Fatalf("expected page lang, got %q", lang)
+	}
+	if class != "dark" {
+		t.Fatalf("expected sanitized page class, got %q", class)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected one prop, got %v", out)
+	}
+}
+
+func TestResolveHTMLDocumentAttrs_NilProps(t *testing.T) {
+	lang, class, out := ResolveHTMLDocumentAttrs("", "es", "dark", nil)
+	if lang != "es" {
+		t.Fatalf("got lang %q", lang)
+	}
+	if class != "dark" {
+		t.Fatalf("got class %q", class)
+	}
+	if out != nil {
+		t.Fatal("expected nil propsForReact when props nil")
+	}
+}

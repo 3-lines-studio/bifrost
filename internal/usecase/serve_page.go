@@ -189,7 +189,7 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 		if _, err := os.Stat(ssrPath); err == nil {
 			page, err := s.renderer.Render(ssrPath, map[string]any{})
 			if err == nil {
-				lang, _ := core.ResolveHTMLLang(input.DefaultHTMLLang, input.Config.HTMLLang, nil)
+				lang, htmlClass, _ := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
 				return core.RenderHTMLShell(
 					page.Body,
 					map[string]any{},
@@ -199,6 +199,7 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 					assets.CSS,
 					assets.Chunks,
 					lang,
+					htmlClass,
 				)
 			}
 			// If SSR render fails, fall through to empty shell
@@ -206,7 +207,7 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 	}
 
 	// Production or fallback: empty shell (will be hydrated on client)
-	lang, _ := core.ResolveHTMLLang(input.DefaultHTMLLang, input.Config.HTMLLang, nil)
+	lang, htmlClass, _ := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
 	return core.RenderHTMLShell(
 		"",
 		map[string]any{},
@@ -216,6 +217,7 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 		assets.CSS,
 		assets.Chunks,
 		lang,
+		htmlClass,
 	)
 }
 
@@ -249,7 +251,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 			}
 		}
 
-		lang, propsForReact := core.ResolveHTMLLang(input.DefaultHTMLLang, input.Config.HTMLLang, props)
+		lang, htmlClass, propsForReact := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, props)
 
 		if s.renderer == nil {
 			return ServePageOutput{
@@ -266,7 +268,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 			}
 		}
 
-		html, err := s.renderPageHTML(input, propsForReact, page, lang)
+		html, err := s.renderPageHTML(input, propsForReact, page, lang, htmlClass)
 		return ServePageOutput{
 			Action: core.ActionRenderStaticPrerender,
 			HTML:   html,
@@ -282,7 +284,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 		}
 	}
 
-	lang, propsForReact := core.ResolveHTMLLang(input.DefaultHTMLLang, input.Config.HTMLLang, map[string]any{})
+	lang, htmlClass, propsForReact := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, map[string]any{})
 
 	page, err := s.renderer.Render(renderPath, propsForReact)
 	if err != nil {
@@ -292,7 +294,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 		}
 	}
 
-	html, err := s.renderPageHTML(input, propsForReact, page, lang)
+	html, err := s.renderPageHTML(input, propsForReact, page, lang, htmlClass)
 	return ServePageOutput{
 		Action: core.ActionRenderStaticPrerender,
 		HTML:   html,
@@ -313,7 +315,7 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 		}
 	}
 
-	lang, propsForReact := core.ResolveHTMLLang(input.DefaultHTMLLang, input.Config.HTMLLang, props)
+	lang, htmlClass, propsForReact := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, props)
 
 	if s.renderer == nil {
 		return ServePageOutput{
@@ -332,7 +334,7 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 		}
 	}
 
-	html, err := s.renderPageHTML(input, propsForReact, page, lang)
+	html, err := s.renderPageHTML(input, propsForReact, page, lang, htmlClass)
 	return ServePageOutput{
 		Action: core.ActionRenderSSR,
 		HTML:   html,
@@ -352,7 +354,7 @@ func (s *PageService) resolveRenderPath(input ServePageInput) string {
 	return input.Config.ComponentPath
 }
 
-func (s *PageService) renderPageHTML(input ServePageInput, props map[string]any, page core.RenderedPage, htmlLang string) (string, error) {
+func (s *PageService) renderPageHTML(input ServePageInput, props map[string]any, page core.RenderedPage, htmlLang string, htmlClass string) (string, error) {
 	assets := core.GetAssets(input.Manifest, input.EntryName)
 
 	return core.RenderHTMLShell(
@@ -364,6 +366,7 @@ func (s *PageService) renderPageHTML(input ServePageInput, props map[string]any,
 		assets.CSS,
 		assets.Chunks,
 		htmlLang,
+		htmlClass,
 	)
 }
 

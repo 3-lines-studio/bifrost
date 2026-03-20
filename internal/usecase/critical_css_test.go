@@ -36,6 +36,7 @@ func TestWriteClientOnlyHTML_IncludesCriticalAndStylesheet(t *testing.T) {
 		"/dist/page.css",
 		[]string{"/dist/chunk-a.js"},
 		"en",
+		"",
 	)
 	if err != nil {
 		t.Fatalf("writeClientOnlyHTML failed: %v", err)
@@ -74,6 +75,7 @@ func TestPageServiceRenderPageHTML_IncludesCriticalAndStylesheet(t *testing.T) {
 			Head: `<title>Home</title>`,
 		},
 		"en",
+		"",
 	)
 	if err != nil {
 		t.Fatalf("renderPageHTML failed: %v", err)

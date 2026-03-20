@@ -307,7 +307,7 @@ func (a *App) ExportStaticPages(outputDir string) error {
 			if a.config != nil {
 				appDefault = a.config.DefaultHTMLLang
 			}
-			lang, propsForReact := core.ResolveHTMLLang(appDefault, config.HTMLLang, entry.Props)
+			lang, htmlClass, propsForReact := core.ResolveHTMLDocumentAttrs(appDefault, config.HTMLLang, config.HTMLClass, entry.Props)
 
 			page, err := a.renderer.client.Render(ssrBundlePath, propsForReact)
 			if err != nil {
@@ -325,7 +325,7 @@ func (a *App) ExportStaticPages(outputDir string) error {
 				}
 			}
 
-			html, err := core.RenderHTMLShell(page.Body, propsForReact, manifestEntry.Script, page.Head, criticalCSS, manifestEntry.CSS, manifestEntry.Chunks, lang)
+			html, err := core.RenderHTMLShell(page.Body, propsForReact, manifestEntry.Script, page.Head, criticalCSS, manifestEntry.CSS, manifestEntry.Chunks, lang, htmlClass)
 			if err != nil {
 				fmt.Printf("Warning: Failed to build HTML for %s: %v, skipping\n", entry.Path, err)
 				continue
@@ -407,12 +407,19 @@ func WithStaticData(loader core.StaticDataLoader) PageOption {
 // PropHTMLLang is the reserved loader/static-data key for document language (see WithHTMLLang / WithDefaultHTMLLang).
 const PropHTMLLang = core.PropHTMLLang
 
+// PropHTMLClass is the reserved loader/static-data key for document class (see WithHTMLClass).
+const PropHTMLClass = core.PropHTMLClass
+
 func WithDefaultHTMLLang(lang string) ConfigOption {
 	return core.WithDefaultHTMLLang(lang)
 }
 
 func WithHTMLLang(lang string) PageOption {
 	return core.WithHTMLLang(lang)
+}
+
+func WithHTMLClass(class string) PageOption {
+	return core.WithHTMLClass(class)
 }
 
 func createAssetHandler(router router, app *App) http.Handler {

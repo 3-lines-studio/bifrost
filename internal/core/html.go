@@ -10,12 +10,13 @@ import (
 
 var emptyPropsJSON = []byte("{}")
 
-func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, headHTML string, criticalCSS string, cssHref string, chunks []string, htmlLang string) (string, error) {
+func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, headHTML string, criticalCSS string, cssHref string, chunks []string, htmlLang string, htmlClass string) (string, error) {
 	if scriptSrc == "" {
 		return "", errors.New("missing script src")
 	}
 
 	langAttr := SanitizeHTMLLang(htmlLang)
+	classAttr := SanitizeHTMLClass(htmlClass)
 
 	hasCustomTitle := false
 	if headHTML != "" {
@@ -53,7 +54,13 @@ func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, he
 
 	sb.WriteString("<!doctype html>\n<html lang=\"")
 	sb.WriteString(html.EscapeString(langAttr))
-	sb.WriteString("\">\n  <head>\n    ")
+	sb.WriteString(`"`)
+	if classAttr != "" {
+		sb.WriteString(` class="`)
+		sb.WriteString(html.EscapeString(classAttr))
+		sb.WriteString(`"`)
+	}
+	sb.WriteString(">\n  <head>\n    ")
 	sb.WriteString(`<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />`)
 
 	if !hasCustomTitle {

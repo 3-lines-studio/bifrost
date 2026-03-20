@@ -172,6 +172,9 @@ func WithStaticData(loader StaticDataLoader) PageOption
 
 // Document <html lang> for this route (overridden by loader key below)
 func WithHTMLLang(lang string) PageOption
+
+// Document <html class> for this route (overridden by loader key below)
+func WithHTMLClass(class string) PageOption
 ```
 
 **App options** (use `NewWithOptions(assets, []bifrost.ConfigOption{...}, pages...)`):
@@ -181,6 +184,8 @@ func WithDefaultHTMLLang(lang string) ConfigOption
 ```
 
 **Document language:** precedence is loader/static-data field `bifrost.PropHTMLLang` (`"__bifrost_html_lang"`) → `WithHTMLLang` → `WithDefaultHTMLLang` → `"en"`. The reserved key is stripped before props reach React.
+
+**Document class:** precedence is loader/static-data field `bifrost.PropHTMLClass` (`"__bifrost_html_class"`) → `WithHTMLClass` → empty class. The reserved key is stripped before props reach React.
 
 **Props Loader:**
 
