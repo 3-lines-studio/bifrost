@@ -12,7 +12,7 @@ func TestRenderHTMLShell_Basic(t *testing.T) {
 		"/dist/page.js",
 		"<title>Test</title>",
 		".hero{display:block}",
-		"/dist/page.css",
+		[]string{"/dist/page.css"},
 		nil,
 		"en",
 		"",
@@ -57,14 +57,14 @@ func TestRenderHTMLShell_Basic(t *testing.T) {
 }
 
 func TestRenderHTMLShell_MissingScript(t *testing.T) {
-	_, err := RenderHTMLShell("", nil, "", "", "", "", nil, "", "")
+	_, err := RenderHTMLShell("", nil, "", "", "", nil, nil, "", "")
 	if err == nil {
 		t.Error("expected error for missing script src")
 	}
 }
 
 func TestRenderHTMLShell_DefaultTitle(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "", "")
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", nil, nil, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestRenderHTMLShell_DefaultTitle(t *testing.T) {
 }
 
 func TestRenderHTMLShell_CustomTitleSuppressesDefault(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "<title>My App</title>", "", "", nil, "", "")
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "<title>My App</title>", "", nil, nil, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestRenderHTMLShell_CustomTitleSuppressesDefault(t *testing.T) {
 }
 
 func TestRenderHTMLShell_CustomLang(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "fr-CA", "")
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", nil, nil, "fr-CA", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestRenderHTMLShell_CustomLang(t *testing.T) {
 }
 
 func TestRenderHTMLShell_InvalidLangFallsBack(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, `en"><script`, "")
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", nil, nil, `en"><script`, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestRenderHTMLShell_ScriptBreakoutEscaped(t *testing.T) {
 		"/dist/page.js",
 		"",
 		"",
-		"",
+		nil,
 		nil,
 		"",
 		"",
@@ -145,7 +145,7 @@ func TestRenderHTMLShell_WithChunks(t *testing.T) {
 		"/dist/page.js",
 		"",
 		"",
-		"",
+		nil,
 		[]string{"/dist/chunk-a.js", "/dist/chunk-b.js"},
 		"en",
 		"",
@@ -175,7 +175,7 @@ func TestRenderHTMLShell_WithChunks(t *testing.T) {
 }
 
 func TestRenderHTMLShell_NilProps(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "", "")
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", nil, nil, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestRenderHTMLShell_NilProps(t *testing.T) {
 }
 
 func TestRenderHTMLShell_CustomClass(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "en", "dark")
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", nil, nil, "en", "dark")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestRenderHTMLShell_CustomClass(t *testing.T) {
 }
 
 func TestRenderHTMLShell_ClassEscaped(t *testing.T) {
-	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", "", nil, "en", `dark" onclick="alert(1)`)
+	html, err := RenderHTMLShell("", nil, "/dist/page.js", "", "", nil, nil, "en", `dark" onclick="alert(1)`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestRenderHTMLShell_ClassEscaped(t *testing.T) {
 }
 
 func TestRenderStyleTags_StylesheetOnly(t *testing.T) {
-	html := RenderStyleTags("", "/dist/page.css")
+	html := RenderStyleTags("", []string{"/dist/page.css"})
 	if html != `<link rel="stylesheet" href="/dist/page.css" />` {
 		t.Fatalf("unexpected output: %q", html)
 	}
@@ -215,11 +215,38 @@ func TestRenderStyleTags_StylesheetOnly(t *testing.T) {
 }
 
 func TestRenderStyleTags_CriticalOnly(t *testing.T) {
-	html := RenderStyleTags(".hero{display:block}", "")
+	html := RenderStyleTags(".hero{display:block}", nil)
 	if !strings.Contains(html, `data-bifrost-critical`) {
 		t.Fatal("expected critical style tag")
 	}
 	if strings.Contains(html, `rel="stylesheet"`) {
 		t.Fatal("did not expect stylesheet link")
+	}
+}
+
+func TestRenderStyleTags_MultipleStylesheets(t *testing.T) {
+	html := RenderStyleTags("", []string{"/dist/a.css", "/dist/b.css"})
+	if !strings.Contains(html, `href="/dist/a.css"`) || !strings.Contains(html, `href="/dist/b.css"`) {
+		t.Fatalf("expected both links: %q", html)
+	}
+}
+
+func TestRenderHTMLShell_MultipleStylesheets(t *testing.T) {
+	html, err := RenderHTMLShell(
+		"<div>x</div>",
+		nil,
+		"/dist/page.js",
+		"<title>T</title>",
+		"",
+		[]string{"/dist/first.css", "/dist/second.css"},
+		nil,
+		"en",
+		"",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(html, `rel="stylesheet"`) != 2 {
+		t.Fatalf("expected 2 stylesheet links, got: %q", html)
 	}
 }

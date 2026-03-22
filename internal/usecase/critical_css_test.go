@@ -33,7 +33,7 @@ func TestWriteClientOnlyHTML_IncludesCriticalAndStylesheet(t *testing.T) {
 		"Client Page",
 		"/dist/page.js",
 		".hero{display:block}",
-		"/dist/page.css",
+		[]string{"/dist/page.css"},
 		[]string{"/dist/chunk-a.js"},
 		"en",
 		"",
@@ -55,6 +55,34 @@ func TestWriteClientOnlyHTML_IncludesCriticalAndStylesheet(t *testing.T) {
 	}
 }
 
+func TestWriteClientOnlyHTML_MultipleStylesheets(t *testing.T) {
+	svc := &BuildService{}
+	dir := t.TempDir()
+	htmlPath := filepath.Join(dir, "page.html")
+
+	err := svc.writeClientOnlyHTML(
+		htmlPath,
+		"Client Page",
+		"/dist/page.js",
+		"",
+		[]string{"/dist/a.css", "/dist/b.css"},
+		nil,
+		"en",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("writeClientOnlyHTML failed: %v", err)
+	}
+	data, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(data)
+	if !strings.Contains(html, `href="/dist/a.css"`) || !strings.Contains(html, `href="/dist/b.css"`) {
+		t.Fatalf("expected both stylesheet links: %s", html)
+	}
+}
+
 func TestPageServiceRenderPageHTML_IncludesCriticalAndStylesheet(t *testing.T) {
 	svc := &PageService{}
 	manifest := &core.Manifest{
@@ -63,6 +91,7 @@ func TestPageServiceRenderPageHTML_IncludesCriticalAndStylesheet(t *testing.T) {
 				Script:      "/dist/home.js",
 				CriticalCSS: ".hero{display:grid}",
 				CSS:         "/dist/home.css",
+				CSSFiles:    []string{"/dist/extra.css"},
 			},
 		},
 	}
@@ -84,7 +113,7 @@ func TestPageServiceRenderPageHTML_IncludesCriticalAndStylesheet(t *testing.T) {
 	if !strings.Contains(html, `data-bifrost-critical`) {
 		t.Fatal("expected inline critical CSS tag")
 	}
-	if !strings.Contains(html, `href="/dist/home.css"`) {
-		t.Fatal("expected stylesheet link")
+	if !strings.Contains(html, `href="/dist/home.css"`) || !strings.Contains(html, `href="/dist/extra.css"`) {
+		t.Fatal("expected both stylesheet links")
 	}
 }

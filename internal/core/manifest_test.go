@@ -218,6 +218,36 @@ func TestGetAssets_FallbackWithoutManifest(t *testing.T) {
 	}
 }
 
+func TestStylesheetHrefs_DedupesAndOrders(t *testing.T) {
+	got := StylesheetHrefs("/dist/a.css", []string{"/dist/a.css", "/dist/b.css"})
+	want := []string{"/dist/a.css", "/dist/b.css"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v want %v", got, want)
+		}
+	}
+}
+
+func TestGetAssets_WithCSSFiles(t *testing.T) {
+	man := &Manifest{
+		Entries: map[string]ManifestEntry{
+			"pages-docs-entry": {
+				Script:   "/dist/docs.js",
+				CSS:      "/dist/shared.css",
+				CSSFiles: []string{"/dist/extra.css"},
+			},
+		},
+	}
+	assets := GetAssets(man, "pages-docs-entry")
+	hrefs := StylesheetHrefs(assets.CSS, assets.CSSFiles)
+	if len(hrefs) != 2 || hrefs[0] != "/dist/shared.css" || hrefs[1] != "/dist/extra.css" {
+		t.Fatalf("unexpected hrefs: %v", hrefs)
+	}
+}
+
 func TestManifestEntryJSON_StaticRoutes(t *testing.T) {
 	entry := ManifestEntry{
 		Script: "/dist/pages-blog-entry.js",

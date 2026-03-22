@@ -10,7 +10,7 @@ import (
 
 var emptyPropsJSON = []byte("{}")
 
-func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, headHTML string, criticalCSS string, cssHref string, chunks []string, htmlLang string, htmlClass string) (string, error) {
+func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, headHTML string, criticalCSS string, cssHrefs []string, chunks []string, htmlLang string, htmlClass string) (string, error) {
 	if scriptSrc == "" {
 		return "", errors.New("missing script src")
 	}
@@ -41,7 +41,7 @@ func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, he
 
 	// Pre-calculate approximate capacity
 	const staticLen = 250 // fixed HTML structure overhead
-	styleTags := RenderStyleTags(criticalCSS, cssHref)
+	styleTags := RenderStyleTags(criticalCSS, cssHrefs)
 	capacity := staticLen + len(bodyHTML) + len(propsJSON) + len(scriptSrc) + len(headHTML) + len(styleTags)
 	for _, chunk := range chunks {
 		capacity += 55 + len(chunk) // <script src="..." type="module" defer></script>\n
@@ -102,22 +102,29 @@ func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, he
 	return sb.String(), nil
 }
 
-func RenderStyleTags(criticalCSS string, cssHref string) string {
-	if criticalCSS == "" && cssHref == "" {
+func RenderStyleTags(criticalCSS string, cssHrefs []string) string {
+	if criticalCSS == "" && len(cssHrefs) == 0 {
 		return ""
 	}
 
+	grow := len(criticalCSS) + 120
+	for _, href := range cssHrefs {
+		grow += len(href) + 48
+	}
 	var sb strings.Builder
-	sb.Grow(len(criticalCSS) + len(cssHref) + 120)
+	sb.Grow(grow)
 
 	if criticalCSS != "" {
 		sb.WriteString(`<style data-bifrost-critical>`)
 		sb.WriteString(sanitizeInlineStyleText(criticalCSS))
 		sb.WriteString(`</style>`)
 	}
-	if cssHref != "" {
+	for _, href := range cssHrefs {
+		if href == "" {
+			continue
+		}
 		sb.WriteString(`<link rel="stylesheet" href="`)
-		sb.WriteString(cssHref)
+		sb.WriteString(href)
 		sb.WriteString(`" />`)
 	}
 	return sb.String()

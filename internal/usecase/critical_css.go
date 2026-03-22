@@ -16,7 +16,11 @@ func (s *BuildService) populateCriticalCSS(ctx context.Context, bifrostDir strin
 	for i := range pages {
 		pm := pages[i]
 		entry, ok := manifest.Entries[pm.entryName]
-		if !ok || entry.CSS == "" {
+		if !ok {
+			continue
+		}
+		hrefs := core.StylesheetHrefs(entry.CSS, entry.CSSFiles)
+		if len(hrefs) == 0 {
 			continue
 		}
 
@@ -25,16 +29,23 @@ func (s *BuildService) populateCriticalCSS(ctx context.Context, bifrostDir strin
 			continue
 		}
 
-		cssPath := resolveBuiltAssetPath(bifrostDir, entry.CSS)
-		if cssPath == "" {
-			continue
+		var fullCSS strings.Builder
+		for _, href := range hrefs {
+			cssPath := resolveBuiltAssetPath(bifrostDir, href)
+			if cssPath == "" {
+				continue
+			}
+			cssBytes, err := os.ReadFile(cssPath)
+			if err != nil {
+				continue
+			}
+			fullCSS.Write(cssBytes)
 		}
-		cssBytes, err := os.ReadFile(cssPath)
-		if err != nil {
+		if fullCSS.Len() == 0 {
 			continue
 		}
 
-		entry.CriticalCSS = core.ExtractCriticalCSS(htmlDoc, string(cssBytes), core.DefaultCriticalCSSMaxBytes)
+		entry.CriticalCSS = core.ExtractCriticalCSS(htmlDoc, fullCSS.String(), core.DefaultCriticalCSSMaxBytes)
 		manifest.Entries[pm.entryName] = entry
 	}
 }

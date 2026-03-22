@@ -24,6 +24,7 @@ interface BuildEntryResult {
   script: string;
   criticalCSS: string;
   css: string;
+  cssFiles?: string[];
   chunks: string[];
 }
 
@@ -88,6 +89,86 @@ function artifactForChunkImport(
   return buildResult.outputs.find(
     (o) => o.kind === "chunk" && nodePath.basename(o.path) === base,
   );
+}
+
+function artifactForImport(
+  buildResult: Awaited<ReturnType<typeof Bun.build>>,
+  impPath: string,
+): (typeof buildResult.outputs)[number] | undefined {
+  const resolvedImp = nodePath.resolve(impPath);
+  let art = buildResult.outputs.find(
+    (o) => nodePath.resolve(o.path) === resolvedImp,
+  );
+  if (art) return art;
+  const base = nodePath.basename(impPath);
+  return buildResult.outputs.find(
+    (o) => nodePath.basename(o.path) === base,
+  );
+}
+
+function dedupeOrderedStylesheetHrefs(urls: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const u of urls) {
+    if (!u || seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
+}
+
+/** All stylesheet URLs from build outputs (multi-entry shared Tailwind often emits one CSS file not linked in every entry's meta graph). */
+function allCssHrefsFromBuildOutputs(
+  buildResult: Awaited<ReturnType<typeof Bun.build>>,
+): string[] {
+  const hrefs = buildResult.outputs
+    .filter((o) => o.path.endsWith(".css"))
+    .map((o) => "/dist/" + nodePath.basename(o.path));
+  return [...new Set(hrefs)].sort();
+}
+
+/** CSS outputs reachable from this entry via the module graph (shared bundles under code splitting). */
+function collectCssForEntry(
+  buildResult: Awaited<ReturnType<typeof Bun.build>>,
+  entryJsAbsPath: string,
+): string[] {
+  const meta = buildResult.metafile;
+  if (!meta?.outputs) {
+    return [];
+  }
+  const metaOutputs = meta.outputs;
+  const startKey = resolveMetaOutputKey(metaOutputs, entryJsAbsPath);
+  if (!startKey) {
+    return [];
+  }
+
+  const seenMeta = new Set<string>();
+  const hrefs: string[] = [];
+
+  function visit(metaKey: string) {
+    if (seenMeta.has(metaKey)) return;
+    seenMeta.add(metaKey);
+    const node = metaOutputs[metaKey];
+    if (!node?.imports) return;
+    for (const imp of node.imports) {
+      const impPath = imp.path;
+      if (impPath.endsWith(".css")) {
+        const art = artifactForImport(buildResult, impPath);
+        if (art?.path.endsWith(".css")) {
+          hrefs.push("/dist/" + nodePath.basename(art.path));
+        }
+        continue;
+      }
+      if (!impPath.endsWith(".js")) continue;
+      const art = artifactForChunkImport(buildResult, impPath);
+      if (!art || art.kind !== "chunk") continue;
+      const childKey = resolveMetaOutputKey(metaOutputs, art.path);
+      if (childKey) visit(childKey);
+    }
+  }
+
+  visit(startKey);
+  return [...new Set(hrefs)].sort();
 }
 
 /** Chunks reachable from this entry only (correct for multi-entry shared vendor builds). */
@@ -165,14 +246,31 @@ function buildEntriesPayload(
           o.path.endsWith(".css") &&
           entryStemMatchesCss(nodePath.basename(o.path), stem),
       );
-      css = cssArt ? "/dist/" + nodePath.basename(cssArt.path) : "";
+      const stemCss = cssArt ? "/dist/" + nodePath.basename(cssArt.path) : "";
+      const graphCss = collectCssForEntry(buildResult, entryAbs);
+      let ordered = dedupeOrderedStylesheetHrefs(
+        stemCss ? [stemCss, ...graphCss] : [...graphCss],
+      );
+      if (ordered.length === 0) {
+        ordered = allCssHrefsFromBuildOutputs(buildResult);
+      }
+      css = ordered[0] ?? "";
+      const cssFiles = ordered.slice(1);
+      const chunks = collectChunksForEntry(buildResult, entryAbs);
+      out[entryName] = {
+        script,
+        criticalCSS: "",
+        css,
+        ...(cssFiles.length > 0 ? { cssFiles } : {}),
+        chunks,
+      };
     } else {
       script = "/dist/" + entryName + ".js";
       css = "/dist/" + entryName + ".css";
       entryAbs = nodePath.resolve(nodePath.join(outdir, entryName + ".js"));
+      const chunks = collectChunksForEntry(buildResult, entryAbs);
+      out[entryName] = { script, criticalCSS: "", css, chunks };
     }
-    const chunks = collectChunksForEntry(buildResult, entryAbs);
-    out[entryName] = { script, criticalCSS: "", css, chunks };
   }
   return out;
 }

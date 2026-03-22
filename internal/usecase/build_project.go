@@ -293,6 +293,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 			entry.Script = built.Script
 			entry.CriticalCSS = built.CriticalCSS
 			entry.CSS = built.CSS
+			entry.CSSFiles = built.CSSFiles
 			entry.Chunks = built.Chunks
 			entry.Mode = pm.modeStr
 			manifest.Entries[pm.entryName] = entry
@@ -323,7 +324,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 			lang = fileDefaultHTMLLang
 		}
 		lang = core.SanitizeHTMLLang(lang)
-		if err := s.writeClientOnlyHTML(htmlPath, title, mentry.Script, mentry.CriticalCSS, mentry.CSS, mentry.Chunks, lang, pm.config.HTMLClass); err != nil {
+		if err := s.writeClientOnlyHTML(htmlPath, title, mentry.Script, mentry.CriticalCSS, core.StylesheetHrefs(mentry.CSS, mentry.CSSFiles), mentry.Chunks, lang, pm.config.HTMLClass); err != nil {
 			htmlErrors = append(htmlErrors, BuildError{
 				Page:    pm.entryName,
 				Message: "Failed to generate HTML shell",
@@ -628,7 +629,7 @@ func (s *BuildService) extractTitleFromComponent(componentPath string) string {
 	return ""
 }
 
-func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, criticalCSS, css string, chunks []string, htmlLang string, htmlClass string) error {
+func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, criticalCSS string, cssHrefs []string, chunks []string, htmlLang string, htmlClass string) error {
 	var chunkLines strings.Builder
 	for _, c := range chunks {
 		chunkLines.WriteString(`    <script src="`)
@@ -636,7 +637,7 @@ func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, criticalCSS,
 		chunkLines.WriteString(`" type="module" defer></script>
 `)
 	}
-	styleTags := core.RenderStyleTags(criticalCSS, css)
+	styleTags := core.RenderStyleTags(criticalCSS, cssHrefs)
 	cssLink := ""
 	if styleTags != "" {
 		cssLink = "    " + strings.ReplaceAll(styleTags, "><", ">\n    <") + "\n"

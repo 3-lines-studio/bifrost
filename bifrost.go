@@ -295,6 +295,7 @@ func (a *App) ExportStaticPages(outputDir string) error {
 			Script:       a.manifest.Entries[entryName].Script,
 			CriticalCSS:  a.manifest.Entries[entryName].CriticalCSS,
 			CSS:          a.manifest.Entries[entryName].CSS,
+			CSSFiles:     a.manifest.Entries[entryName].CSSFiles,
 			Chunks:       a.manifest.Entries[entryName].Chunks,
 			Mode:         "static",
 			StaticRoutes: make(map[string]string),
@@ -316,16 +317,23 @@ func (a *App) ExportStaticPages(outputDir string) error {
 			}
 
 			criticalCSS := manifestEntry.CriticalCSS
-			if manifestEntry.CSS != "" {
-				cssPath := filepath.Join(outputDir, filepath.FromSlash(strings.TrimPrefix(manifestEntry.CSS, "/")))
-				if cssBytes, err := os.ReadFile(cssPath); err == nil {
-					if extracted := core.ExtractCriticalCSS(page.Head+page.Body, string(cssBytes), core.DefaultCriticalCSSMaxBytes); extracted != "" {
+			styleHrefs := core.StylesheetHrefs(manifestEntry.CSS, manifestEntry.CSSFiles)
+			if len(styleHrefs) > 0 {
+				var fullCSS strings.Builder
+				for _, href := range styleHrefs {
+					cssPath := filepath.Join(outputDir, filepath.FromSlash(strings.TrimPrefix(href, "/")))
+					if cssBytes, err := os.ReadFile(cssPath); err == nil {
+						fullCSS.Write(cssBytes)
+					}
+				}
+				if fullCSS.Len() > 0 {
+					if extracted := core.ExtractCriticalCSS(page.Head+page.Body, fullCSS.String(), core.DefaultCriticalCSSMaxBytes); extracted != "" {
 						criticalCSS = extracted
 					}
 				}
 			}
 
-			html, err := core.RenderHTMLShell(page.Body, propsForReact, manifestEntry.Script, page.Head, criticalCSS, manifestEntry.CSS, manifestEntry.Chunks, lang, htmlClass)
+			html, err := core.RenderHTMLShell(page.Body, propsForReact, manifestEntry.Script, page.Head, criticalCSS, styleHrefs, manifestEntry.Chunks, lang, htmlClass)
 			if err != nil {
 				fmt.Printf("Warning: Failed to build HTML for %s: %v, skipping\n", entry.Path, err)
 				continue

@@ -8,6 +8,7 @@ type ManifestEntry struct {
 	Script       string            `json:"script"`
 	CriticalCSS  string            `json:"criticalCSS,omitempty"`
 	CSS          string            `json:"css,omitempty"`
+	CSSFiles     []string          `json:"cssFiles,omitempty"`
 	Chunks       []string          `json:"chunks,omitempty"`
 	Static       bool              `json:"static,omitempty"`
 	SSR          string            `json:"ssr,omitempty"`
@@ -34,6 +35,7 @@ type ClientBuildResult struct {
 	Script      string   `json:"script"`
 	CriticalCSS string   `json:"criticalCSS,omitempty"`
 	CSS         string   `json:"css,omitempty"`
+	CSSFiles    []string `json:"cssFiles,omitempty"`
 	Chunks      []string `json:"chunks,omitempty"`
 }
 
@@ -41,9 +43,31 @@ type Assets struct {
 	Script      string
 	CriticalCSS string
 	CSS         string
+	CSSFiles    []string
 	Chunks      []string
 	IsStatic    bool
 	SSRPath     string
+}
+
+// StylesheetHrefs returns ordered unique stylesheet URLs: primary CSS then cssFiles.
+func StylesheetHrefs(css string, cssFiles []string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	add := func(u string) {
+		if u == "" {
+			return
+		}
+		if _, ok := seen[u]; ok {
+			return
+		}
+		seen[u] = struct{}{}
+		out = append(out, u)
+	}
+	add(css)
+	for _, u := range cssFiles {
+		add(u)
+	}
+	return out
 }
 
 func GetAssets(man *Manifest, entryName string) Assets {
@@ -53,6 +77,7 @@ func GetAssets(man *Manifest, entryName string) Assets {
 				Script:      entry.Script,
 				CriticalCSS: entry.CriticalCSS,
 				CSS:         entry.CSS,
+				CSSFiles:    entry.CSSFiles,
 				Chunks:      entry.Chunks,
 				IsStatic:    entry.Static,
 				SSRPath:     entry.SSR,
