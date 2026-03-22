@@ -11,10 +11,10 @@ import (
 
 func TestCleanPath(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
-		want    string
-		wantOK  bool
+		name   string
+		input  string
+		want   string
+		wantOK bool
 	}{
 		{"normal path", "dist/app.js", "dist/app.js", true},
 		{"leading slash", "/dist/app.js", "dist/app.js", true},

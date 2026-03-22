@@ -30,7 +30,6 @@ func ParseManifest(data []byte) (*Manifest, error) {
 	return &m, nil
 }
 
-// ClientBuildResult is the Bun /build response for one client entry (hashed paths in production).
 type ClientBuildResult struct {
 	Script      string   `json:"script"`
 	CriticalCSS string   `json:"criticalCSS,omitempty"`
@@ -49,7 +48,6 @@ type Assets struct {
 	SSRPath     string
 }
 
-// StylesheetHrefs returns ordered unique stylesheet URLs: primary CSS then cssFiles.
 func StylesheetHrefs(css string, cssFiles []string) []string {
 	seen := make(map[string]struct{})
 	var out []string
@@ -90,9 +88,6 @@ func GetAssets(man *Manifest, entryName string) Assets {
 	}
 }
 
-// HasSSREntries returns true if any manifest entry requires the SSR runtime
-// at production time (mode="ssr"). Static pages with SSR bundles (mode="static")
-// do NOT need runtime in production as they are pre-rendered at build time.
 func HasSSREntries(man *Manifest) bool {
 	if man == nil {
 		return false
@@ -105,9 +100,6 @@ func HasSSREntries(man *Manifest) bool {
 	return false
 }
 
-// HasSSRBundles returns true if any manifest entry has an SSR bundle.
-// This is used for build-time operations (export mode) where static pages
-// need SSR bundles for prerendering, but don't need runtime in production.
 func HasSSRBundles(man *Manifest) bool {
 	if man == nil {
 		return false

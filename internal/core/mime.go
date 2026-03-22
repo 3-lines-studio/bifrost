@@ -27,7 +27,7 @@ func GetContentType(p string) string {
 	if ct, ok := contentTypes[ext]; ok {
 		return ct
 	}
-	// Fallback: lowercase for case-insensitive match
+
 	lower := strings.ToLower(ext)
 	if lower != ext {
 		if ct, ok := contentTypes[lower]; ok {

@@ -26,7 +26,6 @@ type staticPathExport struct {
 	Props map[string]any `json:"props"`
 }
 
-// WriteStaticBuildExport writes static-prerender route/props metadata as JSON (build pipeline).
 func WriteStaticBuildExport(w io.Writer, routes []core.Route, pageConfigs map[string]*core.PageConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -93,7 +92,6 @@ func WriteStaticBuildExport(w io.Writer, routes []core.Route, pageConfigs map[st
 	return nil
 }
 
-// WriteStaticBuildExportToStdout is WriteStaticBuildExport(os.Stdout, ...).
 func WriteStaticBuildExportToStdout(routes []core.Route, pageConfigs map[string]*core.PageConfig) error {
 	return WriteStaticBuildExport(os.Stdout, routes, pageConfigs)
 }

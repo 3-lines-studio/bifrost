@@ -4,9 +4,9 @@ This is an example application demonstrating Bifrost's SSR capabilities.
 
 ## Prerequisites
 
-- Go 1.21+
+- Go 1.25+
 - Bun
-- Air (`go install github.com/cosmtrek/air@latest`)
+- Air (`go install github.com/air-verse/air@latest`)
 
 ## Development
 
@@ -33,7 +33,7 @@ Build a native desktop app using webview (no external browser needed):
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.25+
 - Bun
 - Linux: GTK 3 and WebKitGTK development libraries
 

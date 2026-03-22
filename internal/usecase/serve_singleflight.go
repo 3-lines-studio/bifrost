@@ -2,7 +2,6 @@ package usecase
 
 import "sync"
 
-// singleflightGroup deduplicates concurrent dev builds for the same entry.
 type singleflightGroup struct {
 	mu sync.Mutex
 	m  map[string]*singleflightCall

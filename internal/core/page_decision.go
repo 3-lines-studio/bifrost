@@ -30,12 +30,11 @@ type PageDecision struct {
 }
 
 func DecidePageAction(req PageRequest, entry *ManifestEntry) PageDecision {
-	// Production mode: serve static files when available
+
 	if !req.IsDev {
 		return decideProductionAction(req, entry)
 	}
 
-	// Development mode: check if setup is needed
 	needsSetup := req.Mode != ModeClientOnly && req.Mode != ModeStaticPrerender
 	if (req.Mode == ModeClientOnly || req.Mode == ModeStaticPrerender) && req.HasRenderer {
 		needsSetup = true
@@ -45,7 +44,6 @@ func DecidePageAction(req PageRequest, entry *ManifestEntry) PageDecision {
 		return PageDecision{Action: ActionNeedsSetup, NeedsSetup: true}
 	}
 
-	// Dev mode: render based on page type
 	switch req.Mode {
 	case ModeClientOnly:
 		return PageDecision{Action: ActionRenderClientOnlyShell}
@@ -87,8 +85,7 @@ func decideStaticPrerenderAction(req PageRequest, entry *ManifestEntry, normaliz
 	if req.StaticPath != "" {
 		return PageDecision{Action: ActionServeStaticFile, StaticPath: req.StaticPath}
 	}
-	// In production without manifest/static routes, this is a missing asset.
-	// In dev mode this function is not called (dev takes the ActionNeedsSetup path).
+
 	if !req.IsDev {
 		return PageDecision{Action: ActionNotFound}
 	}

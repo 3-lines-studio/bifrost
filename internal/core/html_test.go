@@ -121,8 +121,7 @@ func TestRenderHTMLShell_ScriptBreakoutEscaped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Go's json.Marshal escapes < and > to \u003c and \u003e, so the literal
-	// </script> sequence should never appear in the props JSON block.
+
 	propsStart := strings.Index(html, `id="__BIFROST_PROPS__"`)
 	if propsStart == -1 {
 		t.Fatal("could not find props script tag")

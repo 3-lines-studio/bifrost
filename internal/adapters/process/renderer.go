@@ -53,8 +53,6 @@ func removeStaleSocket(path string) {
 	}
 }
 
-// NewRenderer starts the Bun render/build subprocess. Pass extraEnv as "KEY=value"
-// pairs (e.g. "BIFROST_PROD=1" for bifrost-build) — omit for dev on-demand builds.
 func NewRenderer(mode core.Mode, source string, extraEnv ...string) (*Renderer, error) {
 	socket := uniqueSocketPath()
 	removeStaleSocket(socket)
@@ -374,8 +372,6 @@ func (r *Renderer) postJSON(ctx context.Context, endpoint string, body any, resu
 	return json.NewDecoder(resp.Body).Decode(result)
 }
 
-// waitForSocket probes the socket by attempting a connection rather than
-// just checking file existence, so we know Bun is actually listening.
 func waitForSocket(socketPath string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {

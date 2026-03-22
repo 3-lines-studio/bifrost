@@ -9,7 +9,7 @@ order: 5
 The build command prepares all frontend assets for production:
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/build@latest main.go
+go run github.com/3-lines-studio/bifrost/cmd/build@latest ./main.go
 ```
 
 The build pipeline:

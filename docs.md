@@ -27,6 +27,7 @@ Bifrost is organized into focused internal packages:
 - `internal/usecase` — Build and page-serve orchestration (wiring core to adapters)
 - `internal/adapters/http` — Page and asset HTTP handlers
 - `internal/adapters/process` — Bun renderer process and bundle IPC
+- `internal/adapters/runtime` — Renderer host lifecycle and embedded runtime
 - `internal/adapters/fs` — Filesystem and embed abstractions
 - `internal/adapters/framework` — Framework entry templates (e.g. React)
 - `internal/adapters/cli` — Terminal output and build reports
@@ -96,8 +97,8 @@ Features:
 ### Production Mode
 
 ```bash
-# Build first
-bifrost-build main.go
+# Build assets (from module root; path is your main package entrypoint)
+go run github.com/3-lines-studio/bifrost/cmd/build@latest ./main.go
 
 # Build Go binary
 go build -o myapp main.go
@@ -105,6 +106,8 @@ go build -o myapp main.go
 # Run (no BIFROST_DEV set)
 ./myapp
 ```
+
+`go install github.com/3-lines-studio/bifrost/cmd/build@latest` installs a binary named `build` (the directory name); rename it or add a shell alias if you want a `bifrost-build` command on your PATH.
 
 Requirements:
 - `embed.FS` is **mandatory** - panics at startup if missing
@@ -133,10 +136,12 @@ Strict validation causes panic on:
 ```go
 func New(assetsFS embed.FS, pages ...Route) *App
 
+func NewWithFramework(assetsFS embed.FS, fw Framework, pages ...Route) *App
+
 func NewWithOptions(assetsFS embed.FS, opts []ConfigOption, pages ...Route) *App
 ```
 
-Creates a new Bifrost application. Must be stopped with `app.Stop()` when done. Use `NewWithOptions` for app-wide settings such as `WithDefaultHTMLLang`.
+Creates a new Bifrost application. Must be stopped with `app.Stop()` when done. `New` defaults to React. Use `NewWithFramework` when selecting a non-default framework constant (today only `bifrost.React` exists). Use `NewWithOptions` for app-wide settings such as `WithDefaultHTMLLang` or `WithFramework` inside the options slice.
 
 **Parameters:**
 
@@ -183,6 +188,8 @@ func WithHTMLClass(class string) PageOption
 
 ```go
 func WithDefaultHTMLLang(lang string) ConfigOption
+
+func WithFramework(fw Framework) ConfigOption
 ```
 
 **Document language:** precedence is loader/static-data field `bifrost.PropHTMLLang` (`"__bifrost_html_lang"`) → `WithHTMLLang` → `WithDefaultHTMLLang` → `"en"`. The reserved key is stripped before props reach React.
@@ -298,7 +305,7 @@ Characteristics:
 **Build Process:**
 
 ```bash
-bifrost-build main.go
+go run github.com/3-lines-studio/bifrost/cmd/build@latest ./main.go
 ```
 
 Generates:
@@ -342,23 +349,29 @@ export default function Home({ message, count }) {
 
 ### Redirects
 
-Return a redirect from props loader:
+Return an error from the props loader that implements `bifrost.RedirectError` (an interface type alias). Example:
 
 ```go
-bifrost.Page("/protected", "./pages/protected.tsx", 
+type loginRedirect struct {
+    url    string
+    status int
+}
+
+func (e *loginRedirect) Error() string              { return "redirect" }
+func (e *loginRedirect) RedirectURL() string       { return e.url }
+func (e *loginRedirect) RedirectStatusCode() int   { return e.status }
+
+bifrost.Page("/protected", "./pages/protected.tsx",
     bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
         if !isAuthenticated(req) {
-            return nil, &bifrost.RedirectError{
-                URL:    "/login",
-                Status: http.StatusFound,
-            }
+            return nil, &loginRedirect{url: "/login", status: http.StatusFound}
         }
         // ...
     }),
 )
 ```
 
-Implement the `RedirectError` interface:
+The interface is:
 
 ```go
 type RedirectError interface {
@@ -366,6 +379,8 @@ type RedirectError interface {
     RedirectStatusCode() int
 }
 ```
+
+Implementations should also satisfy `error` (typically via an `Error()` method) because loaders return `(map[string]any, error)`.
 
 ### Production Errors
 
@@ -411,7 +426,7 @@ go run github.com/3-lines-studio/bifrost/cmd/doctor@latest .
 ### Build for Production
 
 ```bash
-bifrost-build main.go
+go run github.com/3-lines-studio/bifrost/cmd/build@latest ./main.go
 ```
 
 **Build Pipeline:**
@@ -457,7 +472,7 @@ myapp/
 1. **Always defer Stop()**: `defer app.Stop()` after creating the app
 2. **Use typed options**: `WithLoader()`, `WithClient()`, `WithStatic()`
 3. **Test mode behavior**: Set `BIFROST_DEV=1` explicitly in tests that render TSX
-4. **Strict production**: Always embed `.bifrost` and run `bifrost-build`
+4. **Strict production**: Always embed `.bifrost` and run the build CLI (`go run github.com/3-lines-studio/bifrost/cmd/build@latest ./main.go`, or an installed `build` binary from `cmd/build`)
 5. **Handle errors in props loaders**: Return proper errors or redirects
 6. **Keep props minimal**: Pass only necessary data to React
 
@@ -465,10 +480,10 @@ myapp/
 
 The architecture supports future extensions:
 
-- **New Page Modes**: Add to `PageMode` enum in `internal/types`
-- **New Page Options**: Implement `PageOption` function type
-- **Custom Build Targets**: Extend build pipeline in `internal/build`
-- **Alternative Runtimes**: Runtime interface abstraction in `internal/runtime`
+- **New page modes**: extend `PageMode` in [`internal/core`](internal/core/types.go)
+- **New page options**: implement the `PageOption` function type in `internal/core`
+- **Build pipeline**: extend [`internal/usecase`](internal/usecase/build_project.go) and related build steps
+- **Renderer / Bun host**: extend [`internal/adapters/runtime`](internal/adapters/runtime/host.go) and [`internal/adapters/process`](internal/adapters/process/)
 
 ## Complete Example
 

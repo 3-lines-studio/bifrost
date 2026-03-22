@@ -46,7 +46,6 @@ func ExtractCriticalCSS(htmlDoc string, stylesheet string, maxBytes int) string 
 		sort.Strings(names)
 
 		var sb strings.Builder
-		sb.Grow(len(critical) + 256)
 		sb.WriteString(critical)
 		for _, name := range names {
 			sb.WriteString(keyframes[name])

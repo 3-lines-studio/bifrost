@@ -102,7 +102,7 @@ func (s *PageService) ServePage(ctx context.Context, input ServePageInput) Serve
 					Error:  buildErr,
 				}
 			}
-			// After setup, render based on the page mode
+
 			if input.Config.Mode == core.ModeClientOnly {
 				html, err := s.renderClientOnlyShell(input)
 				return ServePageOutput{
@@ -158,16 +158,15 @@ func (s *PageService) buildAndRender(ctx context.Context, input ServePageInput) 
 	}
 
 	componentPath := input.Config.ComponentPath
-	// Make path relative to project root from the entries directory
+
 	if !strings.HasPrefix(componentPath, "./") && !strings.HasPrefix(componentPath, "/") {
 		componentPath = "./" + componentPath
 	}
-	// Entry is in .bifrost/entries/, need to go up two levels to reach project root
+
 	if strings.HasPrefix(componentPath, "./") {
 		componentPath = "../../" + componentPath[2:]
 	}
 
-	// Build client entry
 	entryFile := filepath.Join(entryDir, input.EntryName+s.adapter.EntryFileExtension())
 	clientTemplate := s.adapter.ClientEntryTemplate(input.Config.Mode)
 	clientContent := strings.ReplaceAll(clientTemplate, "COMPONENT_PATH", componentPath)
@@ -183,8 +182,6 @@ func (s *PageService) buildAndRender(ctx context.Context, input ServePageInput) 
 		return fmt.Errorf("failed to build client entry: %w", err)
 	}
 
-	// Build SSR entry in dev mode for all page types (for initial render),
-	// or in production for SSR and StaticPrerender modes
 	shouldBuildSSR := input.IsDev ||
 		input.Config.Mode == core.ModeSSR ||
 		input.Config.Mode == core.ModeStaticPrerender
@@ -204,7 +201,7 @@ func (s *PageService) buildAndRender(ctx context.Context, input ServePageInput) 
 		}
 
 		ssrEntrypoints := []string{ssrEntryFile}
-		// Build SSR with target=bun
+
 		if err := s.renderer.BuildSSR(ssrEntrypoints, ssrDir); err != nil {
 			return fmt.Errorf("failed to build SSR entry: %w", err)
 		}

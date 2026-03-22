@@ -16,24 +16,22 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/usecase"
 )
 
-// Router is the minimal API Bifrost needs from an HTTP mux (e.g. *http.ServeMux).
 type Router interface {
 	http.Handler
 	Handle(pattern string, handler http.Handler)
 }
 
-// App is the Bifrost application (routes, assets, SSR runtime).
 type App struct {
-	host        *runtime.Host
-	routes      []core.Route
-	assetsFS    embed.FS
-	isDev       bool
-	manifest    *core.Manifest
-	pageConfigs map[string]*core.PageConfig
-	config      *core.Config
+	host         *runtime.Host
+	routes       []core.Route
+	assetsFS     embed.FS
+	isDev        bool
+	manifest     *core.Manifest
+	pageConfigs  map[string]*core.PageConfig
+	config       *core.Config
+	routesSealed bool
 }
 
-// New constructs an app with default React framework.
 func New(assetsFS embed.FS, routes ...core.Route) *App {
 	config := &core.Config{
 		Framework: core.FrameworkReact,
@@ -41,7 +39,6 @@ func New(assetsFS embed.FS, routes ...core.Route) *App {
 	return newApp(assetsFS, routes, config)
 }
 
-// NewWithFramework constructs an app with the given framework constant.
 func NewWithFramework(assetsFS embed.FS, fw core.Framework, routes ...core.Route) *App {
 	config := &core.Config{
 		Framework: fw,
@@ -49,7 +46,6 @@ func NewWithFramework(assetsFS embed.FS, fw core.Framework, routes ...core.Route
 	return newApp(assetsFS, routes, config)
 }
 
-// NewWithOptions constructs an app and applies ConfigOption values (e.g. WithDefaultHTMLLang).
 func NewWithOptions(assetsFS embed.FS, opts []core.ConfigOption, routes ...core.Route) *App {
 	config := &core.Config{
 		Framework: core.FrameworkReact,
@@ -65,22 +61,17 @@ func newApp(assetsFS embed.FS, routes []core.Route, config *core.Config) *App {
 	app := &App{
 		assetsFS:    assetsFS,
 		isDev:       mode == core.ModeDev,
-		routes:      routes,
 		pageConfigs: make(map[string]*core.PageConfig),
 		config:      config,
 	}
-
-	for _, route := range routes {
-		pc := core.PageConfigFromRoute(route)
-		app.pageConfigs[route.ComponentPath] = &pc
-	}
+	app.addRoutes(routes)
 
 	if env.IsExportMarkerPresent() {
 		return app
 	}
 
 	if mode == core.ModeExport {
-		app.runExportMode()
+		return app
 	}
 
 	h, err := runtime.NewHost(assetsFS, mode, app.getAdapter())
@@ -95,6 +86,21 @@ func newApp(assetsFS embed.FS, routes []core.Route, config *core.Config) *App {
 
 func (a *App) getAdapter() core.FrameworkAdapter {
 	return framework.NewReactAdapter()
+}
+
+func (a *App) addRoutes(routes []core.Route) {
+	for _, route := range routes {
+		pc := core.PageConfigFromRoute(route)
+		a.pageConfigs[route.ComponentPath] = &pc
+	}
+	a.routes = append(a.routes, routes...)
+}
+
+func (a *App) Handle(routes ...core.Route) {
+	if a.routesSealed {
+		panic("bifrost: Handle after Wrap or Handler")
+	}
+	a.addRoutes(routes)
 }
 
 func (a *App) runExportMode() {
@@ -120,7 +126,6 @@ func (a *App) runExportMode() {
 	os.Exit(0)
 }
 
-// Wrap mounts page handlers on the given router and returns the full HTTP handler.
 func (a *App) Wrap(api Router) http.Handler {
 	if env.IsExportMarkerPresent() {
 		if err := usecase.WriteStaticBuildExportToStdout(a.routes, a.pageConfigs); err != nil {
@@ -130,9 +135,15 @@ func (a *App) Wrap(api Router) http.Handler {
 		os.Exit(0)
 	}
 
+	if env.DetectAppMode() == core.ModeExport {
+		a.runExportMode()
+	}
+
 	if api == nil {
 		panic("bifrost: nil router passed to Wrap; use app.Handler()")
 	}
+
+	a.routesSealed = true
 
 	defaultLang := ""
 	if a.config != nil {
@@ -153,7 +164,6 @@ func (a *App) Wrap(api Router) http.Handler {
 	return createAssetHandler(api, a)
 }
 
-// Handler returns a mux with all Bifrost routes registered.
 func (a *App) Handler() http.Handler {
 	return a.Wrap(http.NewServeMux())
 }
@@ -193,7 +203,6 @@ func (a *App) getSSBundlePath(entryName string) string {
 	return entry.SSR
 }
 
-// Stop releases renderer resources.
 func (a *App) Stop() error {
 	if a.host != nil {
 		return a.host.Stop()
@@ -201,7 +210,6 @@ func (a *App) Stop() error {
 	return nil
 }
 
-// ExportStaticPages generates static HTML files for StaticPrerender pages.
 func (a *App) ExportStaticPages(outputDir string) error {
 	var r usecase.Renderer
 	if a.host != nil {

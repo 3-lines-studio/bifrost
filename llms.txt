@@ -19,21 +19,27 @@ Bifrost enables Go HTTP servers to render React components on the server, provid
 - [Example Application](example/cmd/full/main.go): Working example with SSR pages, static pages, and dynamic routes
 - [Air Configuration](example/.air.toml): Hot reload proxy configuration for development
 
-### Internal Implementation
+### Internal implementation
 
-- [Types](internal/types/types.go): Core types including `PropsLoader`, `PageConfig`, and `RedirectError`
-- [Runtime](internal/runtime/client.go): Bun process management and IPC protocol
-- [Page Handler](internal/page/handler.go): HTTP handler logic for SSR and static pages
-- [Build System](internal/build/engine.go): Asset building and bundling logic
-- [Asset Resolution](internal/assets/resolver.go): Manifest-driven embedded FS handling
-- [CLI Helpers](internal/cli/output.go): Terminal output utilities
+- [Core types](internal/core/types.go): `PropsLoader`, `PageConfig`, `RedirectError`, `PageMode`
+- [Routes](internal/core/route.go): `Page()` and route types
+- [Manifest and HTML shell](internal/core/manifest.go), [internal/core/html.go](internal/core/html.go): asset manifest and document shell
+- [App wiring](internal/app/app.go): public `App` construction, `Wrap`, `Handler`
+- [Build orchestration](internal/usecase/build_project.go): production build pipeline
+- [Serve / render](internal/usecase/serve_page.go): request-time page serving
+- [Bun host](internal/adapters/runtime/host.go): renderer process lifecycle
+- [Renderer IPC](internal/adapters/process/renderer.go): Bun renderer integration
+- [HTTP handlers](internal/adapters/http/page_handler.go), [asset_handler.go](internal/adapters/http/asset_handler.go): pages and static assets
+- [Filesystem adapters](internal/adapters/fs/embed_fs.go): embed and OS FS
+- [CLI output](internal/adapters/cli/output.go): terminal helpers
 
-### CLI Commands
+### CLI commands
 
-- [Init Command](cmd/init/main.go): Project scaffolding with templates
-- [Doctor Command](cmd/doctor/main.go): Repair `.bifrost` directory
-- [Init Logic](internal/initcmd/init.go): Template processing and project creation
-- [Templates](internal/templates/embed.go): Embedded template filesystem
+- [Init command](cmd/init/main.go): project scaffolding with templates
+- [Doctor command](cmd/doctor/main.go): repair `.bifrost` directory
+- [Build command](cmd/build/main.go): run the production asset build
+- [Init logic](internal/usecase/init_project.go): template processing and project creation
+- [Templates](internal/templates/embed.go): embedded template filesystem
 
 ## Template Options
 

@@ -100,9 +100,7 @@ function artifactForImport(
   );
   if (art) return art;
   const base = nodePath.basename(impPath);
-  return buildResult.outputs.find(
-    (o) => nodePath.basename(o.path) === base,
-  );
+  return buildResult.outputs.find((o) => nodePath.basename(o.path) === base);
 }
 
 function dedupeOrderedStylesheetHrefs(urls: string[]): string[] {
@@ -314,10 +312,7 @@ function createError(
   return new Response(JSON.stringify(result) + "\n");
 }
 
-const componentCache = new Map<
-  string,
-  { Component: any; Head?: any }
->();
+const componentCache = new Map<string, { Component: any; Head?: any }>();
 
 async function handleRender(req: Bun.BunRequest): Promise<Response> {
   let body: { path?: string; props?: Record<string, unknown> };
@@ -403,7 +398,12 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
 }
 
 async function handleBuild(req: Bun.BunRequest): Promise<Response> {
-  let body: { entrypoints?: string[]; outdir?: string; target?: string; entryNames?: string[] };
+  let body: {
+    entrypoints?: string[];
+    outdir?: string;
+    target?: string;
+    entryNames?: string[];
+  };
   try {
     body = await req.json();
   } catch (err) {
@@ -423,10 +423,9 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
 
   const buildTarget = target === "bun" ? "bun" : "browser";
   const isSSR = buildTarget === "bun";
-  // Hash only browser bundles for cache busting; SSR bundles keep stable names (Go manifest paths).
+
   const hashClientAssets =
-    (process.env.BIFROST_PROD === "1" ||
-      process.env.BIFROST_PROD === "true") &&
+    (process.env.BIFROST_PROD === "1" || process.env.BIFROST_PROD === "true") &&
     !isSSR;
 
   try {
@@ -451,9 +450,7 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
       naming,
       plugins,
       metafile: true,
-      ...(!isDev
-        ? { define: { "process.env.NODE_ENV": '"production"' } }
-        : {}),
+      ...(!isDev ? { define: { "process.env.NODE_ENV": '"production"' } } : {}),
     });
 
     if (!result.success) {
@@ -476,7 +473,11 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
       return createError("Build failed", { errors });
     }
 
-    if (!hashClientAssets && entryNames && entryNames.length === entrypoints.length) {
+    if (
+      !hashClientAssets &&
+      entryNames &&
+      entryNames.length === entrypoints.length
+    ) {
       for (let i = 0; i < entrypoints.length; i++) {
         const entryPath = entrypoints[i];
         const entryName = entryNames[i];
@@ -513,7 +514,10 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return createError(`Build output mapping failed: ${message}`, err as Error);
+      return createError(
+        `Build output mapping failed: ${message}`,
+        err as Error,
+      );
     }
 
     const response: Result = { ok: true, entries };

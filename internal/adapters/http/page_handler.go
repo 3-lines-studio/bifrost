@@ -89,7 +89,6 @@ func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// safeEmbedPath builds a safe embedded FS path rooted under ".bifrost".
 func safeEmbedPath(raw string) (string, bool) {
 	if containsDotDot(strings.ReplaceAll(raw, "\\", "/")) {
 		return "", false

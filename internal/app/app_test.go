@@ -36,6 +36,45 @@ func TestNewCreatesApp(t *testing.T) {
 	}
 }
 
+func TestHandleBeforeWrap(t *testing.T) {
+	skipIfNoBun(t)
+	t.Setenv("BIFROST_DEV", "1")
+
+	a := New(testFS)
+	defer func() { _ = a.Stop() }()
+
+	a.Handle(core.Page("/", "./example/components/hello.tsx"))
+
+	api := http.NewServeMux()
+	handler := a.Wrap(api)
+
+	req := httptest.NewRequest("GET", "/", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code == http.StatusNotFound {
+		t.Errorf("root / returned 404 after Handle before Wrap")
+	}
+}
+
+func TestHandleAfterWrapPanics(t *testing.T) {
+	skipIfNoBun(t)
+	t.Setenv("BIFROST_DEV", "1")
+
+	a := New(testFS, core.Page("/", "./test.tsx"))
+	defer func() { _ = a.Stop() }()
+
+	_ = a.Wrap(http.NewServeMux())
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Handle after Wrap should panic")
+		}
+	}()
+
+	a.Handle(core.Page("/other", "./other.tsx"))
+}
+
 func TestStrictProductionRequirements(t *testing.T) {
 	t.Setenv("BIFROST_DEV", "")
 

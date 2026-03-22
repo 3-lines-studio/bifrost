@@ -11,8 +11,6 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-// cleanPath sanitizes a URL path segment to prevent directory traversal.
-// Returns the cleaned path and false if the path is unsafe (escapes root).
 func cleanPath(raw string) (string, bool) {
 	raw = strings.ReplaceAll(raw, "\\", "/")
 	if containsDotDot(raw) {
@@ -26,14 +24,13 @@ func cleanPath(raw string) (string, bool) {
 	return cleaned, true
 }
 
-// containsDotDot checks for ".." path segments without allocating a slice.
 func containsDotDot(p string) bool {
 	for {
 		idx := strings.Index(p, "..")
 		if idx < 0 {
 			return false
 		}
-		// Check that ".." is a whole segment (bounded by "/" or string edges)
+
 		atStart := idx == 0 || p[idx-1] == '/'
 		end := idx + 2
 		atEnd := end == len(p) || p[end] == '/'
@@ -70,7 +67,6 @@ func (h *AssetHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// serveFromFS uses http.ServeFile for streaming + range support instead of ReadFile.
 func (h *AssetHandler) serveFromFS(w http.ResponseWriter, req *http.Request, p string) {
 	fullPath := filepath.Join(".bifrost", p)
 
@@ -132,7 +128,6 @@ func (h *PublicHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// servePublicFromFSDirect merges exist-check + serve into one path to avoid double stat/open.
 func (h *PublicHandler) servePublicFromFSDirect(w http.ResponseWriter, req *http.Request, cleaned string) {
 	publicPath := filepath.Join("public", cleaned)
 
@@ -159,7 +154,6 @@ func (h *PublicHandler) servePublicFromFSDirect(w http.ResponseWriter, req *http
 	http.ServeContent(w, req, info.Name(), info.ModTime(), file)
 }
 
-// servePublicFromEmbedDirect merges exist-check + serve to avoid double ReadFile.
 func (h *PublicHandler) servePublicFromEmbedDirect(w http.ResponseWriter, req *http.Request, cleaned string) {
 	embedPath := path.Join("public", cleaned)
 	data, err := h.assetsFS.ReadFile(embedPath)
@@ -173,7 +167,6 @@ func (h *PublicHandler) servePublicFromEmbedDirect(w http.ResponseWriter, req *h
 	_, _ = w.Write(data)
 }
 
-// isPathSafe checks that the resolved absolute path stays under root.
 func isPathSafe(p, root string) bool {
 	abs, err := filepath.Abs(p)
 	if err != nil {

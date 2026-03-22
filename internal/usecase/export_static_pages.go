@@ -12,18 +12,16 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-// ExportStaticPagesInput carries everything needed to prerender static HTML routes.
 type ExportStaticPagesInput struct {
-	OutputDir      string
-	Routes         []core.Route
-	PageConfigs    map[string]*core.PageConfig
-	Manifest       *core.Manifest
-	AppConfig      *core.Config
-	SSBundlePath   func(entryName string) string
-	Renderer       Renderer
+	OutputDir    string
+	Routes       []core.Route
+	PageConfigs  map[string]*core.PageConfig
+	Manifest     *core.Manifest
+	AppConfig    *core.Config
+	SSBundlePath func(entryName string) string
+	Renderer     Renderer
 }
 
-// ExportStaticPages generates static HTML files for StaticPrerender pages and export-manifest.json.
 func ExportStaticPages(in ExportStaticPagesInput) error {
 	pagesDir := filepath.Join(in.OutputDir, "pages", "routes")
 	if err := os.MkdirAll(pagesDir, 0755); err != nil {

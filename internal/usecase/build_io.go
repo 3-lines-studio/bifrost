@@ -23,7 +23,6 @@ func (s *BuildService) copyPublicDir(src, dst string) error {
 	return s.copyDirRecursive(src, dst)
 }
 
-// copyDirRecursive uses streaming io.Copy instead of ReadFile/WriteFile to reduce peak memory.
 func (s *BuildService) copyDirRecursive(src, dst string) error {
 	entries, err := os.ReadDir(src)
 	if err != nil {

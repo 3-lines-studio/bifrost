@@ -45,20 +45,17 @@ Tests error handling and redirects:
 - Go 1.25+
 - Bun installed and available in PATH
 
-### Run all E2E tests (recommended)
+### Run all checks from the repo root (recommended)
 ```bash
-make test
+make check
 ```
 
-This will:
-1. Build the bifrost-build tool
-2. Build example assets (`make e2e-build`)
-3. Run all E2E tests
+This runs doctor, builds `cmd/build` as `/tmp/bifrost-build`, builds the example through that CLI, then lint, unit tests (with race), and E2E tests under `test/e2e`.
 
 ### Run tests directly (requires built assets)
 ```bash
 # First, build the example assets
-cd example && go run ../cmd/build/main.go ./cmd/full/main.go
+cd example && go run ../cmd/build ./cmd/full/main.go
 
 # Then run tests
 go test ./test/e2e/... -v

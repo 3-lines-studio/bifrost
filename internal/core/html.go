@@ -34,23 +34,12 @@ func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, he
 		}
 	}
 
-	// Only run escape when the dangerous sequence is present
 	if bytes.Contains(propsJSON, []byte("</")) {
 		propsJSON = bytes.ReplaceAll(propsJSON, []byte("</"), []byte("<\\/"))
 	}
 
-	// Pre-calculate approximate capacity
-	const staticLen = 250 // fixed HTML structure overhead
 	styleTags := RenderStyleTags(criticalCSS, cssHrefs)
-	capacity := staticLen + len(bodyHTML) + len(propsJSON) + len(scriptSrc) + len(headHTML) + len(styleTags)
-	for _, chunk := range chunks {
-		capacity += 55 + len(chunk) // <script src="..." type="module" defer></script>\n
-		capacity += 36 + len(chunk) // <link rel="modulepreload" href="..." />
-	}
-	capacity += 36 + len(scriptSrc) // modulepreload for entry
-
 	var sb strings.Builder
-	sb.Grow(capacity)
 
 	sb.WriteString("<!doctype html>\n<html lang=\"")
 	sb.WriteString(html.EscapeString(langAttr))
@@ -73,7 +62,6 @@ func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, he
 		sb.WriteString(styleTags)
 	}
 
-	// Discover module graph during head parse instead of after body scan (shorter critical path).
 	for _, chunk := range chunks {
 		sb.WriteString(`<link rel="modulepreload" href="`)
 		sb.WriteString(chunk)
@@ -107,13 +95,7 @@ func RenderStyleTags(criticalCSS string, cssHrefs []string) string {
 		return ""
 	}
 
-	grow := len(criticalCSS) + 120
-	for _, href := range cssHrefs {
-		grow += len(href) + 48
-	}
 	var sb strings.Builder
-	sb.Grow(grow)
-
 	if criticalCSS != "" {
 		sb.WriteString(`<style data-bifrost-critical>`)
 		sb.WriteString(sanitizeInlineStyleText(criticalCSS))
@@ -137,8 +119,6 @@ func sanitizeInlineStyleText(css string) string {
 	}
 
 	var sb strings.Builder
-	sb.Grow(len(css) + 8)
-
 	start := 0
 	for {
 		idx := strings.Index(lower[start:], "</style")
@@ -153,7 +133,6 @@ func sanitizeInlineStyleText(css string) string {
 	}
 }
 
-// containsTitle does a case-insensitive check for "<title" without allocating a lowercased copy.
 func containsTitle(s string) bool {
 	const needle = "<title"
 	nLen := len(needle)

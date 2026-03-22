@@ -14,7 +14,6 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-// Precompiled title extraction regexes (avoid per-call compilation).
 var (
 	titleRegex         = regexp.MustCompile(`<title>([^}]+?)</title>`)
 	titleTemplateRegex = regexp.MustCompile(`<title>\{` + "`" + `([^}]+?)` + "`" + `\}</title>`)

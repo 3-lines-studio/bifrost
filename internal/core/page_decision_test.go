@@ -189,7 +189,7 @@ func TestMatchStaticRoute(t *testing.T) {
 		Entries: map[string]ManifestEntry{
 			"pages-blog-entry": {
 				StaticRoutes: map[string]string{
-					"/blog/hello":          "/pages/routes/blog/hello/index.html",
+					"/blog/hello":           "/pages/routes/blog/hello/index.html",
 					"/blog/getting-started": "/pages/routes/blog/getting-started/index.html",
 				},
 			},

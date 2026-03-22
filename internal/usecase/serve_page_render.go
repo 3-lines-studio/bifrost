@@ -12,7 +12,6 @@ import (
 func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error) {
 	assets := core.GetAssets(input.Manifest, input.EntryName)
 
-	// In dev mode, try to render with SSR for initial content
 	if input.IsDev && s.renderer != nil {
 		ssrPath := filepath.Join(".bifrost/ssr", input.EntryName+"-ssr.js")
 		if _, err := os.Stat(ssrPath); err == nil {
@@ -31,11 +30,9 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 					htmlClass,
 				)
 			}
-			// If SSR render fails, fall through to empty shell
 		}
 	}
 
-	// Production or fallback: empty shell (will be hydrated on client)
 	lang, htmlClass, _ := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
 	return core.RenderHTMLShell(
 		"",

@@ -47,7 +47,6 @@ func NewBuildService(renderer Renderer, fs FileSystem, cli CLIOutput, adapter co
 	}
 }
 
-// pageMetadata holds precomputed per-page data to avoid redundant calculations.
 type pageMetadata struct {
 	config           core.PageConfig
 	entryName        string
@@ -73,7 +72,6 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		}
 	}
 
-	// Precompute per-page metadata once
 	pages := make([]pageMetadata, len(pageConfigs))
 	hasStaticPrerender := false
 	needsRuntime := false
@@ -250,7 +248,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 	if len(entryPaths) > 0 {
 		builtMap, batchErr := s.renderer.Build(entryPaths, outdir, entryNames)
 		if batchErr != nil {
-			// One invalid entry fails the whole graph; retry per page so other routes still build.
+
 			builtMap = make(map[string]core.ClientBuildResult)
 			for i := range pages {
 				pm := &pages[i]
@@ -286,7 +284,6 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 
 	s.populateCriticalCSS(ctx, bifrostDir, pages, manifest)
 
-	// Generate ClientOnly HTML shells
 	stepHTML := report.StartStep("Generating ClientOnly HTML shells")
 	htmlErrors := make([]BuildError, 0)
 	for i := range pages {
@@ -322,7 +319,6 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		report.AddWarning(err.Page, err.Message, err.Details)
 	}
 
-	// Write manifest before export mode
 	manifestPath := filepath.Join(bifrostDir, "manifest.json")
 	manifestData, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -332,9 +328,6 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		return BuildOutput{Success: false, Error: fmt.Errorf("failed to write manifest: %w", err)}
 	}
 
-	// Compile runtime if needed for SSR pages (runtime) or static pages (export)
-	// - SSR pages need runtime at production time
-	// - Static pages need runtime at build time (for prerendering)
 	shouldCompileRuntime := needsRuntime || hasStaticPrerender
 
 	if shouldCompileRuntime {
@@ -347,7 +340,6 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		report.EndStep(stepRuntime, true, "")
 	}
 
-	// Only run export mode when static-prerender pages exist
 	stepExport := report.StartStep("Building StaticPrerender pages")
 	if hasStaticPrerender {
 		exportErr := s.runExportMode(input.OriginalCwd, bifrostDir, manifest, input.MainFile)
@@ -358,8 +350,6 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		}
 		report.EndStep(stepExport, true, "")
 
-		// For static-only apps, remove runtime after export to reduce binary size
-		// Static apps don't need runtime at production time (pages are pre-rendered)
 		if !needsRuntime {
 			runtimeDir := filepath.Join(bifrostDir, "runtime")
 			if err := os.RemoveAll(runtimeDir); err != nil {
@@ -367,7 +357,6 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 			}
 		}
 
-		// Re-write manifest only when export ran (may have added static routes)
 		manifestData, err = json.MarshalIndent(manifest, "", "  ")
 		if err != nil {
 			return BuildOutput{Success: false, Error: fmt.Errorf("failed to marshal manifest after export: %w", err)}

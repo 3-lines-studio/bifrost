@@ -11,7 +11,6 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-// Host manages the Bun SSR client, manifest, and temp SSR bundle layout.
 type Host struct {
 	client     *process.Renderer
 	assetsFS   embed.FS
@@ -22,7 +21,6 @@ type Host struct {
 	adapter    core.FrameworkAdapter
 }
 
-// NewHost constructs a Host for the given mode (dev, prod, or export build).
 func NewHost(assetsFS embed.FS, mode core.Mode, adapter core.FrameworkAdapter) (*Host, error) {
 	if adapter == nil {
 		adapter = framework.NewReactAdapter()
@@ -161,19 +159,14 @@ func (r *Host) initDevMode() (*Host, error) {
 	return r, nil
 }
 
-// Client returns the Bun renderer client, if started.
 func (h *Host) Client() *process.Renderer { return h.client }
 
-// Manifest returns the loaded manifest, if any.
 func (h *Host) Manifest() *core.Manifest { return h.manifest }
 
-// SSRTempDir is the directory holding extracted SSR bundles (prod/export).
 func (h *Host) SSRTempDir() string { return h.ssrTempDir }
 
-// IsDev is true when running in development mode.
 func (h *Host) IsDev() bool { return h.isDev }
 
-// Stop shuts down the renderer client.
 func (h *Host) Stop() error {
 	if h.client != nil {
 		return h.client.Stop()
