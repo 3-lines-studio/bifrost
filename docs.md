@@ -23,12 +23,14 @@ Requires [Bun](https://bun.sh) to be installed.
 
 Bifrost is organized into focused internal packages:
 
-- `internal/types` - Shared types (PropsLoader, PageConfig, RedirectError)
-- `internal/runtime` - Bun process management and IPC protocol
-- `internal/page` - HTTP handler orchestration
-- `internal/assets` - Manifest resolution and embedded FS handling
-- `internal/build` - Build pipeline and AST-based page discovery
-- `internal/cli` - Terminal output helpers
+- `internal/core` — Shared types (`PageConfig`, `PropsLoader`, `RedirectError`), manifest and HTML shell, page routing decisions, critical CSS, MIME/path helpers
+- `internal/usecase` — Build and page-serve orchestration (wiring core to adapters)
+- `internal/adapters/http` — Page and asset HTTP handlers
+- `internal/adapters/process` — Bun renderer process and bundle IPC
+- `internal/adapters/fs` — Filesystem and embed abstractions
+- `internal/adapters/framework` — Framework entry templates (e.g. React)
+- `internal/adapters/cli` — Terminal output and build reports
+- Root `bifrost` package — Public `App` API (`New`, `Page`, `Wrap`, …)
 
 ## Quick Start
 
