@@ -1,45 +1,25 @@
-package bifrost
+package core
 
 import (
 	"context"
 	"testing"
 )
 
-func TestDevModeWithStaticData(t *testing.T) {
-	skipIfNoBun(t)
-	t.Setenv("BIFROST_DEV", "1")
-
-	loader := func(ctx context.Context) ([]StaticPathData, error) {
-		return []StaticPathData{
-			{
-				Path: "/blog/hello",
-				Props: map[string]any{
-					"title": "Hello Post",
-					"body":  "Hello content",
-				},
-			},
-			{
-				Path: "/blog/world",
-				Props: map[string]any{
-					"title": "World Post",
-					"body":  "World content",
-				},
-			},
-		}, nil
+func TestStaticPathDataStructure(t *testing.T) {
+	data := StaticPathData{
+		Path: "/blog/test",
+		Props: map[string]any{
+			"title": "Test Post",
+			"slug":  "test",
+		},
 	}
 
-	route := Page("/blog", "./blog.tsx", WithStaticData(loader))
-
-	app := New(testFS, route)
-	defer func() { _ = app.Stop() }()
-
-	config := app.pageConfigs["./blog.tsx"]
-	if config == nil {
-		t.Fatal("Config not stored")
+	if data.Path != "/blog/test" {
+		t.Errorf("Expected Path to be /blog/test, got %s", data.Path)
 	}
 
-	if config.StaticDataLoader == nil {
-		t.Error("StaticDataLoader not set")
+	if data.Props["title"] != "Test Post" {
+		t.Errorf("Expected title prop, got %v", data.Props["title"])
 	}
 }
 

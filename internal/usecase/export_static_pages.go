@@ -1,4 +1,4 @@
-package bifrost
+package usecase
 
 import (
 	"context"
@@ -12,26 +12,36 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-// ExportStaticPages generates static HTML files for StaticPrerender pages
-func (a *App) ExportStaticPages(outputDir string) error {
-	pagesDir := filepath.Join(outputDir, "pages", "routes")
+// ExportStaticPagesInput carries everything needed to prerender static HTML routes.
+type ExportStaticPagesInput struct {
+	OutputDir      string
+	Routes         []core.Route
+	PageConfigs    map[string]*core.PageConfig
+	Manifest       *core.Manifest
+	AppConfig      *core.Config
+	SSBundlePath   func(entryName string) string
+	Renderer       Renderer
+}
+
+// ExportStaticPages generates static HTML files for StaticPrerender pages and export-manifest.json.
+func ExportStaticPages(in ExportStaticPagesInput) error {
+	pagesDir := filepath.Join(in.OutputDir, "pages", "routes")
 	if err := os.MkdirAll(pagesDir, 0755); err != nil {
 		return fmt.Errorf("failed to create pages directory: %w", err)
 	}
 
-	// Build manifest with StaticRoutes
 	exportManifest := &core.Manifest{
 		Entries: make(map[string]core.ManifestEntry),
 	}
 
-	for _, route := range a.routes {
-		config := buildPageConfig(route)
+	for _, route := range in.Routes {
+		config := core.PageConfigFromRoute(route)
 		if config.Mode != core.ModeStaticPrerender {
 			continue
 		}
 
 		entryName := core.EntryNameForPath(config.ComponentPath)
-		ssrBundlePath := a.getSSBundlePath(entryName)
+		ssrBundlePath := in.SSBundlePath(entryName)
 		if ssrBundlePath == "" {
 			fmt.Printf("Warning: No SSR bundle for %s, skipping\n", route.Pattern)
 			continue
@@ -46,7 +56,6 @@ func (a *App) ExportStaticPages(outputDir string) error {
 				continue
 			}
 		} else {
-			// Static page without data loader - create single entry with empty props
 			entries = []core.StaticPathData{
 				{
 					Path:  route.Pattern,
@@ -55,12 +64,17 @@ func (a *App) ExportStaticPages(outputDir string) error {
 			}
 		}
 
+		srcEntry := core.ManifestEntry{}
+		if in.Manifest != nil {
+			srcEntry = in.Manifest.Entries[entryName]
+		}
+
 		manifestEntry := core.ManifestEntry{
-			Script:       a.manifest.Entries[entryName].Script,
-			CriticalCSS:  a.manifest.Entries[entryName].CriticalCSS,
-			CSS:          a.manifest.Entries[entryName].CSS,
-			CSSFiles:     a.manifest.Entries[entryName].CSSFiles,
-			Chunks:       a.manifest.Entries[entryName].Chunks,
+			Script:       srcEntry.Script,
+			CriticalCSS:  srcEntry.CriticalCSS,
+			CSS:          srcEntry.CSS,
+			CSSFiles:     srcEntry.CSSFiles,
+			Chunks:       srcEntry.Chunks,
 			Mode:         "static",
 			StaticRoutes: make(map[string]string),
 		}
@@ -69,12 +83,12 @@ func (a *App) ExportStaticPages(outputDir string) error {
 			fmt.Printf("Exporting %s...\n", entry.Path)
 
 			appDefault := ""
-			if a.config != nil {
-				appDefault = a.config.DefaultHTMLLang
+			if in.AppConfig != nil {
+				appDefault = in.AppConfig.DefaultHTMLLang
 			}
 			lang, htmlClass, propsForReact := core.ResolveHTMLDocumentAttrs(appDefault, config.HTMLLang, config.HTMLClass, entry.Props)
 
-			page, err := a.renderer.client.Render(ssrBundlePath, propsForReact)
+			page, err := in.Renderer.Render(ssrBundlePath, propsForReact)
 			if err != nil {
 				fmt.Printf("Warning: Failed to render %s: %v, skipping\n", entry.Path, err)
 				continue
@@ -85,7 +99,7 @@ func (a *App) ExportStaticPages(outputDir string) error {
 			if len(styleHrefs) > 0 {
 				var fullCSS strings.Builder
 				for _, href := range styleHrefs {
-					cssPath := filepath.Join(outputDir, filepath.FromSlash(strings.TrimPrefix(href, "/")))
+					cssPath := filepath.Join(in.OutputDir, filepath.FromSlash(strings.TrimPrefix(href, "/")))
 					if cssBytes, err := os.ReadFile(cssPath); err == nil {
 						fullCSS.Write(cssBytes)
 					}
@@ -142,12 +156,11 @@ func (a *App) ExportStaticPages(outputDir string) error {
 		exportManifest.Entries[entryName] = manifestEntry
 	}
 
-	// Write export manifest
 	manifestData, err := json.MarshalIndent(exportManifest, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal export manifest: %w", err)
 	}
 
-	manifestPath := filepath.Join(outputDir, "export-manifest.json")
+	manifestPath := filepath.Join(in.OutputDir, "export-manifest.json")
 	return os.WriteFile(manifestPath, manifestData, 0644)
 }

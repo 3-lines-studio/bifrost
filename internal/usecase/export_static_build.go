@@ -1,9 +1,10 @@
-package bifrost
+package usecase
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -25,7 +26,8 @@ type staticPathExport struct {
 	Props map[string]any `json:"props"`
 }
 
-func exportStaticBuildData(app *App) error {
+// WriteStaticBuildExport writes static-prerender route/props metadata as JSON (build pipeline).
+func WriteStaticBuildExport(w io.Writer, routes []core.Route, pageConfigs map[string]*core.PageConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -34,16 +36,15 @@ func exportStaticBuildData(app *App) error {
 		Pages:   make([]staticPageExport, 0),
 	}
 
-	// Build a map from component path to route pattern
 	componentToPattern := make(map[string]string)
-	for _, route := range app.routes {
-		config := buildPageConfig(route)
+	for _, route := range routes {
+		config := core.PageConfigFromRoute(route)
 		if config.Mode == core.ModeStaticPrerender {
 			componentToPattern[config.ComponentPath] = route.Pattern
 		}
 	}
 
-	for componentPath, config := range app.pageConfigs {
+	for componentPath, config := range pageConfigs {
 		if config.Mode != core.ModeStaticPrerender {
 			continue
 		}
@@ -56,10 +57,9 @@ func exportStaticBuildData(app *App) error {
 				return fmt.Errorf("failed to load static data for %s: %w", componentPath, err)
 			}
 		} else {
-			// Static page without data loader - use route pattern with empty props
 			pattern := componentToPattern[componentPath]
 			if pattern == "" {
-				continue // Skip if no route pattern found
+				continue
 			}
 			entries = []core.StaticPathData{
 				{
@@ -84,11 +84,16 @@ func exportStaticBuildData(app *App) error {
 		export.Pages = append(export.Pages, pageExport)
 	}
 
-	encoder := json.NewEncoder(os.Stdout)
+	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(export); err != nil {
 		return fmt.Errorf("failed to encode export data: %w", err)
 	}
 
 	return nil
+}
+
+// WriteStaticBuildExportToStdout is WriteStaticBuildExport(os.Stdout, ...).
+func WriteStaticBuildExportToStdout(routes []core.Route, pageConfigs map[string]*core.PageConfig) error {
+	return WriteStaticBuildExport(os.Stdout, routes, pageConfigs)
 }

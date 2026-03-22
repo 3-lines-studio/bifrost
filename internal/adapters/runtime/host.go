@@ -1,4 +1,4 @@
-package bifrost
+package runtime
 
 import (
 	"embed"
@@ -11,7 +11,8 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-type renderer struct {
+// Host manages the Bun SSR client, manifest, and temp SSR bundle layout.
+type Host struct {
 	client     *process.Renderer
 	assetsFS   embed.FS
 	isDev      bool
@@ -21,12 +22,13 @@ type renderer struct {
 	adapter    core.FrameworkAdapter
 }
 
-func newRenderer(assetsFS embed.FS, mode core.Mode, adapter core.FrameworkAdapter) (*renderer, error) {
+// NewHost constructs a Host for the given mode (dev, prod, or export build).
+func NewHost(assetsFS embed.FS, mode core.Mode, adapter core.FrameworkAdapter) (*Host, error) {
 	if adapter == nil {
 		adapter = framework.NewReactAdapter()
 	}
 
-	r := &renderer{
+	r := &Host{
 		isDev:    mode == core.ModeDev,
 		assetsFS: assetsFS,
 		adapter:  adapter,
@@ -42,7 +44,7 @@ func newRenderer(assetsFS embed.FS, mode core.Mode, adapter core.FrameworkAdapte
 	}
 }
 
-func (r *renderer) initExportMode() (*renderer, error) {
+func (r *Host) initExportMode() (*Host, error) {
 	exportDir := os.Getenv("BIFROST_EXPORT_DIR")
 	if exportDir == "" {
 		exportDir = ".bifrost"
@@ -54,8 +56,6 @@ func (r *renderer) initExportMode() (*renderer, error) {
 	}
 	r.manifest = man
 
-	// Use HasSSRBundles for build-time operations
-	// Static pages need SSR bundles for prerendering during export
 	if core.HasSSRBundles(man) {
 		if err := r.setupRuntimeForExport(exportDir); err != nil {
 			return nil, err
@@ -74,7 +74,7 @@ func loadManifestFromDisk(exportDir string) (*core.Manifest, error) {
 	return core.ParseManifest(data)
 }
 
-func (r *renderer) setupRuntimeForExport(exportDir string) error {
+func (r *Host) setupRuntimeForExport(exportDir string) error {
 	ssrTempDir, ssrCleanup, err := copySSRBundlesFromDisk(exportDir, r.manifest)
 	if err != nil {
 		return fmt.Errorf("failed to copy SSR bundles: %w", err)
@@ -91,7 +91,7 @@ func (r *renderer) setupRuntimeForExport(exportDir string) error {
 	return nil
 }
 
-func (r *renderer) initProdMode() (*renderer, error) {
+func (r *Host) initProdMode() (*Host, error) {
 	if r.assetsFS == (embed.FS{}) {
 		return nil, fmt.Errorf("embed.FS is required in production mode")
 	}
@@ -119,7 +119,7 @@ func loadManifestFromEmbed(assetsFS embed.FS) (*core.Manifest, error) {
 	return core.ParseManifest(data)
 }
 
-func (r *renderer) setupEmbeddedRuntime() error {
+func (r *Host) setupEmbeddedRuntime() error {
 	if !process.HasEmbeddedRuntime(r.assetsFS) {
 		return fmt.Errorf("embedded runtime not found: run 'bifrost-build' to generate production assets")
 	}
@@ -152,7 +152,7 @@ func (r *renderer) setupEmbeddedRuntime() error {
 	return nil
 }
 
-func (r *renderer) initDevMode() (*renderer, error) {
+func (r *Host) initDevMode() (*Host, error) {
 	client, err := process.NewRenderer(core.ModeDev, r.adapter.DevRendererSource())
 	if err != nil {
 		return nil, err
@@ -161,9 +161,22 @@ func (r *renderer) initDevMode() (*renderer, error) {
 	return r, nil
 }
 
-func (r *renderer) stop() error {
-	if r.client != nil {
-		return r.client.Stop()
+// Client returns the Bun renderer client, if started.
+func (h *Host) Client() *process.Renderer { return h.client }
+
+// Manifest returns the loaded manifest, if any.
+func (h *Host) Manifest() *core.Manifest { return h.manifest }
+
+// SSRTempDir is the directory holding extracted SSR bundles (prod/export).
+func (h *Host) SSRTempDir() string { return h.ssrTempDir }
+
+// IsDev is true when running in development mode.
+func (h *Host) IsDev() bool { return h.isDev }
+
+// Stop shuts down the renderer client.
+func (h *Host) Stop() error {
+	if h.client != nil {
+		return h.client.Stop()
 	}
 	return nil
 }
