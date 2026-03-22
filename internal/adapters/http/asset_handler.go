@@ -24,6 +24,14 @@ func cleanPath(raw string) (string, bool) {
 	return cleaned, true
 }
 
+func safeEmbedPath(raw string) (string, bool) {
+	rel, ok := cleanPath(raw)
+	if !ok {
+		return "", false
+	}
+	return path.Join(".bifrost", rel), true
+}
+
 func containsDotDot(p string) bool {
 	for {
 		idx := strings.Index(p, "..")

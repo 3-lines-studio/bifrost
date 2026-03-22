@@ -16,7 +16,6 @@ type ServePageInput struct {
 	Config          core.PageConfig
 	DefaultHTMLLang string
 	IsDev           bool
-	Mode            core.Mode
 	Manifest        *core.Manifest
 	EntryName       string
 	StaticPath      string
@@ -50,6 +49,22 @@ func NewPageService(renderer Renderer, fs FileSystem, adapter core.FrameworkAdap
 		renderer: renderer,
 		fs:       fs,
 		adapter:  adapter,
+	}
+}
+
+func (s *PageService) serveRenderedForPageMode(ctx context.Context, input ServePageInput) ServePageOutput {
+	switch input.Config.Mode {
+	case core.ModeClientOnly:
+		html, err := s.renderClientOnlyShell(input)
+		return ServePageOutput{
+			Action: core.ActionRenderClientOnlyShell,
+			HTML:   html,
+			Error:  err,
+		}
+	case core.ModeStaticPrerender:
+		return s.renderStaticPrerender(ctx, input)
+	default:
+		return s.renderSSR(ctx, input)
 	}
 }
 
@@ -102,38 +117,17 @@ func (s *PageService) ServePage(ctx context.Context, input ServePageInput) Serve
 					Error:  buildErr,
 				}
 			}
-
-			if input.Config.Mode == core.ModeClientOnly {
-				html, err := s.renderClientOnlyShell(input)
-				return ServePageOutput{
-					Action: core.ActionRenderClientOnlyShell,
-					HTML:   html,
-					Error:  err,
-				}
-			}
-			if input.Config.Mode == core.ModeStaticPrerender {
-				return s.renderStaticPrerender(ctx, input)
-			}
-			return s.renderSSR(ctx, input)
+			return s.serveRenderedForPageMode(ctx, input)
 		}
 		return ServePageOutput{
 			Action:     core.ActionNeedsSetup,
 			NeedsSetup: true,
 		}
 
-	case core.ActionRenderClientOnlyShell:
-		html, err := s.renderClientOnlyShell(input)
-		return ServePageOutput{
-			Action: core.ActionRenderClientOnlyShell,
-			HTML:   html,
-			Error:  err,
-		}
-
-	case core.ActionRenderStaticPrerender:
-		return s.renderStaticPrerender(ctx, input)
-
-	case core.ActionRenderSSR:
-		return s.renderSSR(ctx, input)
+	case core.ActionRenderClientOnlyShell,
+		core.ActionRenderStaticPrerender,
+		core.ActionRenderSSR:
+		return s.serveRenderedForPageMode(ctx, input)
 
 	default:
 		return ServePageOutput{

@@ -35,8 +35,8 @@ func DecidePageAction(req PageRequest, entry *ManifestEntry) PageDecision {
 		return decideProductionAction(req, entry)
 	}
 
-	needsSetup := req.Mode != ModeClientOnly && req.Mode != ModeStaticPrerender
-	if (req.Mode == ModeClientOnly || req.Mode == ModeStaticPrerender) && req.HasRenderer {
+	needsSetup := !IsStaticMode(req.Mode)
+	if IsStaticMode(req.Mode) && req.HasRenderer {
 		needsSetup = true
 	}
 
@@ -76,20 +76,19 @@ func decideClientOnlyAction(req PageRequest, entry *ManifestEntry) PageDecision 
 }
 
 func decideStaticPrerenderAction(req PageRequest, entry *ManifestEntry, normalizedPath string) PageDecision {
-	if req.HasManifest && entry != nil && entry.StaticRoutes != nil {
-		if htmlPath, ok := entry.StaticRoutes[normalizedPath]; ok {
+	if req.HasManifest && entry != nil {
+		if htmlPath, ok := LookupStaticRoute(entry, normalizedPath); ok {
 			return PageDecision{Action: ActionServeRouteFile, HTMLPath: htmlPath}
 		}
-		return PageDecision{Action: ActionNotFound}
+		if entry.StaticRoutes != nil {
+			return PageDecision{Action: ActionNotFound}
+		}
 	}
 	if req.StaticPath != "" {
 		return PageDecision{Action: ActionServeStaticFile, StaticPath: req.StaticPath}
 	}
-
-	if !req.IsDev {
-		return PageDecision{Action: ActionNotFound}
-	}
-	return PageDecision{Action: ActionRenderStaticPrerender}
+	// Production: no prerendered asset for this request.
+	return PageDecision{Action: ActionNotFound}
 }
 
 func ResolveRenderPath(isDev bool, ssrPath string, componentPath string) string {
@@ -102,17 +101,22 @@ func ResolveRenderPath(isDev bool, ssrPath string, componentPath string) string 
 	return ssrPath
 }
 
+// LookupStaticRoute returns the prerendered HTML path for a normalized URL path.
+func LookupStaticRoute(entry *ManifestEntry, normalizedPath string) (htmlPath string, ok bool) {
+	if entry == nil || entry.StaticRoutes == nil {
+		return "", false
+	}
+	htmlPath, ok = entry.StaticRoutes[normalizedPath]
+	return htmlPath, ok
+}
+
 func MatchStaticRoute(manifest *Manifest, entryName string, requestPath string) (htmlPath string, found bool) {
 	if manifest == nil {
 		return "", false
 	}
-
 	entry, ok := manifest.Entries[entryName]
-	if !ok || entry.StaticRoutes == nil {
+	if !ok {
 		return "", false
 	}
-
-	normalizedPath := NormalizePath(requestPath)
-	htmlPath, found = entry.StaticRoutes[normalizedPath]
-	return htmlPath, found
+	return LookupStaticRoute(&entry, NormalizePath(requestPath))
 }

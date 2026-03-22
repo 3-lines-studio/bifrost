@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"path"
 	"path/filepath"
-	"strings"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
 	"github.com/3-lines-studio/bifrost/internal/usecase"
@@ -71,10 +70,10 @@ func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	switch output.Action {
 	case core.ActionServeStaticFile:
-		h.serveStaticFile(w, req, output.StaticPath)
+		h.serveBifrostHTMLFile(w, req, output.StaticPath, "static")
 
 	case core.ActionServeRouteFile:
-		h.serveRouteFile(w, req, output.RoutePath)
+		h.serveBifrostHTMLFile(w, req, output.RoutePath, "route")
 
 	case core.ActionNotFound:
 		http.NotFound(w, req)
@@ -89,28 +88,17 @@ func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func safeEmbedPath(raw string) (string, bool) {
-	if containsDotDot(strings.ReplaceAll(raw, "\\", "/")) {
-		return "", false
+func (h *PageHandler) serveBifrostHTMLFile(w http.ResponseWriter, req *http.Request, logicalPath string, kind string) {
+	rel, ok := cleanPath(logicalPath)
+	if !ok {
+		h.serveError(w, req, fmt.Errorf("invalid %s file path: %s", kind, logicalPath))
+		return
 	}
-	cleaned := path.Clean("/" + raw)
-	cleaned = strings.TrimPrefix(cleaned, "/")
-	if cleaned == "" || cleaned == "." {
-		return "", false
-	}
-	return path.Join(".bifrost", cleaned), true
-}
-
-func (h *PageHandler) serveStaticFile(w http.ResponseWriter, req *http.Request, p string) {
 	if h.assetsFS != (embed.FS{}) {
-		embedPath, ok := safeEmbedPath(p)
-		if !ok {
-			h.serveError(w, req, fmt.Errorf("invalid static file path: %s", p))
-			return
-		}
+		embedPath := path.Join(".bifrost", rel)
 		data, err := h.assetsFS.ReadFile(embedPath)
 		if err != nil {
-			h.serveError(w, req, fmt.Errorf("failed to read static file %s: %w", embedPath, err))
+			h.serveError(w, req, fmt.Errorf("failed to read %s file %s: %w", kind, embedPath, err))
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -118,32 +106,7 @@ func (h *PageHandler) serveStaticFile(w http.ResponseWriter, req *http.Request, 
 		return
 	}
 
-	safePath := filepath.Join(".bifrost", filepath.FromSlash(path.Clean("/"+p)))
-	if !isPathSafe(safePath, ".bifrost") {
-		http.NotFound(w, req)
-		return
-	}
-	http.ServeFile(w, req, safePath)
-}
-
-func (h *PageHandler) serveRouteFile(w http.ResponseWriter, req *http.Request, htmlPath string) {
-	if h.assetsFS != (embed.FS{}) {
-		embedPath, ok := safeEmbedPath(htmlPath)
-		if !ok {
-			h.serveError(w, req, fmt.Errorf("invalid route file path: %s", htmlPath))
-			return
-		}
-		data, err := h.assetsFS.ReadFile(embedPath)
-		if err != nil {
-			h.serveError(w, req, fmt.Errorf("failed to read route file %s: %w", embedPath, err))
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(data)
-		return
-	}
-
-	safePath := filepath.Join(".bifrost", filepath.FromSlash(path.Clean("/"+htmlPath)))
+	safePath := filepath.Join(".bifrost", filepath.FromSlash(rel))
 	if !isPathSafe(safePath, ".bifrost") {
 		http.NotFound(w, req)
 		return
