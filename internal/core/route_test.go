@@ -97,4 +97,5 @@ func TestPageOptions(t *testing.T) {
 			t.Errorf("Expected 1 option, got %d", len(route.Options))
 		}
 	})
+
 }

@@ -264,7 +264,7 @@ For SSR pages, Bifrost streams the HTML response in two phases: the document hea
 
 **Reverse proxies:** If you use nginx, Caddy, or another reverse proxy in front of your Go server, turn off response buffering for HTML routes (for example, in nginx, `proxy_buffering off` in the relevant `location`). Otherwise the proxy may wait for the full response and you will not see a better time to first byte or First Contentful Paint.
 
-**React Suspense:** Incremental body streaming via `renderToReadableStream` is not enabled in Bifrost yet; it remains a possible future option for apps that rely on Suspense during SSR.
+**React body streaming (`renderToReadableStream`):** All SSR pages use `renderToReadableStream` for the page body; Bun forwards byte chunks after the usual head flush. **Suspense** (or other deferred server work) makes progressive HTML visible; synchronous trees still work but gain little. If streaming fails, Bifrost falls back to `renderToString` for that request. Errors that occur after bytes have been sent cannot be turned into an HTTP 500.
 
 ### Static Pages
 

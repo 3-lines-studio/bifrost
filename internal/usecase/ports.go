@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"io"
 
 	"github.com/3-lines-studio/bifrost/internal/adapters/fs"
 	"github.com/3-lines-studio/bifrost/internal/core"
@@ -10,6 +11,7 @@ import (
 type Renderer interface {
 	Render(componentPath string, props map[string]any) (core.RenderedPage, error)
 	RenderChunked(ctx context.Context, componentPath string, props map[string]any, onHead func(head string) error, onBody func(body string) error) error
+	RenderBodyStream(ctx context.Context, componentPath string, props map[string]any, w io.Writer, flush func(), onHead func(head string) error) error
 	Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error)
 	BuildSSR(entrypoints []string, outdir string) error
 }

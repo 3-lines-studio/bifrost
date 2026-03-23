@@ -60,6 +60,7 @@ func main() {
 			return map[string]any{"name": "World"}, nil
 		})),
 		bifrost.Page("/simple", "./pages/home.tsx"),
+		bifrost.Page("/stream-demo", "./pages/stream-demo.tsx"),
 		bifrost.Page("/user/{id}", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
 			return map[string]any{"name": r.PathValue("id")}, nil
 		})),

@@ -3,7 +3,6 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -164,36 +163,36 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 		}
 	}
 
-	streamFn := func(w http.ResponseWriter) error {
-		flush := func() {
+	flush := func(w http.ResponseWriter) func() {
+		return func() {
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}
 		}
+	}
+
+	streamFn := func(w http.ResponseWriter) error {
+		doFlush := flush(w)
 		rCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		return s.renderer.RenderChunked(rCtx, renderPath, propsForReact,
+		err := s.renderer.RenderBodyStream(rCtx, renderPath, propsForReact, w, doFlush,
 			func(head string) error {
-				// Only commit 200 after Bun confirms a successful render (not an error envelope).
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusOK)
 				if err := core.WriteHTMLPreamble(w, head, assets.Script, assets.CriticalCSS, core.StylesheetHrefs(assets.CSS, assets.CSSFiles), assets.Chunks, lang, htmlClass); err != nil {
 					return err
 				}
-				flush()
+				doFlush()
 				return nil
-			},
-			func(body string) error {
-				if _, err := io.WriteString(w, body); err != nil {
-					return err
-				}
-				if err := core.WriteHTMLSuffix(w, propsJSON, assets.Script, assets.Chunks); err != nil {
-					return err
-				}
-				flush()
-				return nil
-			},
-		)
+			})
+		if err != nil {
+			return err
+		}
+		if err := core.WriteHTMLSuffix(w, propsJSON, assets.Script, assets.Chunks); err != nil {
+			return err
+		}
+		doFlush()
+		return nil
 	}
 
 	return ServePageOutput{

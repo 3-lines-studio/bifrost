@@ -22,8 +22,9 @@ interface Result {
 }
 
 interface RenderResult {
-  html: string;
+  html?: string;
   head?: string;
+  stream?: ReadableStream<Uint8Array>;
 }
 
 function serializeError(error: unknown): {
@@ -81,8 +82,43 @@ function ndjsonRenderResponse(head: string, html: string): Response {
   );
 }
 
+function headThenRawStreamResponse(
+  head: string,
+  htmlStream: ReadableStream<Uint8Array>,
+): Response {
+  const enc = new TextEncoder();
+  const headLine = enc.encode(JSON.stringify({ head }) + "\n");
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(headLine);
+        const reader = htmlStream.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) controller.enqueue(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        controller.close();
+      },
+    }),
+    {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+      },
+    },
+  );
+}
+
 async function handleRender(req: Bun.BunRequest): Promise<Response> {
-  let body: { path?: string; props?: Record<string, unknown> };
+  let body: {
+    path?: string;
+    props?: Record<string, unknown>;
+    streamBody?: boolean;
+  };
   try {
     body = await req.json();
   } catch (err) {
@@ -90,7 +126,8 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
     return createError(`Failed to parse request: ${message}`);
   }
 
-  const { path, props } = body;
+  const { path, props, streamBody } = body;
+  const wantStream = streamBody === true;
 
   if (!path) {
     return createError("Missing 'path' in request");
@@ -106,7 +143,12 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
       );
     }
 
-    const result: RenderResult = await mod.render(props || {});
+    const result: RenderResult = await mod.render(props || {}, {
+      streamBody: wantStream,
+    });
+    if (result.stream instanceof ReadableStream) {
+      return headThenRawStreamResponse(result.head ?? "", result.stream);
+    }
     return ndjsonRenderResponse(result.head ?? "", result.html ?? "");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
