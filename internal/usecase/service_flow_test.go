@@ -73,6 +73,11 @@ func TestPageServiceDevSSRBuildsThenStreams(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "export default function Page(){ return <div>Hello</div> }")
 
 	renderer := &fakeRenderer{
+		buildSSRFn: func(entrypoints []string, outdir string) error {
+			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
+			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
+			return nil
+		},
 		streamFn: func(ctx context.Context, componentPath string, props map[string]any, w http.ResponseWriter, flush func(), onHead func(head string) error) error {
 			if componentPath == "" {
 				t.Fatal("expected render path")
@@ -132,7 +137,13 @@ func TestPageServiceStaticPrerenderReturnsNotFoundForMissingPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "blog.tsx"), "export default function Page(){ return <div>Blog</div> }")
 
-	renderer := &fakeRenderer{}
+	renderer := &fakeRenderer{
+		buildSSRFn: func(entrypoints []string, outdir string) error {
+			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
+			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
+			return nil
+		},
+	}
 	service := NewPageService(renderer, nil, nil)
 
 	restore := chdirForTest(t, tmpDir)
@@ -373,6 +384,13 @@ func main() {
 			}
 			return result, nil
 		},
+		buildSSRFn: func(entrypoints []string, outdir string) error {
+			for _, entryPath := range entrypoints {
+				name := strings.TrimSuffix(filepath.Base(entryPath), filepath.Ext(entryPath))
+				writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
+			}
+			return nil
+		},
 	}
 	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
 
@@ -391,6 +409,13 @@ func main() {
 	}
 	if len(renderer.buildSSRBatchSizes) != 1 || renderer.buildSSRBatchSizes[0] != 2 {
 		t.Fatalf("expected one SSR batch of size 2, got %v", renderer.buildSSRBatchSizes)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmpDir, ".bifrost", "ssr", "pages-home-entry-ssr.js")); err != nil {
+		t.Fatalf("expected home SSR bundle: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, ".bifrost", "ssr", "pages-about-entry-ssr.js")); err != nil {
+		t.Fatalf("expected about SSR bundle: %v", err)
 	}
 }
 
@@ -416,6 +441,8 @@ func main() {
 			if len(entrypoints) > 1 {
 				return errors.New("batch failed")
 			}
+			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
+			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
 			return nil
 		},
 	}
@@ -436,6 +463,49 @@ func main() {
 	}
 	if got := renderer.buildSSRBatchSizes; len(got) != 3 || got[0] != 2 || got[1] != 1 || got[2] != 1 {
 		t.Fatalf("unexpected SSR batch sizes: %v", got)
+	}
+}
+
+func TestBuildProjectFailsWhenMultipleNestedSSRBundlesExist(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main
+func main() {
+	_ = Page("/", "./pages/home.tsx")
+}`)
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "<title>Home</title>")
+
+	renderer := &fakeRenderer{
+		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+			return map[string]core.ClientBuildResult{
+				entryNames[0]: {Script: "/dist/" + entryNames[0] + ".js"},
+			}, nil
+		},
+		buildSSRFn: func(entrypoints []string, outdir string) error {
+			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
+			writeTestFile(t, filepath.Join(outdir, ".bifrost", "entries", name+".js"), "// misplaced ssr")
+			writeTestFile(t, filepath.Join(outdir, "nested", name+".js"), "// misplaced ssr duplicate")
+			return nil
+		},
+	}
+	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
+
+	result := service.BuildProject(context.Background(), BuildInput{
+		MainFile:    filepath.Join(tmpDir, "main.go"),
+		OriginalCwd: tmpDir,
+	})
+	if result.Error != nil {
+		t.Fatalf("BuildProject() error = %v", result.Error)
+	}
+	if result.Success {
+		t.Fatal("expected build failure when multiple nested SSR bundles exist")
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, ".bifrost", "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if strings.Contains(string(data), `"ssr":`) {
+		t.Fatalf("did not expect SSR manifest entry when SSR bundle is missing: %s", string(data))
 	}
 }
 

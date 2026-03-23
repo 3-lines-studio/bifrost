@@ -28,12 +28,17 @@ const (
 )
 
 var (
-	//go:embed bun_renderer_dev.ts
-	BunRendererDevSource string
-
-	//go:embed bun_renderer_prod.ts
-	BunRendererProdSource string
+	//go:embed react_runtime.ts
+	ReactRuntimeSource string
 )
+
+func RuntimeSource(mode core.Mode) string {
+	tailwindPlugin := `(await import("bun-plugin-tailwind")).default`
+	if mode == core.ModeProd {
+		tailwindPlugin = "undefined"
+	}
+	return strings.ReplaceAll(ReactRuntimeSource, "BIFROST_TAILWIND_PLUGIN", tailwindPlugin)
+}
 
 type Renderer struct {
 	cmd     *exec.Cmd
@@ -71,10 +76,7 @@ func removeStaleSocket(path string) {
 
 func NewRenderer(mode core.Mode, source string, extraEnv ...string) (*Renderer, error) {
 	if source == "" {
-		source = BunRendererProdSource
-		if mode == core.ModeDev {
-			source = BunRendererDevSource
-		}
+		source = RuntimeSource(mode)
 	}
 
 	cwd, err := os.Getwd()

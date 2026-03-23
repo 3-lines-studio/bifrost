@@ -33,6 +33,23 @@ Bifrost is organized into focused internal packages:
 - `internal/adapters/cli` — Terminal output and build reports
 - Root `bifrost` package — Public `App` API (`New`, `Page`, `Wrap`, …)
 
+### Go vs TypeScript Boundary
+
+TypeScript is intentionally minimal in Bifrost.
+
+- TypeScript is only for Bun-specific capabilities that Go does not provide directly:
+  - rendering React components inside the Bun runtime
+  - invoking `Bun.build`
+  - serializing raw render/build results back to Go
+- Everything else belongs in Go:
+  - build orchestration and fallback behavior
+  - manifest generation
+  - artifact path normalization
+  - filesystem layout decisions and cleanup
+  - validation and user-facing build errors
+
+If a behavior can be implemented in Go with equivalent correctness, it must live in Go, not in TypeScript.
+
 ## Quick Start
 
 ```go
@@ -485,6 +502,7 @@ myapp/
 4. **Strict production**: Always embed `.bifrost` and run the build CLI (`go run github.com/3-lines-studio/bifrost/cmd/build@latest ./main.go`, or an installed `build` binary from `cmd/build`)
 5. **Handle errors in props loaders**: Return proper errors or redirects
 6. **Keep props minimal**: Pass only necessary data to React
+7. **Keep TypeScript minimal**: Treat TS as a thin Bun adapter; keep policy, validation, and artifact logic in Go
 
 ## Extension Points
 

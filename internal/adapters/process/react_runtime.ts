@@ -5,9 +5,8 @@ const socket = process.env.BIFROST_SOCKET;
 const isDev =
   process.env.BIFROST_DEV === "1" || process.env.BIFROST_DEV === "true";
 
-const tailwindPlugin = (await import("bun-plugin-tailwind")).default;
+const tailwindPlugin: Bun.BunPlugin | undefined = BIFROST_TAILWIND_PLUGIN;
 
-// --- Shared with assets/build_graph.ts (inlined: Bun stdin resolves imports from caller CWD) ---
 interface ErrorDetail {
   message: string;
   position?: {
@@ -26,6 +25,12 @@ interface BuildEntryResult {
   css: string;
   cssFiles?: string[];
   chunks: string[];
+}
+
+interface RenderResult {
+  html?: string;
+  head?: string;
+  stream?: ReadableStream<Uint8Array>;
 }
 
 function serializeError(error: unknown): {
@@ -67,6 +72,72 @@ function createError(
   }
 
   return new Response(JSON.stringify(result) + "\n");
+}
+
+function singleLineRenderResponse(head: string, html: string): Response {
+  return new Response(JSON.stringify({ head, html }) + "\n", {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+    },
+  });
+}
+
+function ndjsonRenderResponse(head: string, html: string): Response {
+  const enc = new TextEncoder();
+  const line1 = JSON.stringify({ head }) + "\n";
+  const line2 = JSON.stringify({ html }) + "\n";
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode(line1));
+        controller.enqueue(enc.encode(line2));
+        controller.close();
+      },
+    }),
+    {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+      },
+    },
+  );
+}
+
+function headThenRawStreamResponse(
+  head: string,
+  htmlStream: ReadableStream<Uint8Array>,
+): Response {
+  const enc = new TextEncoder();
+  const headLine = enc.encode(JSON.stringify({ head }) + "\n");
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(headLine);
+        const reader = htmlStream.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) controller.enqueue(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        controller.close();
+      },
+    }),
+    {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+      },
+    },
+  );
+}
+
+function renderResponse(head: string, html: string): Response {
+  if (isDev) {
+    return ndjsonRenderResponse(head, html);
+  }
+  return singleLineRenderResponse(head, html);
 }
 
 function entryStemMatchesJs(base: string, stem: string): boolean {
@@ -303,27 +374,17 @@ function buildEntriesPayload(
   return out;
 }
 
-// --- End inlined build_graph ---
-
-interface Result {
-  ok?: boolean;
-  entries?: Record<string, BuildEntryResult>;
-  error?: {
-    message: string;
-    stack?: string;
-    errors?: ErrorDetail[];
-  };
-}
-
-interface RenderResult {
-  html: string;
-  head?: string;
-}
-
-const componentCache = new Map<string, { Component: any; Head?: any }>();
+const componentCache = new Map<
+  string,
+  { Component: any; Head?: any }
+>();
 
 async function handleRender(req: Bun.BunRequest): Promise<Response> {
-  let body: { path?: string; props?: Record<string, unknown> };
+  let body: {
+    path?: string;
+    props?: Record<string, unknown>;
+    streamBody?: boolean;
+  };
   try {
     body = await req.json();
   } catch (err) {
@@ -331,20 +392,30 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
     return createError(`Failed to parse request: ${message}`);
   }
 
-  const { path, props } = body;
+  const { path, props, streamBody } = body;
+  const wantStream = streamBody === true;
 
   if (!path) {
     return createError("Missing 'path' in request");
   }
 
-  const importPath = isDev ? `${path}?t=${Date.now()}` : path;
+  const importPath = isDev
+    ? `${path}?t=${Date.now()}`
+    : path.startsWith("/")
+      ? "file://" + path
+      : path;
 
   try {
     const mod = await import(importPath);
 
     if (typeof mod.render === "function") {
-      const result: RenderResult = await mod.render(props || {});
-      return new Response(JSON.stringify(result) + "\n");
+      const result: RenderResult = await mod.render(props || {}, {
+        streamBody: wantStream,
+      });
+      if (result.stream instanceof ReadableStream) {
+        return headThenRawStreamResponse(result.head ?? "", result.stream);
+      }
+      return renderResponse(result.head ?? "", result.html ?? "");
     }
 
     const cached = componentCache.get(path);
@@ -377,16 +448,6 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
 
     const componentProps = props || {};
 
-    let html: string;
-    try {
-      const el = React.createElement(Component, componentProps);
-      html = renderToString(el);
-    } catch (renderErr) {
-      const message =
-        renderErr instanceof Error ? renderErr.message : String(renderErr);
-      return createError(`Render error: ${message}`, renderErr);
-    }
-
     let head = "";
     if (Head) {
       try {
@@ -397,8 +458,36 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
       }
     }
 
-    const result: RenderResult = { html, head };
-    return new Response(JSON.stringify(result) + "\n");
+    const el = React.createElement(Component, componentProps);
+
+    if (wantStream) {
+      try {
+        const { renderToReadableStream } = await import("react-dom/server");
+        const stream = await renderToReadableStream(el);
+        return headThenRawStreamResponse(head, stream);
+      } catch {
+        let html: string;
+        try {
+          html = renderToString(el);
+        } catch (renderErr) {
+          const message =
+            renderErr instanceof Error ? renderErr.message : String(renderErr);
+          return createError(`Render error: ${message}`, renderErr);
+        }
+        return renderResponse(head, html);
+      }
+    }
+
+    let html: string;
+    try {
+      html = renderToString(el);
+    } catch (renderErr) {
+      const message =
+        renderErr instanceof Error ? renderErr.message : String(renderErr);
+      return createError(`Render error: ${message}`, renderErr);
+    }
+
+    return renderResponse(head, html);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return createError(`Failed to import component: ${message}`, err);
@@ -431,13 +520,14 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
 
   const buildTarget = target === "bun" ? "bun" : "browser";
   const isSSR = buildTarget === "bun";
-
   const hashClientAssets =
-    (process.env.BIFROST_PROD === "1" || process.env.BIFROST_PROD === "true") &&
+    (process.env.BIFROST_PROD === "1" ||
+      process.env.BIFROST_PROD === "true") &&
     !isSSR;
 
   try {
-    const plugins = isSSR ? [] : [tailwindPlugin];
+    const plugins =
+      isSSR || !tailwindPlugin ? [] : [tailwindPlugin];
 
     const naming = hashClientAssets
       ? {
@@ -458,7 +548,9 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
       naming,
       plugins,
       metafile: true,
-      ...(!isDev ? { define: { "process.env.NODE_ENV": '"production"' } } : {}),
+      ...(!isDev
+        ? { define: { "process.env.NODE_ENV": '"production"' } }
+        : {}),
     });
 
     if (!result.success) {
@@ -481,11 +573,7 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
       return createError("Build failed", { errors });
     }
 
-    if (
-      !hashClientAssets &&
-      entryNames &&
-      entryNames.length === entrypoints.length
-    ) {
+    if (!hashClientAssets && entryNames && entryNames.length === entrypoints.length) {
       for (let i = 0; i < entrypoints.length; i++) {
         const entryPath = entrypoints[i];
         const entryName = entryNames[i];
@@ -522,16 +610,12 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return createError(
-        `Build output mapping failed: ${message}`,
-        err as Error,
-      );
+      return createError(`Build output mapping failed: ${message}`, err as Error);
     }
 
-    const response: Result = { ok: true, entries };
-    return new Response(JSON.stringify(response) + "\n");
+    return new Response(JSON.stringify({ ok: true, entries }) + "\n");
   } catch (err) {
-    return createError("Build failed", err);
+    return createError("Build failed", err as Error);
   }
 }
 

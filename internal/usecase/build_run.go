@@ -217,6 +217,8 @@ func (s *BuildService) buildSSRBundles(run *buildRun) {
 		}
 	}
 
+	s.validateSSRBundles(run, pagesToBuild, &errors)
+
 	for _, entryName := range entryNames {
 		if run.ssrFailedFor(entryName) {
 			continue
@@ -249,6 +251,22 @@ func (s *BuildService) buildSSRBundlesIndividually(run *buildRun, pages []buildP
 		if err := s.renderer.BuildSSR([]string{ssrEntryPath}, run.paths.ssrDir); err != nil {
 			run.markSSRFailed(page.entryName)
 			*errors = append(*errors, parseBuildError(page.entryName, err))
+		}
+	}
+}
+
+func (s *BuildService) validateSSRBundles(run *buildRun, pages []buildPage, errors *[]BuildError) {
+	for _, page := range pages {
+		if run.ssrFailedFor(page.entryName) {
+			continue
+		}
+		if _, err := normalizeSSRBundle(run.paths.ssrDir, page.entryName); err != nil {
+			run.markSSRFailed(page.entryName)
+			*errors = append(*errors, BuildError{
+				Page:    page.config.ComponentPath,
+				Message: "SSR bundle missing after build",
+				Details: []string{err.Error()},
+			})
 		}
 	}
 }

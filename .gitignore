@@ -9,3 +9,4 @@ example
 !example/
 go.work
 go.work.sum
+.gocache/

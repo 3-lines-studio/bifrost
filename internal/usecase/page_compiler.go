@@ -115,6 +115,9 @@ func CompileDevPageOnDemand(renderer Renderer, cwd string, entryName string, con
 	if err := renderer.BuildSSR([]string{ssrEntryFile}, ssrDir); err != nil {
 		return fmt.Errorf("failed to build SSR entry: %w", err)
 	}
+	if _, err := normalizeSSRBundle(ssrDir, entryName); err != nil {
+		return fmt.Errorf("failed to finalize SSR entry: %w", err)
+	}
 
 	return nil
 }

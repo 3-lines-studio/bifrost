@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"strings"
 
+	"github.com/3-lines-studio/bifrost/internal/adapters/process"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
@@ -17,11 +18,6 @@ var (
 	//go:embed react_client_only.txt
 	reactClientOnlyTemplate string
 
-	//go:embed assets/react_dev.ts
-	reactDevRendererSource string
-
-	//go:embed assets/react_prod.ts
-	reactProdRendererSource string
 )
 
 type ReactAdapter struct{}
@@ -77,11 +73,11 @@ func (a *ReactAdapter) ClientEntryTemplate(mode core.PageMode) string {
 }
 
 func (a *ReactAdapter) DevRendererSource() string {
-	return reactDevRendererSource
+	return process.RuntimeSource(core.ModeDev)
 }
 
 func (a *ReactAdapter) ProdRendererSource() string {
-	return reactProdRendererSource
+	return process.RuntimeSource(core.ModeProd)
 }
 
 func (a *ReactAdapter) BuildPlugins() []string {

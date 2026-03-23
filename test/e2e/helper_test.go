@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -244,6 +245,9 @@ func normalizeHTML(html string) string {
 
 	// Normalize all file paths in error stack traces
 	html = regexp.MustCompile(`\(/(?:home|Users)/[^)]+\)`).ReplaceAllString(html, "([FILE_PATH])")
+
+	// Async stack labels vary between Bun/runtime source shapes.
+	html = strings.ReplaceAll(html, "async handleRender", "handleRender")
 
 	return html
 }
