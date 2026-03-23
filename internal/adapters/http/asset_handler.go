@@ -2,6 +2,8 @@ package http
 
 import (
 	"embed"
+	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path"
@@ -117,7 +119,7 @@ func serveBifrostFile(w http.ResponseWriter, req *http.Request, assetsFS embed.F
 
 func serveProjectFile(w http.ResponseWriter, req *http.Request, assetsFS embed.FS, root string, cleaned string, fromEmbed bool, contentType string) error {
 	if fromEmbed {
-		return serveFileFromEmbed(w, assetsFS, path.Join(root, cleaned), contentType)
+		return serveFileFromEmbed(w, req, assetsFS, path.Join(root, cleaned), contentType)
 	}
 	return serveFileFromDisk(w, req, filepath.Join(root, cleaned), root, contentType)
 }
@@ -137,12 +139,24 @@ func serveFileFromDisk(w http.ResponseWriter, req *http.Request, fullPath string
 	return nil
 }
 
-func serveFileFromEmbed(w http.ResponseWriter, assetsFS embed.FS, embedPath string, contentType string) error {
-	data, err := assetsFS.ReadFile(embedPath)
+func serveFileFromEmbed(w http.ResponseWriter, req *http.Request, assetsFS embed.FS, embedPath string, contentType string) error {
+	file, err := assetsFS.Open(embedPath)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = file.Close() }()
+
+	info, err := file.Stat()
+	if err != nil || info.IsDir() {
+		return os.ErrNotExist
+	}
+
+	seeker, ok := file.(io.ReadSeeker)
+	if !ok {
+		return fs.ErrInvalid
+	}
+
 	w.Header().Set("Content-Type", contentType)
-	_, _ = w.Write(data)
+	http.ServeContent(w, req, info.Name(), info.ModTime(), seeker)
 	return nil
 }

@@ -7,7 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/3-lines-studio/bifrost/internal/core"
 )
+
+//go:embed testdata/embedded_files/app.js
+var embeddedAssetFS embed.FS
 
 func TestCleanPath(t *testing.T) {
 	tests := []struct {
@@ -200,5 +205,44 @@ func TestSafeEmbedPath(t *testing.T) {
 				t.Errorf("safeEmbedPath(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAssetHandler_ServesEmbeddedFileWithHead(t *testing.T) {
+	req := httptest.NewRequest(http.MethodHead, "/dist/app.js", nil)
+	w := httptest.NewRecorder()
+	err := serveProjectFile(w, req, embeddedAssetFS, "testdata/embedded_files", "app.js", true, core.GetContentType("app.js"))
+	if err != nil {
+		t.Fatalf("serveProjectFile() error = %v", err)
+	}
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if body := w.Body.String(); body != "" {
+		t.Fatalf("expected empty HEAD body, got %q", body)
+	}
+	if got := w.Header().Get("Content-Length"); got == "" {
+		t.Fatal("expected Content-Length header")
+	}
+}
+
+func TestAssetHandler_ServesEmbeddedFileWithRange(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/dist/app.js", nil)
+	req.Header.Set("Range", "bytes=0-6")
+	w := httptest.NewRecorder()
+	err := serveProjectFile(w, req, embeddedAssetFS, "testdata/embedded_files", "app.js", true, core.GetContentType("app.js"))
+	if err != nil {
+		t.Fatalf("serveProjectFile() error = %v", err)
+	}
+
+	if w.Code != http.StatusPartialContent {
+		t.Fatalf("expected 206, got %d", w.Code)
+	}
+	if got := w.Body.String(); got != "console" {
+		t.Fatalf("expected partial body %q, got %q", "console", got)
+	}
+	if got := w.Header().Get("Content-Range"); got == "" {
+		t.Fatal("expected Content-Range header")
 	}
 }

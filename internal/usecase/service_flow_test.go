@@ -272,6 +272,89 @@ func main() {
 	}
 }
 
+func TestExportStaticPages_UsesRouteSpecificCriticalCSS(t *testing.T) {
+	tmpDir := t.TempDir()
+	distDir := filepath.Join(tmpDir, "dist")
+	if err := os.MkdirAll(distDir, 0o755); err != nil {
+		t.Fatalf("mkdir dist: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(distDir, "blog.css"), []byte(".hero{color:red}.cta{color:blue}"), 0o644); err != nil {
+		t.Fatalf("write css: %v", err)
+	}
+
+	renderer := &fakeRenderer{
+		renderFn: func(componentPath string, props map[string]any) (core.RenderedPage, error) {
+			switch props["kind"] {
+			case "hero":
+				return core.RenderedPage{Body: `<div class="hero">Hero</div>`}, nil
+			case "cta":
+				return core.RenderedPage{Body: `<button class="cta">CTA</button>`}, nil
+			default:
+				return core.RenderedPage{Body: `<div>default</div>`}, nil
+			}
+		},
+	}
+
+	routes := []core.Route{
+		core.Page("/blog/{slug}", "./pages/blog.tsx", core.WithStaticData(func(context.Context) ([]core.StaticPathData, error) {
+			return []core.StaticPathData{
+				{Path: "/blog/hero", Props: map[string]any{"kind": "hero"}},
+				{Path: "/blog/cta", Props: map[string]any{"kind": "cta"}},
+			}, nil
+		})),
+	}
+
+	entryName := core.EntryNameForPath("./pages/blog.tsx")
+	manifest := &core.Manifest{
+		Entries: map[string]core.ManifestEntry{
+			entryName: {
+				Script:      "/dist/blog.js",
+				CriticalCSS: ".hero{color:red}",
+				CSS:         "/dist/blog.css",
+				Mode:        "static",
+			},
+		},
+	}
+
+	err := ExportStaticPages(ExportStaticPagesInput{
+		OutputDir: tmpDir,
+		Routes:    routes,
+		Manifest:  manifest,
+		AppConfig: &core.Config{DefaultHTMLLang: "en"},
+		SSBundlePath: func(string) string {
+			return "/ssr/blog-ssr.js"
+		},
+		Renderer: renderer,
+	})
+	if err != nil {
+		t.Fatalf("ExportStaticPages() error = %v", err)
+	}
+
+	heroHTML, err := os.ReadFile(filepath.Join(tmpDir, "pages", "routes", "blog", "hero", "index.html"))
+	if err != nil {
+		t.Fatalf("read hero html: %v", err)
+	}
+	ctaHTML, err := os.ReadFile(filepath.Join(tmpDir, "pages", "routes", "blog", "cta", "index.html"))
+	if err != nil {
+		t.Fatalf("read cta html: %v", err)
+	}
+
+	heroDoc := string(heroHTML)
+	ctaDoc := string(ctaHTML)
+	if !strings.Contains(heroDoc, ".hero{color:red}") {
+		t.Fatalf("expected hero critical CSS in hero route: %s", heroDoc)
+	}
+	if strings.Contains(heroDoc, ".cta{color:blue}") {
+		t.Fatalf("did not expect cta critical CSS in hero route: %s", heroDoc)
+	}
+	if !strings.Contains(ctaDoc, ".cta{color:blue}") {
+		t.Fatalf("expected cta critical CSS in cta route: %s", ctaDoc)
+	}
+	if strings.Contains(ctaDoc, ".hero{color:red}") {
+		t.Fatalf("did not expect hero critical CSS in cta route: %s", ctaDoc)
+	}
+}
+
 func TestBuildProjectBatchesSSRBundles(t *testing.T) {
 	tmpDir := t.TempDir()
 	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main

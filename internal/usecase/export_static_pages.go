@@ -31,6 +31,7 @@ func ExportStaticPages(in ExportStaticPagesInput) error {
 	exportManifest := &core.Manifest{
 		Entries: make(map[string]core.ManifestEntry),
 	}
+	cache := stylesheetCache{byKey: make(map[string]string)}
 
 	for _, route := range in.Routes {
 		config := core.PageConfigFromRoute(route)
@@ -95,15 +96,9 @@ func ExportStaticPages(in ExportStaticPagesInput) error {
 			criticalCSS := manifestEntry.CriticalCSS
 			styleHrefs := core.StylesheetHrefs(manifestEntry.CSS, manifestEntry.CSSFiles)
 			if len(styleHrefs) > 0 {
-				var fullCSS strings.Builder
-				for _, href := range styleHrefs {
-					cssPath := filepath.Join(in.OutputDir, filepath.FromSlash(strings.TrimPrefix(href, "/")))
-					if cssBytes, err := os.ReadFile(cssPath); err == nil {
-						fullCSS.Write(cssBytes)
-					}
-				}
-				if fullCSS.Len() > 0 {
-					if extracted := core.ExtractCriticalCSS(page.Head+page.Body, fullCSS.String(), core.DefaultCriticalCSSMaxBytes); extracted != "" {
+				fullCSS := cache.load(in.OutputDir, styleHrefs)
+				if fullCSS != "" {
+					if extracted := core.ExtractCriticalCSS(page.Head+page.Body, fullCSS, core.DefaultCriticalCSSMaxBytes); extracted != "" {
 						criticalCSS = extracted
 					}
 				}

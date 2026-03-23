@@ -9,11 +9,19 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
+type stylesheetCache struct {
+	byKey map[string]string
+}
+
 func (s *BuildService) populateCriticalCSS(ctx context.Context, run *buildRun) {
 	if run.manifest == nil {
 		return
 	}
+	cache := stylesheetCache{byKey: make(map[string]string)}
 	for _, page := range run.pages {
+		if page.config.Mode == core.ModeStaticPrerender {
+			continue
+		}
 		entry, ok := run.manifest.Entries[page.entryName]
 		if !ok {
 			continue
@@ -28,23 +36,12 @@ func (s *BuildService) populateCriticalCSS(ctx context.Context, run *buildRun) {
 			continue
 		}
 
-		var fullCSS strings.Builder
-		for _, href := range hrefs {
-			cssPath := resolveBuiltAssetPath(run.paths.bifrostDir, href)
-			if cssPath == "" {
-				continue
-			}
-			cssBytes, err := os.ReadFile(cssPath)
-			if err != nil {
-				continue
-			}
-			fullCSS.Write(cssBytes)
-		}
-		if fullCSS.Len() == 0 {
+		fullCSS := cache.load(run.paths.bifrostDir, hrefs)
+		if fullCSS == "" {
 			continue
 		}
 
-		entry.CriticalCSS = core.ExtractCriticalCSS(htmlDoc, fullCSS.String(), core.DefaultCriticalCSSMaxBytes)
+		entry.CriticalCSS = core.ExtractCriticalCSS(htmlDoc, fullCSS, core.DefaultCriticalCSSMaxBytes)
 		run.manifest.Entries[page.entryName] = entry
 	}
 }
@@ -90,4 +87,31 @@ func resolveBuiltAssetPath(bifrostDir string, href string) string {
 		return ""
 	}
 	return filepath.Join(bifrostDir, rel)
+}
+
+func (c *stylesheetCache) load(root string, hrefs []string) string {
+	if len(hrefs) == 0 {
+		return ""
+	}
+	key := root + "\x00" + strings.Join(hrefs, "\x00")
+	if css, ok := c.byKey[key]; ok {
+		return css
+	}
+
+	var fullCSS strings.Builder
+	for _, href := range hrefs {
+		cssPath := resolveBuiltAssetPath(root, href)
+		if cssPath == "" {
+			continue
+		}
+		cssBytes, err := os.ReadFile(cssPath)
+		if err != nil {
+			continue
+		}
+		fullCSS.Write(cssBytes)
+	}
+
+	css := fullCSS.String()
+	c.byKey[key] = css
+	return css
 }
