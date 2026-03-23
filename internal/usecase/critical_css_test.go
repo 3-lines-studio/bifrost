@@ -53,6 +53,9 @@ func TestWriteClientOnlyHTML_IncludesCriticalAndStylesheet(t *testing.T) {
 	if !strings.Contains(html, `href="/dist/page.css"`) {
 		t.Fatal("expected stylesheet link")
 	}
+	if !strings.Contains(html, `media="print"`) {
+		t.Fatal("expected deferred non-critical stylesheet when critical CSS is present")
+	}
 }
 
 func TestWriteClientOnlyHTML_MultipleStylesheets(t *testing.T) {
@@ -115,5 +118,8 @@ func TestPageServiceRenderPageHTML_IncludesCriticalAndStylesheet(t *testing.T) {
 	}
 	if !strings.Contains(html, `href="/dist/home.css"`) || !strings.Contains(html, `href="/dist/extra.css"`) {
 		t.Fatal("expected both stylesheet links")
+	}
+	if strings.Count(html, `media="print"`) != 2 {
+		t.Fatal("expected deferred load for each non-critical stylesheet")
 	}
 }
