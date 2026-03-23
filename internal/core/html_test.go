@@ -5,6 +5,40 @@ import (
 	"testing"
 )
 
+func TestPreambleAndSuffix_MatchesRenderHTMLShell(t *testing.T) {
+	const body = "<div>Hello</div>"
+	props := map[string]any{"name": "World"}
+	scriptSrc := "/dist/page.js"
+	headHTML := "<title>Test</title>"
+	criticalCSS := ".hero{display:block}"
+	cssHrefs := []string{"/dist/page.css"}
+	chunks := []string{"/dist/chunk-a.js"}
+	lang := "en"
+	class := "dark"
+
+	want, err := RenderHTMLShell(body, props, scriptSrc, headHTML, criticalCSS, cssHrefs, chunks, lang, class)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	propsJSON, err := MarshalBifrostPropsJSON(props)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sb strings.Builder
+	if err := WriteHTMLPreamble(&sb, headHTML, scriptSrc, criticalCSS, cssHrefs, chunks, lang, class); err != nil {
+		t.Fatal(err)
+	}
+	sb.WriteString(body)
+	if err := WriteHTMLSuffix(&sb, propsJSON, scriptSrc, chunks); err != nil {
+		t.Fatal(err)
+	}
+	got := sb.String()
+	if got != want {
+		t.Fatalf("concatenated preamble+body+suffix mismatch\nwant: %s\ngot:  %s", want, got)
+	}
+}
+
 func TestRenderHTMLShell_Basic(t *testing.T) {
 	html, err := RenderHTMLShell(
 		"<div>Hello</div>",

@@ -3,8 +3,11 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
@@ -152,7 +155,8 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 
 	renderPath := s.resolveRenderPath(input)
 
-	page, err := s.renderer.Render(renderPath, propsForReact)
+	assets := core.GetAssets(input.Manifest, input.EntryName)
+	propsJSON, err := core.MarshalBifrostPropsJSON(propsForReact)
 	if err != nil {
 		return ServePageOutput{
 			Action: core.ActionRenderSSR,
@@ -160,12 +164,42 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 		}
 	}
 
-	html, err := s.renderPageHTML(input, propsForReact, page, lang, htmlClass)
+	streamFn := func(w http.ResponseWriter) error {
+		flush := func() {
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		rCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		return s.renderer.RenderChunked(rCtx, renderPath, propsForReact,
+			func(head string) error {
+				// Only commit 200 after Bun confirms a successful render (not an error envelope).
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.WriteHeader(http.StatusOK)
+				if err := core.WriteHTMLPreamble(w, head, assets.Script, assets.CriticalCSS, core.StylesheetHrefs(assets.CSS, assets.CSSFiles), assets.Chunks, lang, htmlClass); err != nil {
+					return err
+				}
+				flush()
+				return nil
+			},
+			func(body string) error {
+				if _, err := io.WriteString(w, body); err != nil {
+					return err
+				}
+				if err := core.WriteHTMLSuffix(w, propsJSON, assets.Script, assets.Chunks); err != nil {
+					return err
+				}
+				flush()
+				return nil
+			},
+		)
+	}
+
 	return ServePageOutput{
 		Action: core.ActionRenderSSR,
-		HTML:   html,
+		Stream: streamFn,
 		Props:  propsForReact,
-		Error:  err,
 	}
 }
 

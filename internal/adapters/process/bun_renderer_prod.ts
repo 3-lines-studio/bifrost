@@ -61,6 +61,26 @@ function createError(
   return new Response(JSON.stringify(result) + "\n");
 }
 
+function ndjsonRenderResponse(head: string, html: string): Response {
+  const enc = new TextEncoder();
+  const line1 = JSON.stringify({ head }) + "\n";
+  const line2 = JSON.stringify({ html }) + "\n";
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode(line1));
+        controller.enqueue(enc.encode(line2));
+        controller.close();
+      },
+    }),
+    {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+      },
+    },
+  );
+}
+
 async function handleRender(req: Bun.BunRequest): Promise<Response> {
   let body: { path?: string; props?: Record<string, unknown> };
   try {
@@ -87,7 +107,7 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
     }
 
     const result: RenderResult = await mod.render(props || {});
-    return new Response(JSON.stringify(result) + "\n");
+    return ndjsonRenderResponse(result.head ?? "", result.html ?? "");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return createError(`Failed to render: ${message}`, err);

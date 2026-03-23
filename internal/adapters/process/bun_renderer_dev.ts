@@ -315,6 +315,27 @@ function createError(
   return new Response(JSON.stringify(result) + "\n");
 }
 
+/** Two NDJSON lines: head line then body line (enables Go to flush HTML shell early). */
+function ndjsonRenderResponse(head: string, html: string): Response {
+  const enc = new TextEncoder();
+  const line1 = JSON.stringify({ head }) + "\n";
+  const line2 = JSON.stringify({ html }) + "\n";
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode(line1));
+        controller.enqueue(enc.encode(line2));
+        controller.close();
+      },
+    }),
+    {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+      },
+    },
+  );
+}
+
 const componentCache = new Map<
   string,
   { Component: any; Head?: any }
@@ -342,7 +363,7 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
 
     if (typeof mod.render === "function") {
       const result: RenderResult = await mod.render(props || {});
-      return new Response(JSON.stringify(result) + "\n");
+      return ndjsonRenderResponse(result.head ?? "", result.html ?? "");
     }
 
     const cached = componentCache.get(path);
@@ -375,16 +396,6 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
 
     const componentProps = props || {};
 
-    let html: string;
-    try {
-      const el = React.createElement(Component, componentProps);
-      html = renderToString(el);
-    } catch (renderErr) {
-      const message =
-        renderErr instanceof Error ? renderErr.message : String(renderErr);
-      return createError(`Render error: ${message}`, renderErr);
-    }
-
     let head = "";
     if (Head) {
       try {
@@ -395,8 +406,17 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
       }
     }
 
-    const result: RenderResult = { html, head };
-    return new Response(JSON.stringify(result) + "\n");
+    let html: string;
+    try {
+      const el = React.createElement(Component, componentProps);
+      html = renderToString(el);
+    } catch (renderErr) {
+      const message =
+        renderErr instanceof Error ? renderErr.message : String(renderErr);
+      return createError(`Render error: ${message}`, renderErr);
+    }
+
+    return ndjsonRenderResponse(head, html);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return createError(`Failed to import component: ${message}`, err);

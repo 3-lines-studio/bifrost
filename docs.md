@@ -258,6 +258,14 @@ bifrost.Page("/user/{id}", "./pages/user.tsx",
 )
 ```
 
+#### Streaming HTML and First Contentful Paint
+
+For SSR pages, Bifrost streams the HTML response in two phases: the document head (including output from your `Head` component, critical CSS, stylesheets, and `modulepreload` links) is written and flushed as soon as it is ready, then the server-rendered body and trailing scripts follow. That lets the browser start downloading JavaScript and CSS while the main page tree is still being rendered in Bun.
+
+**Reverse proxies:** If you use nginx, Caddy, or another reverse proxy in front of your Go server, turn off response buffering for HTML routes (for example, in nginx, `proxy_buffering off` in the relevant `location`). Otherwise the proxy may wait for the full response and you will not see a better time to first byte or First Contentful Paint.
+
+**React Suspense:** Incremental body streaming via `renderToReadableStream` is not enabled in Bifrost yet; it remains a possible future option for apps that rely on Suspense during SSR.
+
 ### Static Pages
 
 There are two static page modes:

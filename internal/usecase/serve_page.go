@@ -32,6 +32,8 @@ type ServePageOutput struct {
 	Props      map[string]any
 	NeedsSetup bool
 	Error      error
+	// Stream is set for SSR when the HTML response should be written with chunked flushing (see PageHandler).
+	Stream func(http.ResponseWriter) error
 }
 
 type PageService struct {

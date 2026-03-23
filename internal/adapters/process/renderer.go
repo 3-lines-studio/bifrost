@@ -151,57 +151,139 @@ func (r *Renderer) Stop() error {
 	return err
 }
 
-func (r *Renderer) Render(path string, props map[string]any) (core.RenderedPage, error) {
+type renderErrJSON struct {
+	Message string `json:"message"`
+	Stack   string `json:"stack"`
+	Errors  []struct {
+		Message string `json:"message"`
+		Stack   string `json:"stack"`
+	} `json:"errors"`
+}
+
+func formatRenderError(e *renderErrJSON) error {
+	if e == nil {
+		return nil
+	}
+	var sb strings.Builder
+	sb.WriteString(e.Message)
+
+	if len(e.Errors) > 0 {
+		sb.WriteString("\n\nErrors:")
+		for i, err := range e.Errors {
+			fmt.Fprintf(&sb, "\n  %d. %s", i+1, err.Message)
+			if err.Stack != "" {
+				fmt.Fprintf(&sb, "\n     Stack: %s", err.Stack)
+			}
+		}
+	}
+
+	if e.Stack != "" {
+		fmt.Fprintf(&sb, "\n\nStack:\n%s", e.Stack)
+	}
+
+	return fmt.Errorf("%s", sb.String())
+}
+
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+func (r *Renderer) postRender(ctx context.Context, path string, props map[string]any) (*http.Response, error) {
 	reqBody := map[string]any{
 		"path":  path,
 		"props": props,
 	}
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://localhost/render", bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return r.client.Do(req)
+}
 
+// renderChunkedFromDecoder consumes Bun /render output: one legacy JSON object or two NDJSON lines (head then html).
+func renderChunkedFromDecoder(dec *json.Decoder, onHead func(head string) error, onBody func(body string) error) error {
+	type firstMsg struct {
+		Error *renderErrJSON `json:"error"`
+		Head  *string        `json:"head"`
+		HTML  *string        `json:"html"`
+	}
+
+	var first firstMsg
+	if err := dec.Decode(&first); err != nil {
+		return fmt.Errorf("render response: %w", err)
+	}
+	if first.Error != nil {
+		return formatRenderError(first.Error)
+	}
+
+	if first.HTML != nil {
+		head := derefString(first.Head)
+		if err := onHead(head); err != nil {
+			return err
+		}
+		return onBody(*first.HTML)
+	}
+
+	head := derefString(first.Head)
+	if err := onHead(head); err != nil {
+		return err
+	}
+
+	var second struct {
+		Error *renderErrJSON `json:"error"`
+		HTML  *string        `json:"html"`
+	}
+	if err := dec.Decode(&second); err != nil {
+		return fmt.Errorf("render stream body: %w", err)
+	}
+	if second.Error != nil {
+		return formatRenderError(second.Error)
+	}
+	if second.HTML == nil {
+		return fmt.Errorf("missing html in streamed render response")
+	}
+	return onBody(*second.HTML)
+}
+
+// RenderChunked calls onHead after the first NDJSON object (head), then onBody after the body.
+// Legacy single JSON {"html","head"} invokes onHead then onBody in one round trip.
+func (r *Renderer) RenderChunked(ctx context.Context, path string, props map[string]any, onHead func(head string) error, onBody func(body string) error) error {
+	resp, err := r.postRender(ctx, path, props)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	return renderChunkedFromDecoder(json.NewDecoder(resp.Body), onHead, onBody)
+}
+
+func (r *Renderer) Render(path string, props map[string]any) (core.RenderedPage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
 	defer cancel()
 
-	var result struct {
-		HTML  string `json:"html"`
-		Head  string `json:"head"`
-		Error *struct {
-			Message string `json:"message"`
-			Stack   string `json:"stack"`
-			Errors  []struct {
-				Message string `json:"message"`
-				Stack   string `json:"stack"`
-			} `json:"errors"`
-		} `json:"error"`
-	}
-
-	if err := r.postJSON(ctx, "/render", reqBody, &result); err != nil {
+	var page core.RenderedPage
+	err := r.RenderChunked(ctx, path, props,
+		func(head string) error {
+			page.Head = head
+			return nil
+		},
+		func(body string) error {
+			page.Body = body
+			return nil
+		},
+	)
+	if err != nil {
 		return core.RenderedPage{}, err
 	}
-
-	if result.Error != nil {
-		var sb strings.Builder
-		sb.WriteString(result.Error.Message)
-
-		if len(result.Error.Errors) > 0 {
-			sb.WriteString("\n\nErrors:")
-			for i, err := range result.Error.Errors {
-				fmt.Fprintf(&sb, "\n  %d. %s", i+1, err.Message)
-				if err.Stack != "" {
-					fmt.Fprintf(&sb, "\n     Stack: %s", err.Stack)
-				}
-			}
-		}
-
-		if result.Error.Stack != "" {
-			fmt.Fprintf(&sb, "\n\nStack:\n%s", result.Error.Stack)
-		}
-
-		return core.RenderedPage{}, fmt.Errorf("%s", sb.String())
-	}
-
-	return core.RenderedPage{
-		Body: result.HTML,
-		Head: result.Head,
-	}, nil
+	return page, nil
 }
 
 func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {

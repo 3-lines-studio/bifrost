@@ -1,12 +1,15 @@
 package usecase
 
 import (
+	"context"
+
 	"github.com/3-lines-studio/bifrost/internal/adapters/fs"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
 type Renderer interface {
 	Render(componentPath string, props map[string]any) (core.RenderedPage, error)
+	RenderChunked(ctx context.Context, componentPath string, props map[string]any, onHead func(head string) error, onBody func(body string) error) error
 	Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error)
 	BuildSSR(entrypoints []string, outdir string) error
 }

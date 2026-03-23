@@ -5,14 +5,31 @@ import (
 	"encoding/json"
 	"errors"
 	"html"
+	"io"
 	"strings"
 )
 
 var emptyPropsJSON = []byte("{}")
 
-func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, headHTML string, criticalCSS string, cssHrefs []string, chunks []string, htmlLang string, htmlClass string) (string, error) {
+// MarshalBifrostPropsJSON marshals props for embedding in the __BIFROST_PROPS__ script tag.
+func MarshalBifrostPropsJSON(props map[string]any) ([]byte, error) {
+	if len(props) == 0 {
+		return emptyPropsJSON, nil
+	}
+	propsJSON, err := json.Marshal(props)
+	if err != nil {
+		return nil, err
+	}
+	if bytes.Contains(propsJSON, []byte("</")) {
+		propsJSON = bytes.ReplaceAll(propsJSON, []byte("</"), []byte("<\\/"))
+	}
+	return propsJSON, nil
+}
+
+// WriteHTMLPreamble writes from doctype through the opening <div id="app"> (exclusive of body HTML).
+func WriteHTMLPreamble(w io.Writer, headHTML string, scriptSrc string, criticalCSS string, cssHrefs []string, chunks []string, htmlLang string, htmlClass string) error {
 	if scriptSrc == "" {
-		return "", errors.New("missing script src")
+		return errors.New("missing script src")
 	}
 
 	langAttr := SanitizeHTMLLang(htmlLang)
@@ -23,69 +40,132 @@ func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, he
 		hasCustomTitle = containsTitle(headHTML)
 	}
 
-	var propsJSON []byte
-	if len(props) == 0 {
-		propsJSON = emptyPropsJSON
-	} else {
-		var err error
-		propsJSON, err = json.Marshal(props)
-		if err != nil {
-			return "", err
+	styleTags := RenderStyleTags(criticalCSS, cssHrefs)
+
+	if _, err := io.WriteString(w, "<!doctype html>\n<html lang=\""); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, html.EscapeString(langAttr)); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, `"`); err != nil {
+		return err
+	}
+	if classAttr != "" {
+		if _, err := io.WriteString(w, ` class="`); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, html.EscapeString(classAttr)); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, `"`); err != nil {
+			return err
+		}
+	}
+	if _, err := io.WriteString(w, ">\n  <head>\n    "); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, `<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />`); err != nil {
+		return err
+	}
+
+	if !hasCustomTitle {
+		if _, err := io.WriteString(w, "<title>Bifrost</title>"); err != nil {
+			return err
+		}
+	}
+	if headHTML != "" {
+		if _, err := io.WriteString(w, headHTML); err != nil {
+			return err
+		}
+	}
+	if styleTags != "" {
+		if _, err := io.WriteString(w, styleTags); err != nil {
+			return err
 		}
 	}
 
-	if bytes.Contains(propsJSON, []byte("</")) {
-		propsJSON = bytes.ReplaceAll(propsJSON, []byte("</"), []byte("<\\/"))
+	for _, chunk := range chunks {
+		if _, err := io.WriteString(w, `<link rel="modulepreload" href="`); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, chunk); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, `" />`); err != nil {
+			return err
+		}
+	}
+	if _, err := io.WriteString(w, `<link rel="modulepreload" href="`); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, scriptSrc); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, `" />`); err != nil {
+		return err
 	}
 
-	styleTags := RenderStyleTags(criticalCSS, cssHrefs)
+	_, err := io.WriteString(w, "\n  </head>\n  <body>\n    <div id=\"app\">")
+	return err
+}
+
+// WriteHTMLSuffix writes the closing </div>, props script, deferred scripts, and closing body/html.
+func WriteHTMLSuffix(w io.Writer, propsJSON []byte, scriptSrc string, chunks []string) error {
+	if scriptSrc == "" {
+		return errors.New("missing script src")
+	}
+	if len(propsJSON) == 0 {
+		propsJSON = emptyPropsJSON
+	}
+	if _, err := io.WriteString(w, "</div>\n    <script id=\"__BIFROST_PROPS__\" type=\"application/json\">"); err != nil {
+		return err
+	}
+	if _, err := w.Write(propsJSON); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, "</script>\n"); err != nil {
+		return err
+	}
+
+	for _, chunk := range chunks {
+		if _, err := io.WriteString(w, `    <script src="`); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, chunk); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, "\" type=\"module\" defer></script>\n"); err != nil {
+			return err
+		}
+	}
+
+	if _, err := io.WriteString(w, "    <script src=\""); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, scriptSrc); err != nil {
+		return err
+	}
+	_, err := io.WriteString(w, "\" type=\"module\" defer></script>\n  </body>\n</html>\n")
+	return err
+}
+
+func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, headHTML string, criticalCSS string, cssHrefs []string, chunks []string, htmlLang string, htmlClass string) (string, error) {
+	propsJSON, err := MarshalBifrostPropsJSON(props)
+	if err != nil {
+		return "", err
+	}
+
 	var sb strings.Builder
-
-	sb.WriteString("<!doctype html>\n<html lang=\"")
-	sb.WriteString(html.EscapeString(langAttr))
-	sb.WriteString(`"`)
-	if classAttr != "" {
-		sb.WriteString(` class="`)
-		sb.WriteString(html.EscapeString(classAttr))
-		sb.WriteString(`"`)
+	if err := WriteHTMLPreamble(&sb, headHTML, scriptSrc, criticalCSS, cssHrefs, chunks, htmlLang, htmlClass); err != nil {
+		return "", err
 	}
-	sb.WriteString(">\n  <head>\n    ")
-	sb.WriteString(`<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />`)
-
-	if !hasCustomTitle {
-		sb.WriteString("<title>Bifrost</title>")
+	if _, err := sb.WriteString(bodyHTML); err != nil {
+		return "", err
 	}
-	if headHTML != "" {
-		sb.WriteString(headHTML)
+	if err := WriteHTMLSuffix(&sb, propsJSON, scriptSrc, chunks); err != nil {
+		return "", err
 	}
-	if styleTags != "" {
-		sb.WriteString(styleTags)
-	}
-
-	for _, chunk := range chunks {
-		sb.WriteString(`<link rel="modulepreload" href="`)
-		sb.WriteString(chunk)
-		sb.WriteString(`" />`)
-	}
-	sb.WriteString(`<link rel="modulepreload" href="`)
-	sb.WriteString(scriptSrc)
-	sb.WriteString(`" />`)
-
-	sb.WriteString("\n  </head>\n  <body>\n    <div id=\"app\">")
-	sb.WriteString(bodyHTML)
-	sb.WriteString("</div>\n    <script id=\"__BIFROST_PROPS__\" type=\"application/json\">")
-	sb.Write(propsJSON)
-	sb.WriteString("</script>\n")
-
-	for _, chunk := range chunks {
-		sb.WriteString(`<script src="`)
-		sb.WriteString(chunk)
-		sb.WriteString("\" type=\"module\" defer></script>\n")
-	}
-
-	sb.WriteString("    <script src=\"")
-	sb.WriteString(scriptSrc)
-	sb.WriteString("\" type=\"module\" defer></script>\n  </body>\n</html>\n")
 
 	return sb.String(), nil
 }
