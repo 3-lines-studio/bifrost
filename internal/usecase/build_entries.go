@@ -52,16 +52,13 @@ func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, criticalCSS 
 }
 
 func (s *BuildService) writeSSREntry(entryPath, importPath string) error {
-	content := strings.ReplaceAll(s.adapter.SSREntryTemplate(), "COMPONENT_PATH", importPath)
-	return os.WriteFile(entryPath, []byte(content), 0644)
+	return WriteSSREntryFile(s.adapter, entryPath, importPath)
 }
 
 func (s *BuildService) writeClientOnlyEntry(entryPath, importPath string) error {
-	content := strings.ReplaceAll(s.adapter.ClientEntryTemplate(core.ModeClientOnly), "COMPONENT_PATH", importPath)
-	return os.WriteFile(entryPath, []byte(content), 0644)
+	return WriteClientEntryFile(s.adapter, entryPath, importPath, core.ModeClientOnly)
 }
 
 func (s *BuildService) writeHydrationEntry(entryPath, importPath string) error {
-	content := strings.ReplaceAll(s.adapter.ClientEntryTemplate(core.ModeSSR), "COMPONENT_PATH", importPath)
-	return os.WriteFile(entryPath, []byte(content), 0644)
+	return WriteClientEntryFile(s.adapter, entryPath, importPath, core.ModeSSR)
 }

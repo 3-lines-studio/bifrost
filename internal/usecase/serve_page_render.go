@@ -12,7 +12,7 @@ import (
 )
 
 func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error) {
-	assets := core.GetAssets(input.Manifest, input.EntryName)
+	artifacts := core.ResolvePageArtifacts(input.Manifest, input.EntryName)
 
 	if input.IsDev && s.renderer != nil {
 		ssrPath := filepath.Join(".bifrost/ssr", input.EntryName+"-ssr.js")
@@ -20,17 +20,7 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 			page, err := s.renderer.Render(ssrPath, map[string]any{})
 			if err == nil {
 				lang, htmlClass, _ := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
-				return core.RenderHTMLShell(
-					page.Body,
-					map[string]any{},
-					assets.Script,
-					page.Head,
-					assets.CriticalCSS,
-					core.StylesheetHrefs(assets.CSS, assets.CSSFiles),
-					assets.Chunks,
-					lang,
-					htmlClass,
-				)
+				return RenderHTMLDocumentFromPage(page, map[string]any{}, artifacts, lang, htmlClass)
 			}
 		}
 	}
@@ -39,11 +29,11 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 	return core.RenderHTMLShell(
 		"",
 		map[string]any{},
-		assets.Script,
+		artifacts.Script,
 		"",
-		assets.CriticalCSS,
-		core.StylesheetHrefs(assets.CSS, assets.CSSFiles),
-		assets.Chunks,
+		artifacts.CriticalCSS,
+		core.StylesheetHrefsFor(artifacts),
+		artifacts.Chunks,
 		lang,
 		htmlClass,
 	)
@@ -154,7 +144,7 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 
 	renderPath := s.resolveRenderPath(input)
 
-	assets := core.GetAssets(input.Manifest, input.EntryName)
+	artifacts := core.ResolvePageArtifacts(input.Manifest, input.EntryName)
 	propsJSON, err := core.MarshalBifrostPropsJSON(propsForReact)
 	if err != nil {
 		return ServePageOutput{
@@ -179,7 +169,7 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 			func(head string) error {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusOK)
-				if err := core.WriteHTMLPreamble(w, head, assets.Script, assets.CriticalCSS, core.StylesheetHrefs(assets.CSS, assets.CSSFiles), assets.Chunks, lang, htmlClass); err != nil {
+				if err := WriteSSRHTMLPreamble(w, head, artifacts, lang, htmlClass); err != nil {
 					return err
 				}
 				doFlush()
@@ -188,7 +178,7 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 		if err != nil {
 			return err
 		}
-		if err := core.WriteHTMLSuffix(w, propsJSON, assets.Script, assets.Chunks); err != nil {
+		if err := core.WriteHTMLSuffix(w, propsJSON, artifacts.Script, artifacts.Chunks); err != nil {
 			return err
 		}
 		doFlush()
@@ -214,17 +204,6 @@ func (s *PageService) resolveRenderPath(input ServePageInput) string {
 }
 
 func (s *PageService) renderPageHTML(input ServePageInput, props map[string]any, page core.RenderedPage, htmlLang string, htmlClass string) (string, error) {
-	assets := core.GetAssets(input.Manifest, input.EntryName)
-
-	return core.RenderHTMLShell(
-		page.Body,
-		props,
-		assets.Script,
-		page.Head,
-		assets.CriticalCSS,
-		core.StylesheetHrefs(assets.CSS, assets.CSSFiles),
-		assets.Chunks,
-		htmlLang,
-		htmlClass,
-	)
+	artifacts := core.ResolvePageArtifacts(input.Manifest, input.EntryName)
+	return RenderHTMLDocumentFromPage(page, props, artifacts, htmlLang, htmlClass)
 }

@@ -62,6 +62,29 @@ func BenchmarkGetAssets_Fallback(b *testing.B) {
 	}
 }
 
+func BenchmarkResolvePageArtifacts_Hit(b *testing.B) {
+	man := &Manifest{
+		Entries: map[string]ManifestEntry{
+			"pages-home-entry": {
+				Script: "/dist/pages-home-entry-abc.js",
+				CSS:    "/dist/pages-home-entry-abc.css",
+				Chunks: []string{"/dist/chunk-1.js"},
+			},
+		},
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		ResolvePageArtifacts(man, "pages-home-entry")
+	}
+}
+
+func BenchmarkResolvePageArtifacts_Fallback(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		ResolvePageArtifacts(nil, "pages-home-entry")
+	}
+}
+
 func BenchmarkGetContentType(b *testing.B) {
 	paths := []string{"style.css", "app.js", "image.PNG", "font.woff2", "data.bin"}
 	b.ReportAllocs()

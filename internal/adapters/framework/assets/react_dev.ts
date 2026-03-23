@@ -7,6 +7,7 @@ const isDev =
 
 const tailwindPlugin = (await import("bun-plugin-tailwind")).default;
 
+// --- Shared with assets/build_graph.ts (inlined: Bun stdin resolves imports from caller CWD) ---
 interface ErrorDetail {
   message: string;
   position?: {
@@ -27,14 +28,45 @@ interface BuildEntryResult {
   chunks: string[];
 }
 
-interface Result {
-  ok?: boolean;
-  entries?: Record<string, BuildEntryResult>;
-  error?: {
-    message: string;
-    stack?: string;
-    errors?: ErrorDetail[];
+function serializeError(error: unknown): {
+  message: string;
+  stack?: string;
+} {
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+  return { message: String(error) };
+}
+
+function createError(
+  message: string,
+  err?: { errors?: ErrorDetail[] } | Error,
+): Response {
+  const result: {
+    error: {
+      message: string;
+      stack?: string;
+      errors?: ErrorDetail[];
+    };
+  } = {
+    error: {
+      message,
+    },
   };
+
+  if (err) {
+    if ("errors" in err && Array.isArray(err.errors)) {
+      result.error.errors = err.errors;
+    } else if (err instanceof Error) {
+      const serialized = serializeError(err);
+      result.error.stack = serialized.stack;
+    }
+  }
+
+  return new Response(JSON.stringify(result) + "\n");
 }
 
 function entryStemMatchesJs(base: string, stem: string): boolean {
@@ -100,7 +132,9 @@ function artifactForImport(
   );
   if (art) return art;
   const base = nodePath.basename(impPath);
-  return buildResult.outputs.find((o) => nodePath.basename(o.path) === base);
+  return buildResult.outputs.find(
+    (o) => nodePath.basename(o.path) === base,
+  );
 }
 
 function dedupeOrderedStylesheetHrefs(urls: string[]): string[] {
@@ -114,7 +148,6 @@ function dedupeOrderedStylesheetHrefs(urls: string[]): string[] {
   return out;
 }
 
-/** All stylesheet URLs from build outputs (multi-entry shared Tailwind often emits one CSS file not linked in every entry's meta graph). */
 function allCssHrefsFromBuildOutputs(
   buildResult: Awaited<ReturnType<typeof Bun.build>>,
 ): string[] {
@@ -124,7 +157,6 @@ function allCssHrefsFromBuildOutputs(
   return [...new Set(hrefs)].sort();
 }
 
-/** CSS outputs reachable from this entry via the module graph (shared bundles under code splitting). */
 function collectCssForEntry(
   buildResult: Awaited<ReturnType<typeof Bun.build>>,
   entryJsAbsPath: string,
@@ -168,7 +200,6 @@ function collectCssForEntry(
   return [...new Set(hrefs)].sort();
 }
 
-/** Chunks reachable from this entry only (correct for multi-entry shared vendor builds). */
 function collectChunksForEntry(
   buildResult: Awaited<ReturnType<typeof Bun.build>>,
   entryJsAbsPath: string,
@@ -272,44 +303,21 @@ function buildEntriesPayload(
   return out;
 }
 
+// --- End inlined build_graph ---
+
+interface Result {
+  ok?: boolean;
+  entries?: Record<string, BuildEntryResult>;
+  error?: {
+    message: string;
+    stack?: string;
+    errors?: ErrorDetail[];
+  };
+}
+
 interface RenderResult {
   html: string;
   head?: string;
-}
-
-function serializeError(error: unknown): {
-  message: string;
-  stack?: string;
-} {
-  if (error instanceof Error) {
-    return {
-      message: error.message,
-      stack: error.stack,
-    };
-  }
-  return { message: String(error) };
-}
-
-function createError(
-  message: string,
-  err?: { errors?: ErrorDetail[] } | Error,
-): Response {
-  const result: Result = {
-    error: {
-      message,
-    },
-  };
-
-  if (err) {
-    if ("errors" in err && Array.isArray(err.errors)) {
-      result.error!.errors = err.errors;
-    } else if (err instanceof Error) {
-      const serialized = serializeError(err);
-      result.error!.stack = serialized.stack;
-    }
-  }
-
-  return new Response(JSON.stringify(result) + "\n");
 }
 
 const componentCache = new Map<string, { Component: any; Head?: any }>();
@@ -408,7 +416,7 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
     body = await req.json();
   } catch (err) {
     const message = err instanceof Error ? err.message : "Invalid JSON body";
-    return createError(`Failed to parse request: ${message}`, err);
+    return createError(`Failed to parse request: ${message}`);
   }
 
   const { entrypoints, outdir, target, entryNames } = body;

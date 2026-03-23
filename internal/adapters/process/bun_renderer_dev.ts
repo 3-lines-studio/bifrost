@@ -1,32 +1,19 @@
 import nodeFs from "fs";
 import nodePath from "path";
 
+import { buildEntriesPayload, type BuildEntryResult } from "../framework/assets/build_graph";
+import {
+  createError,
+  headThenRawStreamResponse,
+  type ErrorDetail,
+} from "../framework/assets/render_protocol";
+
 const socket = process.env.BIFROST_SOCKET;
 const isDev =
   process.env.BIFROST_DEV === "1" || process.env.BIFROST_DEV === "true";
 
 const tailwindPlugin = (await import("bun-plugin-tailwind")).default;
 const reactCompiler = (await import("../framework/assets/react_compiler_plugin")).default;
-
-interface ErrorDetail {
-  message: string;
-  position?: {
-    file?: string;
-    line: number;
-    column: number;
-    lineText?: string;
-  };
-  specifier?: string;
-  referrer?: string;
-}
-
-interface BuildEntryResult {
-  script: string;
-  criticalCSS: string;
-  css: string;
-  cssFiles?: string[];
-  chunks: string[];
-}
 
 interface Result {
   ok?: boolean;
@@ -38,282 +25,10 @@ interface Result {
   };
 }
 
-function entryStemMatchesJs(base: string, stem: string): boolean {
-  return (
-    base === `${stem}.js` ||
-    (base.startsWith(`${stem}-`) && base.endsWith(".js"))
-  );
-}
-
-function entryStemMatchesCss(base: string, stem: string): boolean {
-  return (
-    base === `${stem}.css` ||
-    (base.startsWith(`${stem}-`) && base.endsWith(".css"))
-  );
-}
-
-function collectChunkURLs(
-  outputs: Awaited<ReturnType<typeof Bun.build>>["outputs"],
-): string[] {
-  return outputs
-    .filter((o) => o.kind === "chunk" && o.path.endsWith(".js"))
-    .map((o) => "/dist/" + nodePath.basename(o.path))
-    .sort();
-}
-
-function resolveMetaOutputKey(
-  metaOutputs: NonNullable<Bun.BuildMetafile["outputs"]>,
-  filePath: string,
-): string | undefined {
-  const want = nodePath.resolve(filePath);
-  for (const k of Object.keys(metaOutputs)) {
-    if (nodePath.resolve(k) === want) return k;
-  }
-  const base = nodePath.basename(filePath);
-  for (const k of Object.keys(metaOutputs)) {
-    if (nodePath.basename(k) === base) return k;
-  }
-  return undefined;
-}
-
-function artifactForChunkImport(
-  buildResult: Awaited<ReturnType<typeof Bun.build>>,
-  impPath: string,
-): (typeof buildResult.outputs)[number] | undefined {
-  const resolvedImp = nodePath.resolve(impPath);
-  let art = buildResult.outputs.find(
-    (o) => nodePath.resolve(o.path) === resolvedImp,
-  );
-  if (art) return art;
-  const base = nodePath.basename(impPath);
-  return buildResult.outputs.find(
-    (o) => o.kind === "chunk" && nodePath.basename(o.path) === base,
-  );
-}
-
-function artifactForImport(
-  buildResult: Awaited<ReturnType<typeof Bun.build>>,
-  impPath: string,
-): (typeof buildResult.outputs)[number] | undefined {
-  const resolvedImp = nodePath.resolve(impPath);
-  let art = buildResult.outputs.find(
-    (o) => nodePath.resolve(o.path) === resolvedImp,
-  );
-  if (art) return art;
-  const base = nodePath.basename(impPath);
-  return buildResult.outputs.find(
-    (o) => nodePath.basename(o.path) === base,
-  );
-}
-
-function dedupeOrderedStylesheetHrefs(urls: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const u of urls) {
-    if (!u || seen.has(u)) continue;
-    seen.add(u);
-    out.push(u);
-  }
-  return out;
-}
-
-/** All stylesheet URLs from build outputs (multi-entry shared Tailwind often emits one CSS file not linked in every entry's meta graph). */
-function allCssHrefsFromBuildOutputs(
-  buildResult: Awaited<ReturnType<typeof Bun.build>>,
-): string[] {
-  const hrefs = buildResult.outputs
-    .filter((o) => o.path.endsWith(".css"))
-    .map((o) => "/dist/" + nodePath.basename(o.path));
-  return [...new Set(hrefs)].sort();
-}
-
-/** CSS outputs reachable from this entry via the module graph (shared bundles under code splitting). */
-function collectCssForEntry(
-  buildResult: Awaited<ReturnType<typeof Bun.build>>,
-  entryJsAbsPath: string,
-): string[] {
-  const meta = buildResult.metafile;
-  if (!meta?.outputs) {
-    return [];
-  }
-  const metaOutputs = meta.outputs;
-  const startKey = resolveMetaOutputKey(metaOutputs, entryJsAbsPath);
-  if (!startKey) {
-    return [];
-  }
-
-  const seenMeta = new Set<string>();
-  const hrefs: string[] = [];
-
-  function visit(metaKey: string) {
-    if (seenMeta.has(metaKey)) return;
-    seenMeta.add(metaKey);
-    const node = metaOutputs[metaKey];
-    if (!node?.imports) return;
-    for (const imp of node.imports) {
-      const impPath = imp.path;
-      if (impPath.endsWith(".css")) {
-        const art = artifactForImport(buildResult, impPath);
-        if (art?.path.endsWith(".css")) {
-          hrefs.push("/dist/" + nodePath.basename(art.path));
-        }
-        continue;
-      }
-      if (!impPath.endsWith(".js")) continue;
-      const art = artifactForChunkImport(buildResult, impPath);
-      if (!art || art.kind !== "chunk") continue;
-      const childKey = resolveMetaOutputKey(metaOutputs, art.path);
-      if (childKey) visit(childKey);
-    }
-  }
-
-  visit(startKey);
-  return [...new Set(hrefs)].sort();
-}
-
-/** Chunks reachable from this entry only (correct for multi-entry shared vendor builds). */
-function collectChunksForEntry(
-  buildResult: Awaited<ReturnType<typeof Bun.build>>,
-  entryJsAbsPath: string,
-): string[] {
-  const meta = buildResult.metafile;
-  if (!meta?.outputs) {
-    return collectChunkURLs(buildResult.outputs);
-  }
-  const metaOutputs = meta.outputs;
-  const startKey = resolveMetaOutputKey(metaOutputs, entryJsAbsPath);
-  if (!startKey) {
-    return collectChunkURLs(buildResult.outputs);
-  }
-
-  const seen = new Set<string>();
-  const hrefs: string[] = [];
-
-  function visit(metaKey: string) {
-    if (seen.has(metaKey)) return;
-    seen.add(metaKey);
-    const node = metaOutputs[metaKey];
-    if (!node?.imports) return;
-    for (const imp of node.imports) {
-      const impPath = imp.path;
-      if (!impPath.endsWith(".js")) continue;
-      const art = artifactForChunkImport(buildResult, impPath);
-      if (!art || art.kind !== "chunk") continue;
-      hrefs.push("/dist/" + nodePath.basename(art.path));
-      const childKey = resolveMetaOutputKey(metaOutputs, art.path);
-      if (childKey) visit(childKey);
-    }
-  }
-
-  visit(startKey);
-  return [...new Set(hrefs)].sort();
-}
-
-function buildEntriesPayload(
-  buildResult: Awaited<ReturnType<typeof Bun.build>>,
-  entrypoints: string[],
-  entryNames: string[],
-  isProduction: boolean,
-  outdir: string,
-): Record<string, BuildEntryResult> {
-  if (!entryNames || entryNames.length !== entrypoints.length) {
-    return {};
-  }
-  const out: Record<string, BuildEntryResult> = {};
-  for (let i = 0; i < entrypoints.length; i++) {
-    const entryName = entryNames[i]!;
-    const stem = nodePath.basename(
-      entrypoints[i]!,
-      nodePath.extname(entrypoints[i]!),
-    );
-    let script: string;
-    let css: string;
-    let entryAbs: string;
-    if (isProduction) {
-      const ep = buildResult.outputs.find(
-        (o) =>
-          o.kind === "entry-point" &&
-          o.path.endsWith(".js") &&
-          entryStemMatchesJs(nodePath.basename(o.path), stem),
-      );
-      if (!ep) {
-        throw new Error(`No entry-point .js output for entry stem "${stem}"`);
-      }
-      script = "/dist/" + nodePath.basename(ep.path);
-      entryAbs = nodePath.resolve(ep.path);
-      const cssArt = buildResult.outputs.find(
-        (o) =>
-          o.path.endsWith(".css") &&
-          entryStemMatchesCss(nodePath.basename(o.path), stem),
-      );
-      const stemCss = cssArt ? "/dist/" + nodePath.basename(cssArt.path) : "";
-      const graphCss = collectCssForEntry(buildResult, entryAbs);
-      let ordered = dedupeOrderedStylesheetHrefs(
-        stemCss ? [stemCss, ...graphCss] : [...graphCss],
-      );
-      if (ordered.length === 0) {
-        ordered = allCssHrefsFromBuildOutputs(buildResult);
-      }
-      css = ordered[0] ?? "";
-      const cssFiles = ordered.slice(1);
-      const chunks = collectChunksForEntry(buildResult, entryAbs);
-      out[entryName] = {
-        script,
-        criticalCSS: "",
-        css,
-        ...(cssFiles.length > 0 ? { cssFiles } : {}),
-        chunks,
-      };
-    } else {
-      script = "/dist/" + entryName + ".js";
-      css = "/dist/" + entryName + ".css";
-      entryAbs = nodePath.resolve(nodePath.join(outdir, entryName + ".js"));
-      const chunks = collectChunksForEntry(buildResult, entryAbs);
-      out[entryName] = { script, criticalCSS: "", css, chunks };
-    }
-  }
-  return out;
-}
-
 interface RenderResult {
   html?: string;
   head?: string;
   stream?: ReadableStream<Uint8Array>;
-}
-
-function serializeError(error: unknown): {
-  message: string;
-  stack?: string;
-} {
-  if (error instanceof Error) {
-    return {
-      message: error.message,
-      stack: error.stack,
-    };
-  }
-  return { message: String(error) };
-}
-
-function createError(
-  message: string,
-  err?: { errors?: ErrorDetail[] } | Error,
-): Response {
-  const result: Result = {
-    error: {
-      message,
-    },
-  };
-
-  if (err) {
-    if ("errors" in err && Array.isArray(err.errors)) {
-      result.error!.errors = err.errors;
-    } else if (err instanceof Error) {
-      const serialized = serializeError(err);
-      result.error!.stack = serialized.stack;
-    }
-  }
-
-  return new Response(JSON.stringify(result) + "\n");
 }
 
 /** Two NDJSON lines: head line then body line (enables Go to flush HTML shell early). */
@@ -326,38 +41,6 @@ function ndjsonRenderResponse(head: string, html: string): Response {
       start(controller) {
         controller.enqueue(enc.encode(line1));
         controller.enqueue(enc.encode(line2));
-        controller.close();
-      },
-    }),
-    {
-      headers: {
-        "Content-Type": "application/x-ndjson; charset=utf-8",
-      },
-    },
-  );
-}
-
-/** First line JSON `{"head"}` then raw UTF-8 from renderToReadableStream. */
-function headThenRawStreamResponse(
-  head: string,
-  htmlStream: ReadableStream<Uint8Array>,
-): Response {
-  const enc = new TextEncoder();
-  const headLine = enc.encode(JSON.stringify({ head }) + "\n");
-  return new Response(
-    new ReadableStream<Uint8Array>({
-      async start(controller) {
-        controller.enqueue(headLine);
-        const reader = htmlStream.getReader();
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            if (value) controller.enqueue(value);
-          }
-        } finally {
-          reader.releaseLock();
-        }
         controller.close();
       },
     }),
@@ -496,7 +179,7 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
     body = await req.json();
   } catch (err) {
     const message = err instanceof Error ? err.message : "Invalid JSON body";
-    return createError(`Failed to parse request: ${message}`, err);
+    return createError(`Failed to parse request: ${message}`);
   }
 
   const { entrypoints, outdir, target, entryNames } = body;

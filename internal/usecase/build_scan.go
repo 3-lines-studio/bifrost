@@ -6,7 +6,6 @@ import (
 	"go/token"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -197,20 +196,6 @@ func (s *BuildService) detectPageMode(args []ast.Expr) (core.PageMode, bool) {
 	}
 
 	return core.ModeSSR, hasStaticDataLoader
-}
-
-func (s *BuildService) calculateImportPath(entryPath, componentPath string) (string, error) {
-	entryDir := filepath.Dir(entryPath)
-	relPath, err := filepath.Rel(entryDir, componentPath)
-	if err != nil {
-		return "", err
-	}
-
-	if !strings.HasPrefix(relPath, ".") {
-		relPath = "./" + relPath
-	}
-
-	return relPath, nil
 }
 
 func (s *BuildService) extractTitleFromComponent(componentPath string) string {

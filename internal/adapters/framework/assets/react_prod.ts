@@ -1,5 +1,6 @@
 const socket = process.env.BIFROST_SOCKET;
 
+// Inlined from assets/render_protocol.ts (stdin import resolution; see react_dev.ts header).
 interface ErrorDetail {
   message: string;
   position?: {
@@ -10,21 +11,6 @@ interface ErrorDetail {
   };
   specifier?: string;
   referrer?: string;
-}
-
-interface Result {
-  ok?: boolean;
-  error?: {
-    message: string;
-    stack?: string;
-    errors?: ErrorDetail[];
-  };
-}
-
-interface RenderResult {
-  html?: string;
-  head?: string;
-  stream?: ReadableStream<Uint8Array>;
 }
 
 function serializeError(error: unknown): {
@@ -44,7 +30,13 @@ function createError(
   message: string,
   err?: { errors?: ErrorDetail[] } | Error,
 ): Response {
-  const result: Result = {
+  const result: {
+    error: {
+      message: string;
+      stack?: string;
+      errors?: ErrorDetail[];
+    };
+  } = {
     error: {
       message,
     },
@@ -52,17 +44,16 @@ function createError(
 
   if (err) {
     if ("errors" in err && Array.isArray(err.errors)) {
-      result.error!.errors = err.errors;
+      result.error.errors = err.errors;
     } else if (err instanceof Error) {
       const serialized = serializeError(err);
-      result.error!.stack = serialized.stack;
+      result.error.stack = serialized.stack;
     }
   }
 
   return new Response(JSON.stringify(result) + "\n");
 }
 
-/** One JSON line with head + html (Go RenderBodyStream and RenderChunked both accept this). */
 function singleLineRenderResponse(head: string, html: string): Response {
   return new Response(JSON.stringify({ head, html }) + "\n", {
     headers: {
@@ -100,6 +91,12 @@ function headThenRawStreamResponse(
       },
     },
   );
+}
+
+interface RenderResult {
+  html?: string;
+  head?: string;
+  stream?: ReadableStream<Uint8Array>;
 }
 
 async function handleRender(req: Bun.BunRequest): Promise<Response> {

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
 	"github.com/3-lines-studio/bifrost/internal/core"
@@ -144,64 +142,5 @@ func (s *PageService) buildAndRender(ctx context.Context, input ServePageInput) 
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
-
-	outdir := filepath.Join(cwd, ".bifrost/dist")
-	ssrDir := filepath.Join(cwd, ".bifrost/ssr")
-	entryDir := filepath.Join(cwd, ".bifrost/entries")
-
-	if err := os.MkdirAll(entryDir, 0755); err != nil {
-		return fmt.Errorf("failed to create entries directory: %w", err)
-	}
-
-	componentPath := input.Config.ComponentPath
-
-	if !strings.HasPrefix(componentPath, "./") && !strings.HasPrefix(componentPath, "/") {
-		componentPath = "./" + componentPath
-	}
-
-	if strings.HasPrefix(componentPath, "./") {
-		componentPath = "../../" + componentPath[2:]
-	}
-
-	entryFile := filepath.Join(entryDir, input.EntryName+s.adapter.EntryFileExtension())
-	clientTemplate := s.adapter.ClientEntryTemplate(input.Config.Mode)
-	clientContent := strings.ReplaceAll(clientTemplate, "COMPONENT_PATH", componentPath)
-
-	if err := os.WriteFile(entryFile, []byte(clientContent), 0644); err != nil {
-		return fmt.Errorf("failed to write client entry file: %w", err)
-	}
-
-	clientEntrypoints := []string{entryFile}
-	clientEntryNames := []string{input.EntryName}
-
-	if _, err := s.renderer.Build(clientEntrypoints, outdir, clientEntryNames); err != nil {
-		return fmt.Errorf("failed to build client entry: %w", err)
-	}
-
-	shouldBuildSSR := input.IsDev ||
-		input.Config.Mode == core.ModeSSR ||
-		input.Config.Mode == core.ModeStaticPrerender
-
-	if shouldBuildSSR {
-		if err := os.MkdirAll(ssrDir, 0755); err != nil {
-			return fmt.Errorf("failed to create SSR directory: %w", err)
-		}
-
-		ssrEntryName := input.EntryName + "-ssr"
-		ssrEntryFile := filepath.Join(entryDir, ssrEntryName+s.adapter.EntryFileExtension())
-		ssrTemplate := s.adapter.SSREntryTemplate()
-		ssrContent := strings.ReplaceAll(ssrTemplate, "COMPONENT_PATH", componentPath)
-
-		if err := os.WriteFile(ssrEntryFile, []byte(ssrContent), 0644); err != nil {
-			return fmt.Errorf("failed to write SSR entry file: %w", err)
-		}
-
-		ssrEntrypoints := []string{ssrEntryFile}
-
-		if err := s.renderer.BuildSSR(ssrEntrypoints, ssrDir); err != nil {
-			return fmt.Errorf("failed to build SSR entry: %w", err)
-		}
-	}
-
-	return nil
+	return CompileDevPageOnDemand(s.renderer, cwd, input.EntryName, input.Config, s.adapter)
 }

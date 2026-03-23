@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
 	"github.com/3-lines-studio/bifrost/internal/adapters/process"
@@ -175,39 +176,10 @@ func (h *Host) Stop() error {
 }
 
 func copySSRBundlesFromDisk(exportDir string, manifest *core.Manifest) (string, func(), error) {
-	tempDir, err := os.MkdirTemp("", "bifrost-ssr-*")
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to create SSR temp dir: %w", err)
+	read := func(manifestSSRPath string) ([]byte, error) {
+		clean := strings.TrimPrefix(filepath.ToSlash(manifestSSRPath), "/")
+		srcPath := filepath.Join(exportDir, filepath.FromSlash(clean))
+		return os.ReadFile(srcPath)
 	}
-
-	for entryName, entry := range manifest.Entries {
-		if entry.SSR == "" {
-			continue
-		}
-
-		srcPath := filepath.Join(exportDir, entry.SSR)
-
-		data, err := os.ReadFile(srcPath)
-		if err != nil {
-			_ = os.RemoveAll(tempDir)
-			return "", nil, fmt.Errorf("failed to read SSR bundle %s: %w", srcPath, err)
-		}
-
-		destPath := filepath.Join(tempDir, entry.SSR)
-		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-			_ = os.RemoveAll(tempDir)
-			return "", nil, fmt.Errorf("failed to create SSR dest dir: %w", err)
-		}
-
-		if err := os.WriteFile(destPath, data, 0644); err != nil {
-			_ = os.RemoveAll(tempDir)
-			return "", nil, fmt.Errorf("failed to write SSR bundle %s: %w", entryName, err)
-		}
-	}
-
-	cleanup := func() {
-		_ = os.RemoveAll(tempDir)
-	}
-
-	return tempDir, cleanup, nil
+	return process.StageSSRBundles(read, manifest)
 }

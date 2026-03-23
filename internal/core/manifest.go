@@ -38,15 +38,8 @@ type ClientBuildResult struct {
 	Chunks      []string `json:"chunks,omitempty"`
 }
 
-type Assets struct {
-	Script      string
-	CriticalCSS string
-	CSS         string
-	CSSFiles    []string
-	Chunks      []string
-	IsStatic    bool
-	SSRPath     string
-}
+// Assets is an alias for PageArtifacts (legacy name used across the codebase).
+type Assets = PageArtifacts
 
 func StylesheetHrefs(css string, cssFiles []string) []string {
 	seen := make(map[string]struct{})
@@ -68,24 +61,9 @@ func StylesheetHrefs(css string, cssFiles []string) []string {
 	return out
 }
 
+// GetAssets is equivalent to ResolvePageArtifacts. Prefer ResolvePageArtifacts in new code.
 func GetAssets(man *Manifest, entryName string) Assets {
-	if man != nil {
-		if entry, ok := man.Entries[entryName]; ok && entry.Script != "" {
-			return Assets{
-				Script:      entry.Script,
-				CriticalCSS: entry.CriticalCSS,
-				CSS:         entry.CSS,
-				CSSFiles:    entry.CSSFiles,
-				Chunks:      entry.Chunks,
-				IsStatic:    entry.Static,
-				SSRPath:     entry.SSR,
-			}
-		}
-	}
-	return Assets{
-		Script: "/dist/" + entryName + ".js",
-		CSS:    "/dist/" + entryName + ".css",
-	}
+	return ResolvePageArtifacts(man, entryName)
 }
 
 func HasSSREntries(man *Manifest) bool {

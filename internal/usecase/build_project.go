@@ -145,7 +145,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		ssrEntryName := pm.entryName + "-ssr"
 		ssrEntryPath := filepath.Join(entriesDir, ssrEntryName+s.adapter.EntryFileExtension())
 
-		importPath, err := s.calculateImportPath(ssrEntryPath, pm.absComponentPath)
+		importPath, err := CalculateImportPath(ssrEntryPath, pm.absComponentPath)
 		if err != nil {
 			ssrFailed[pm.entryName] = struct{}{}
 			ssrErrors = append(ssrErrors, BuildError{
@@ -196,7 +196,7 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 		pm := &pages[i]
 		entryPath := filepath.Join(entriesDir, pm.entryName+s.adapter.EntryFileExtension())
 
-		importPath, err := s.calculateImportPath(entryPath, pm.absComponentPath)
+		importPath, err := CalculateImportPath(entryPath, pm.absComponentPath)
 		if err != nil {
 			clientEntryErrors = append(clientEntryErrors, BuildError{
 				Page:    pm.config.ComponentPath,
