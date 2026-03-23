@@ -17,6 +17,7 @@ type buildPaths struct {
 	ssrDir        string
 	entriesDir    string
 	pagesDir      string
+	runtimeDir    string
 	publicDir     string
 	publicDestDir string
 	manifestPath  string
@@ -83,6 +84,7 @@ func (s *BuildService) newBuildRun(input BuildInput) (*buildRun, error) {
 		ssrDir:        filepath.Join(input.OriginalCwd, ".bifrost", "ssr"),
 		entriesDir:    filepath.Join(input.OriginalCwd, ".bifrost", "entries"),
 		pagesDir:      filepath.Join(input.OriginalCwd, ".bifrost", "pages"),
+		runtimeDir:    filepath.Join(input.OriginalCwd, ".bifrost", "runtime"),
 		publicDir:     filepath.Join(input.OriginalCwd, "public"),
 		publicDestDir: filepath.Join(input.OriginalCwd, ".bifrost", "public"),
 		manifestPath:  filepath.Join(input.OriginalCwd, ".bifrost", "manifest.json"),
@@ -121,6 +123,25 @@ func (s *BuildService) newBuildRun(input BuildInput) (*buildRun, error) {
 func (s *BuildService) createOutputDirs(run *buildRun) error {
 	step := run.report.StartStep("Creating output directories")
 
+	cleanPaths := []struct {
+		path string
+		name string
+	}{
+		{path: run.paths.outdir, name: "dist"},
+		{path: run.paths.ssrDir, name: "ssr"},
+		{path: run.paths.entriesDir, name: "entries"},
+		{path: run.paths.pagesDir, name: "pages"},
+		{path: run.paths.runtimeDir, name: "runtime"},
+		{path: run.paths.publicDestDir, name: "public"},
+	}
+
+	for _, dir := range cleanPaths {
+		if err := os.RemoveAll(dir.path); err != nil {
+			run.report.EndStep(step, false, fmt.Sprintf("failed to clean %s dir: %v", dir.name, err))
+			return fmt.Errorf("failed to clean %s dir: %w", dir.name, err)
+		}
+	}
+
 	dirs := []struct {
 		path string
 		name string
@@ -151,6 +172,11 @@ func (s *BuildService) copyPublicAssets(run *buildRun) {
 func (s *BuildService) buildSSRBundles(run *buildRun) {
 	step := run.report.StartStep("Building SSR bundles")
 	errors := make([]BuildError, 0)
+	var batchFallbackWarning []string
+
+	entryPaths := make([]string, 0, len(run.pages))
+	entryNames := make([]string, 0, len(run.pages))
+	pagesToBuild := make([]buildPage, 0, len(run.pages))
 
 	for _, page := range run.pages {
 		if page.config.Mode == core.ModeClientOnly {
@@ -179,27 +205,50 @@ func (s *BuildService) buildSSRBundles(run *buildRun) {
 			continue
 		}
 
-		if err := s.renderer.BuildSSR([]string{ssrEntryPath}, run.paths.ssrDir); err != nil {
-			run.markSSRFailed(page.entryName)
-			errors = append(errors, parseBuildError(page.entryName, err))
+		entryPaths = append(entryPaths, ssrEntryPath)
+		entryNames = append(entryNames, page.entryName)
+		pagesToBuild = append(pagesToBuild, page)
+	}
+
+	if len(entryPaths) > 0 {
+		if err := s.renderer.BuildSSR(entryPaths, run.paths.ssrDir); err != nil {
+			batchFallbackWarning = []string{err.Error()}
+			s.buildSSRBundlesIndividually(run, pagesToBuild, &errors)
+		}
+	}
+
+	for _, entryName := range entryNames {
+		if run.ssrFailedFor(entryName) {
 			continue
 		}
-
-		run.updateManifestEntry(page.entryName, func(entry *core.ManifestEntry) {
-			entry.Script = "/dist/" + page.entryName + ".js"
-			entry.CSS = "/dist/" + page.entryName + ".css"
-			entry.SSR = "/ssr/" + page.ssrEntryName() + ".js"
+		run.updateManifestEntry(entryName, func(entry *core.ManifestEntry) {
+			entry.Script = "/dist/" + entryName + ".js"
+			entry.CSS = "/dist/" + entryName + ".css"
+			entry.SSR = "/ssr/" + entryName + "-ssr.js"
 			entry.Mode = "ssr"
 		})
 	}
 
 	step.Success = len(errors) == 0
 	run.report.EndStep(step, step.Success, "")
+	if len(batchFallbackWarning) > 0 {
+		run.report.AddWarning("SSR build", "Batch SSR build failed; fell back to per-page builds", batchFallbackWarning)
+	}
 	for _, err := range errors {
 		if err.Page != "" {
 			run.report.AddError(err.Page, err.Message, err.Details)
 		} else {
 			run.report.AddWarning("SSR build", err.Message, err.Details)
+		}
+	}
+}
+
+func (s *BuildService) buildSSRBundlesIndividually(run *buildRun, pages []buildPage, errors *[]BuildError) {
+	for _, page := range pages {
+		ssrEntryPath := page.ssrEntryPath(s.adapter, run.paths.entriesDir)
+		if err := s.renderer.BuildSSR([]string{ssrEntryPath}, run.paths.ssrDir); err != nil {
+			run.markSSRFailed(page.entryName)
+			*errors = append(*errors, parseBuildError(page.entryName, err))
 		}
 	}
 }
@@ -396,8 +445,7 @@ func (s *BuildService) exportStaticPrerender(_ context.Context, run *buildRun) e
 	run.report.EndStep(step, true, "")
 
 	if !run.needsRuntime {
-		runtimeDir := filepath.Join(run.paths.bifrostDir, "runtime")
-		if err := os.RemoveAll(runtimeDir); err != nil {
+		if err := os.RemoveAll(run.paths.runtimeDir); err != nil {
 			run.report.AddWarning("Cleanup", "Failed to remove runtime directory", []string{err.Error()})
 		}
 	}

@@ -17,6 +17,7 @@ import (
 type fakeRenderer struct {
 	buildCalls           int
 	buildSSRCalls        int
+	buildSSRBatchSizes   []int
 	individualBuildCalls int
 	renderCalls          int
 	streamCalls          int
@@ -60,6 +61,7 @@ func (f *fakeRenderer) Build(entrypoints []string, outdir string, entryNames []s
 
 func (f *fakeRenderer) BuildSSR(entrypoints []string, outdir string) error {
 	f.buildSSRCalls++
+	f.buildSSRBatchSizes = append(f.buildSSRBatchSizes, len(entrypoints))
 	if f.buildSSRFn != nil {
 		return f.buildSSRFn(entrypoints, outdir)
 	}
@@ -213,6 +215,144 @@ func main() {
 	}
 	if !strings.Contains(manifest, `"html": "/pages/pages-about-entry.html"`) {
 		t.Fatalf("expected about html in manifest, got %s", manifest)
+	}
+}
+
+func TestBuildProjectCleansGeneratedDirsButPreservesBifrostRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main
+func main() {
+	_ = Page("/", "./pages/home.tsx", WithClient())
+}`)
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "<title>Home</title>")
+	writeTestFile(t, filepath.Join(tmpDir, ".bifrost", ".gitkeep"), "keep")
+	writeTestFile(t, filepath.Join(tmpDir, ".bifrost", "dist", "stale.js"), "stale")
+	writeTestFile(t, filepath.Join(tmpDir, ".bifrost", "ssr", "stale.js"), "stale")
+	writeTestFile(t, filepath.Join(tmpDir, ".bifrost", "entries", "stale.tsx"), "stale")
+	writeTestFile(t, filepath.Join(tmpDir, ".bifrost", "pages", "stale.html"), "stale")
+	writeTestFile(t, filepath.Join(tmpDir, ".bifrost", "runtime", "stale-bin"), "stale")
+	writeTestFile(t, filepath.Join(tmpDir, ".bifrost", "public", "stale.txt"), "stale")
+
+	renderer := &fakeRenderer{
+		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+			name := entryNames[0]
+			return map[string]core.ClientBuildResult{
+				name: {Script: "/dist/" + name + ".js"},
+			}, nil
+		},
+	}
+	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
+
+	result := service.BuildProject(context.Background(), BuildInput{
+		MainFile:    filepath.Join(tmpDir, "main.go"),
+		OriginalCwd: tmpDir,
+	})
+	if result.Error != nil {
+		t.Fatalf("BuildProject() error = %v", result.Error)
+	}
+	if !result.Success {
+		t.Fatal("expected build success")
+	}
+
+	for _, stalePath := range []string{
+		filepath.Join(tmpDir, ".bifrost", "dist", "stale.js"),
+		filepath.Join(tmpDir, ".bifrost", "ssr", "stale.js"),
+		filepath.Join(tmpDir, ".bifrost", "entries", "stale.tsx"),
+		filepath.Join(tmpDir, ".bifrost", "pages", "stale.html"),
+		filepath.Join(tmpDir, ".bifrost", "runtime", "stale-bin"),
+		filepath.Join(tmpDir, ".bifrost", "public", "stale.txt"),
+	} {
+		if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+			t.Fatalf("expected stale artifact removed: %s", stalePath)
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(tmpDir, ".bifrost", ".gitkeep")); err != nil {
+		t.Fatalf("expected .bifrost root preserved: %v", err)
+	}
+}
+
+func TestBuildProjectBatchesSSRBundles(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main
+func main() {
+	_ = Page("/", "./pages/home.tsx")
+	_ = Page("/about", "./pages/about.tsx")
+}`)
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "<title>Home</title>")
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "about.tsx"), "<title>About</title>")
+
+	renderer := &fakeRenderer{
+		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+			result := make(map[string]core.ClientBuildResult, len(entryNames))
+			for _, name := range entryNames {
+				result[name] = core.ClientBuildResult{Script: "/dist/" + name + ".js"}
+			}
+			return result, nil
+		},
+	}
+	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
+
+	result := service.BuildProject(context.Background(), BuildInput{
+		MainFile:    filepath.Join(tmpDir, "main.go"),
+		OriginalCwd: tmpDir,
+	})
+	if result.Error != nil {
+		t.Fatalf("BuildProject() error = %v", result.Error)
+	}
+	if !result.Success {
+		t.Fatal("expected build success")
+	}
+	if renderer.buildSSRCalls != 1 {
+		t.Fatalf("expected one batched SSR build, got %d", renderer.buildSSRCalls)
+	}
+	if len(renderer.buildSSRBatchSizes) != 1 || renderer.buildSSRBatchSizes[0] != 2 {
+		t.Fatalf("expected one SSR batch of size 2, got %v", renderer.buildSSRBatchSizes)
+	}
+}
+
+func TestBuildProjectFallsBackToPerPageSSRBundles(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main
+func main() {
+	_ = Page("/", "./pages/home.tsx")
+	_ = Page("/about", "./pages/about.tsx")
+}`)
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "<title>Home</title>")
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "about.tsx"), "<title>About</title>")
+
+	renderer := &fakeRenderer{
+		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+			result := make(map[string]core.ClientBuildResult, len(entryNames))
+			for _, name := range entryNames {
+				result[name] = core.ClientBuildResult{Script: "/dist/" + name + ".js"}
+			}
+			return result, nil
+		},
+		buildSSRFn: func(entrypoints []string, outdir string) error {
+			if len(entrypoints) > 1 {
+				return errors.New("batch failed")
+			}
+			return nil
+		},
+	}
+	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
+
+	result := service.BuildProject(context.Background(), BuildInput{
+		MainFile:    filepath.Join(tmpDir, "main.go"),
+		OriginalCwd: tmpDir,
+	})
+	if result.Error != nil {
+		t.Fatalf("BuildProject() error = %v", result.Error)
+	}
+	if !result.Success {
+		t.Fatal("expected build success")
+	}
+	if renderer.buildSSRCalls != 3 {
+		t.Fatalf("expected one batch SSR build and two fallback builds, got %d", renderer.buildSSRCalls)
+	}
+	if got := renderer.buildSSRBatchSizes; len(got) != 3 || got[0] != 2 || got[1] != 1 || got[2] != 1 {
+		t.Fatalf("unexpected SSR batch sizes: %v", got)
 	}
 }
 

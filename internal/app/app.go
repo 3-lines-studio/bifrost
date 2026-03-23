@@ -148,12 +148,12 @@ func (a *App) Wrap(api Router) http.Handler {
 		defaultLang = a.config.DefaultHTMLLang
 	}
 
+	fsAdapter := adaptersfs.NewEmbedFileSystem(a.assetsFS)
+	pageService := usecase.NewPageService(a.host.Client(), fsAdapter, a.adapter)
+
 	for _, route := range a.routes {
 		config := core.PageConfigFromRoute(route)
 		staticPath := a.getStaticPath(config)
-
-		fsAdapter := adaptersfs.NewEmbedFileSystem(a.assetsFS)
-		pageService := usecase.NewPageService(a.host.Client(), fsAdapter, a.adapter)
 
 		handler := adaptershttp.NewPageHandler(pageService, config, a.manifest, a.assetsFS, a.isDev, staticPath, defaultLang)
 		api.Handle(route.Pattern, handler)
@@ -226,12 +226,12 @@ func (a *App) ExportStaticPages(outputDir string) error {
 
 func createAssetHandler(router Router, app *App) http.Handler {
 	isDev := app.isDev
+	assetHandler := adaptershttp.NewAssetHandler(app.assetsFS, isDev)
 
 	distHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := req.URL.Path
 
 		if len(path) >= 6 && path[:6] == "/dist/" {
-			assetHandler := adaptershttp.NewAssetHandler(app.assetsFS, isDev)
 			assetHandler.ServeHTTP(w, req)
 			return
 		}
