@@ -22,6 +22,7 @@ type PageHandler struct {
 	entryName       string
 	staticPath      string
 	defaultHTMLLang string
+	shell           *core.HTMLDocumentShell
 }
 
 func NewPageHandler(
@@ -33,15 +34,28 @@ func NewPageHandler(
 	staticPath string,
 	defaultHTMLLang string,
 ) http.Handler {
+	entryName := core.EntryNameForPath(config.ComponentPath)
+	artifacts := core.ResolvePageArtifacts(manifest, entryName)
+	var shell *core.HTMLDocumentShell
+	if builtShell, err := core.NewHTMLDocumentShell(
+		artifacts.Script,
+		artifacts.CriticalCSS,
+		core.StylesheetHrefsFor(artifacts),
+		artifacts.Chunks,
+	); err == nil {
+		shell = &builtShell
+	}
+
 	return &PageHandler{
 		service:         service,
 		config:          config,
 		manifest:        manifest,
 		assetsFS:        assetsFS,
 		isDev:           isDev,
-		entryName:       core.EntryNameForPath(config.ComponentPath),
+		entryName:       entryName,
 		staticPath:      staticPath,
 		defaultHTMLLang: defaultHTMLLang,
+		shell:           shell,
 	}
 }
 
@@ -66,6 +80,7 @@ func (h *PageHandler) servePageInput(req *http.Request) usecase.ServePageInput {
 		StaticPath:      h.staticPath,
 		RequestPath:     req.URL.Path,
 		Request:         req,
+		Shell:           h.shell,
 	}
 }
 

@@ -11,6 +11,23 @@ import (
 
 var emptyPropsJSON = []byte("{}")
 
+type HTMLDocumentShell struct {
+	scriptSrc string
+	styleTags string
+	chunks    []string
+}
+
+func NewHTMLDocumentShell(scriptSrc string, criticalCSS string, cssHrefs []string, chunks []string) (HTMLDocumentShell, error) {
+	if scriptSrc == "" {
+		return HTMLDocumentShell{}, errors.New("missing script src")
+	}
+	return HTMLDocumentShell{
+		scriptSrc: scriptSrc,
+		styleTags: RenderStyleTags(criticalCSS, cssHrefs),
+		chunks:    append([]string(nil), chunks...),
+	}, nil
+}
+
 // MarshalBifrostPropsJSON marshals props for embedding in the __BIFROST_PROPS__ script tag.
 func MarshalBifrostPropsJSON(props map[string]any) ([]byte, error) {
 	if len(props) == 0 {
@@ -28,10 +45,31 @@ func MarshalBifrostPropsJSON(props map[string]any) ([]byte, error) {
 
 // WriteHTMLPreamble writes from doctype through the opening <div id="app"> (exclusive of body HTML).
 func WriteHTMLPreamble(w io.Writer, headHTML string, scriptSrc string, criticalCSS string, cssHrefs []string, chunks []string, htmlLang string, htmlClass string) error {
-	if scriptSrc == "" {
-		return errors.New("missing script src")
+	shell, err := NewHTMLDocumentShell(scriptSrc, criticalCSS, cssHrefs, chunks)
+	if err != nil {
+		return err
 	}
+	return shell.WritePreamble(w, headHTML, htmlLang, htmlClass)
+}
 
+// WriteHTMLSuffix writes the closing </div>, props script, deferred scripts, and closing body/html.
+func WriteHTMLSuffix(w io.Writer, propsJSON []byte, scriptSrc string, chunks []string) error {
+	shell, err := NewHTMLDocumentShell(scriptSrc, "", nil, chunks)
+	if err != nil {
+		return err
+	}
+	return shell.WriteSuffix(w, propsJSON)
+}
+
+func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, headHTML string, criticalCSS string, cssHrefs []string, chunks []string, htmlLang string, htmlClass string) (string, error) {
+	shell, err := NewHTMLDocumentShell(scriptSrc, criticalCSS, cssHrefs, chunks)
+	if err != nil {
+		return "", err
+	}
+	return shell.Render(bodyHTML, props, headHTML, htmlLang, htmlClass)
+}
+
+func (s HTMLDocumentShell) WritePreamble(w io.Writer, headHTML string, htmlLang string, htmlClass string) error {
 	langAttr := SanitizeHTMLLang(htmlLang)
 	classAttr := SanitizeHTMLClass(htmlClass)
 
@@ -39,8 +77,6 @@ func WriteHTMLPreamble(w io.Writer, headHTML string, scriptSrc string, criticalC
 	if headHTML != "" {
 		hasCustomTitle = containsTitle(headHTML)
 	}
-
-	styleTags := RenderStyleTags(criticalCSS, cssHrefs)
 
 	if _, err := io.WriteString(w, "<!doctype html>\n<html lang=\""); err != nil {
 		return err
@@ -79,13 +115,13 @@ func WriteHTMLPreamble(w io.Writer, headHTML string, scriptSrc string, criticalC
 			return err
 		}
 	}
-	if styleTags != "" {
-		if _, err := io.WriteString(w, styleTags); err != nil {
+	if s.styleTags != "" {
+		if _, err := io.WriteString(w, s.styleTags); err != nil {
 			return err
 		}
 	}
 
-	for _, chunk := range chunks {
+	for _, chunk := range s.chunks {
 		if _, err := io.WriteString(w, `<link rel="modulepreload" href="`); err != nil {
 			return err
 		}
@@ -99,7 +135,7 @@ func WriteHTMLPreamble(w io.Writer, headHTML string, scriptSrc string, criticalC
 	if _, err := io.WriteString(w, `<link rel="modulepreload" href="`); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(w, scriptSrc); err != nil {
+	if _, err := io.WriteString(w, s.scriptSrc); err != nil {
 		return err
 	}
 	if _, err := io.WriteString(w, `" />`); err != nil {
@@ -110,11 +146,7 @@ func WriteHTMLPreamble(w io.Writer, headHTML string, scriptSrc string, criticalC
 	return err
 }
 
-// WriteHTMLSuffix writes the closing </div>, props script, deferred scripts, and closing body/html.
-func WriteHTMLSuffix(w io.Writer, propsJSON []byte, scriptSrc string, chunks []string) error {
-	if scriptSrc == "" {
-		return errors.New("missing script src")
-	}
+func (s HTMLDocumentShell) WriteSuffix(w io.Writer, propsJSON []byte) error {
 	if len(propsJSON) == 0 {
 		propsJSON = emptyPropsJSON
 	}
@@ -128,7 +160,7 @@ func WriteHTMLSuffix(w io.Writer, propsJSON []byte, scriptSrc string, chunks []s
 		return err
 	}
 
-	for _, chunk := range chunks {
+	for _, chunk := range s.chunks {
 		if _, err := io.WriteString(w, `    <script src="`); err != nil {
 			return err
 		}
@@ -143,27 +175,27 @@ func WriteHTMLSuffix(w io.Writer, propsJSON []byte, scriptSrc string, chunks []s
 	if _, err := io.WriteString(w, "    <script src=\""); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(w, scriptSrc); err != nil {
+	if _, err := io.WriteString(w, s.scriptSrc); err != nil {
 		return err
 	}
 	_, err := io.WriteString(w, "\" type=\"module\" defer></script>\n  </body>\n</html>\n")
 	return err
 }
 
-func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, headHTML string, criticalCSS string, cssHrefs []string, chunks []string, htmlLang string, htmlClass string) (string, error) {
+func (s HTMLDocumentShell) Render(bodyHTML string, props map[string]any, headHTML string, htmlLang string, htmlClass string) (string, error) {
 	propsJSON, err := MarshalBifrostPropsJSON(props)
 	if err != nil {
 		return "", err
 	}
 
 	var sb strings.Builder
-	if err := WriteHTMLPreamble(&sb, headHTML, scriptSrc, criticalCSS, cssHrefs, chunks, htmlLang, htmlClass); err != nil {
+	if err := s.WritePreamble(&sb, headHTML, htmlLang, htmlClass); err != nil {
 		return "", err
 	}
 	if _, err := sb.WriteString(bodyHTML); err != nil {
 		return "", err
 	}
-	if err := WriteHTMLSuffix(&sb, propsJSON, scriptSrc, chunks); err != nil {
+	if err := s.WriteSuffix(&sb, propsJSON); err != nil {
 		return "", err
 	}
 

@@ -32,21 +32,25 @@ func ResolveHTMLDocumentAttrs(appDefaultLang, pageLang, pageClass string, props 
 	var fromLoaderLang string
 	var fromLoaderClass string
 	if props != nil {
-		propsForReact = make(map[string]any, len(props))
-		for k, v := range props {
-			switch k {
-			case PropHTMLLang:
-				if s, ok := v.(string); ok {
-					fromLoaderLang = s
+		_, hasLang := props[PropHTMLLang]
+		_, hasClass := props[PropHTMLClass]
+		if rawLang, ok := props[PropHTMLLang].(string); ok {
+			fromLoaderLang = rawLang
+		}
+		if rawClass, ok := props[PropHTMLClass].(string); ok {
+			fromLoaderClass = rawClass
+		}
+		if !hasLang && !hasClass {
+			propsForReact = props
+		} else {
+			propsForReact = make(map[string]any, len(props))
+			for k, v := range props {
+				switch k {
+				case PropHTMLLang, PropHTMLClass:
+					continue
 				}
-				continue
-			case PropHTMLClass:
-				if s, ok := v.(string); ok {
-					fromLoaderClass = s
-				}
-				continue
+				propsForReact[k] = v
 			}
-			propsForReact[k] = v
 		}
 	}
 

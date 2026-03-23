@@ -70,7 +70,8 @@ func TestResolveHTMLDocumentAttrs_ClassPrecedence(t *testing.T) {
 }
 
 func TestResolveHTMLDocumentAttrs_PageClassFallback(t *testing.T) {
-	lang, class, out := ResolveHTMLDocumentAttrs("", "es", " dark ", map[string]any{"k": 1})
+	props := map[string]any{"k": 1}
+	lang, class, out := ResolveHTMLDocumentAttrs("", "es", " dark ", props)
 	if lang != "es" {
 		t.Fatalf("expected page lang, got %q", lang)
 	}
@@ -79,6 +80,10 @@ func TestResolveHTMLDocumentAttrs_PageClassFallback(t *testing.T) {
 	}
 	if len(out) != 1 {
 		t.Fatalf("expected one prop, got %v", out)
+	}
+	out["copy_check"] = true
+	if props["copy_check"] != true {
+		t.Fatal("expected props map to be reused when no reserved keys are present")
 	}
 }
 
@@ -92,5 +97,58 @@ func TestResolveHTMLDocumentAttrs_NilProps(t *testing.T) {
 	}
 	if out != nil {
 		t.Fatal("expected nil propsForReact when props nil")
+	}
+}
+
+func TestResolveHTMLDocumentAttrs_ReservedKeysForceCopy(t *testing.T) {
+	props := map[string]any{
+		PropHTMLLang:  "pt-BR",
+		PropHTMLClass: "contrast",
+		"k":           1,
+	}
+	lang, class, out := ResolveHTMLDocumentAttrs("en", "es", "dark", props)
+	if lang != "pt-BR" {
+		t.Fatalf("expected loader lang, got %q", lang)
+	}
+	if class != "contrast" {
+		t.Fatalf("expected loader class, got %q", class)
+	}
+	out["copy_check"] = true
+	if _, ok := props["copy_check"]; ok {
+		t.Fatal("expected props map to be copied when reserved keys are stripped")
+	}
+	if _, ok := out[PropHTMLLang]; ok {
+		t.Fatal("reserved lang key should be stripped")
+	}
+	if _, ok := out[PropHTMLClass]; ok {
+		t.Fatal("reserved class key should be stripped")
+	}
+}
+
+func BenchmarkResolveHTMLDocumentAttrs_NilProps(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _, _ = ResolveHTMLDocumentAttrs("en", "es", "dark", nil)
+	}
+}
+
+func BenchmarkResolveHTMLDocumentAttrs_NoReservedKeys(b *testing.B) {
+	b.ReportAllocs()
+	props := map[string]any{"k": 1, "title": "x"}
+	for i := 0; i < b.N; i++ {
+		_, _, _ = ResolveHTMLDocumentAttrs("en", "es", "dark", props)
+	}
+}
+
+func BenchmarkResolveHTMLDocumentAttrs_WithReservedKeys(b *testing.B) {
+	b.ReportAllocs()
+	props := map[string]any{
+		PropHTMLLang:  "de",
+		PropHTMLClass: "contrast",
+		"k":           1,
+		"title":       "x",
+	}
+	for i := 0; i < b.N; i++ {
+		_, _, _ = ResolveHTMLDocumentAttrs("en", "es", "dark", props)
 	}
 }

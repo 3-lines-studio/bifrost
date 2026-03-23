@@ -36,3 +36,15 @@ func BenchmarkRenderHTMLShell_LargeProps(b *testing.B) {
 		_, _ = RenderHTMLShell("<div>body</div>", props, "/dist/page.js", "<title>T</title>", "", []string{"/dist/page.css"}, nil, "", "")
 	}
 }
+
+func BenchmarkHTMLDocumentShell_Render(b *testing.B) {
+	b.ReportAllocs()
+	shell, err := NewHTMLDocumentShell("/dist/page.js", ".hero{display:block}", []string{"/dist/page.css"}, []string{"/dist/chunk-a.js", "/dist/chunk-b.js"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	props := map[string]any{"name": "World", "count": 42}
+	for i := 0; i < b.N; i++ {
+		_, _ = shell.Render("<div><h1>Hello World</h1><p>Some content here</p></div>", props, "<title>Test</title>", "en", "dark")
+	}
+}

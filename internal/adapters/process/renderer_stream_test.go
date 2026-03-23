@@ -2,6 +2,7 @@ package process
 
 import (
 	"bufio"
+	"bytes"
 	"io"
 	"strings"
 	"testing"
@@ -63,5 +64,35 @@ func TestHeadThenRawTail(t *testing.T) {
 	}
 	if string(rest) != `<main>body</main>` {
 		t.Fatalf("tail %q", rest)
+	}
+}
+
+func TestCopyResponseBodyWithFlush_FlushesFirstChunkOnly(t *testing.T) {
+	src := strings.NewReader(strings.Repeat("a", 64*1024))
+	var dst bytes.Buffer
+	flushes := 0
+
+	written, err := copyResponseBodyWithFlush(&dst, src, func() { flushes++ }, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written != int64(dst.Len()) {
+		t.Fatalf("written = %d, dst len = %d", written, dst.Len())
+	}
+	if flushes != 1 {
+		t.Fatalf("flushes = %d, want 1", flushes)
+	}
+}
+
+func TestCopyResponseBodyWithFlush_FlushesEveryChunkWhenRequested(t *testing.T) {
+	src := strings.NewReader(strings.Repeat("a", 64*1024))
+	var dst bytes.Buffer
+	flushes := 0
+
+	if _, err := copyResponseBodyWithFlush(&dst, src, func() { flushes++ }, true); err != nil {
+		t.Fatal(err)
+	}
+	if flushes < 2 {
+		t.Fatalf("flushes = %d, want at least 2", flushes)
 	}
 }

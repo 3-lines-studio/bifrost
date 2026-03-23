@@ -50,6 +50,12 @@ type rendererProcessConfig struct {
 	cleanup func()
 }
 
+type renderRequestPayload struct {
+	Path       string         `json:"path"`
+	Props      map[string]any `json:"props"`
+	StreamBody bool           `json:"streamBody,omitempty"`
+}
+
 func uniqueSocketPath() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
@@ -214,14 +220,11 @@ func derefString(p *string) string {
 
 // MarshalRenderRequestJSON builds the JSON body for POST /render (exported for tests).
 func MarshalRenderRequestJSON(path string, props map[string]any, streamBody bool) ([]byte, error) {
-	reqBody := map[string]any{
-		"path":  path,
-		"props": props,
-	}
-	if streamBody {
-		reqBody["streamBody"] = true
-	}
-	return json.Marshal(reqBody)
+	return json.Marshal(renderRequestPayload{
+		Path:       path,
+		Props:      props,
+		StreamBody: streamBody,
+	})
 }
 
 func (r *Renderer) postRender(ctx context.Context, path string, props map[string]any, streamBody bool) (*http.Response, error) {
@@ -323,16 +326,18 @@ func parseRenderFirstLine(line []byte) (head string, html *string, err error) {
 	return derefString(msg.Head), msg.HTML, nil
 }
 
-func copyResponseBodyWithFlush(dst io.Writer, src io.Reader, flush func()) (int64, error) {
+func copyResponseBodyWithFlush(dst io.Writer, src io.Reader, flush func(), flushEveryChunk bool) (int64, error) {
 	buf := make([]byte, 32*1024)
 	var written int64
+	flushed := false
 	for {
 		n, rerr := src.Read(buf)
 		if n > 0 {
 			nw, werr := dst.Write(buf[:n])
 			written += int64(nw)
-			if flush != nil {
+			if flush != nil && (flushEveryChunk || !flushed) {
 				flush()
+				flushed = true
 			}
 			if werr != nil {
 				return written, werr
@@ -384,7 +389,7 @@ func (r *Renderer) RenderBodyStream(ctx context.Context, path string, props map[
 	if err := onHead(head); err != nil {
 		return err
 	}
-	_, err = copyResponseBodyWithFlush(w, br, flush)
+	_, err = copyResponseBodyWithFlush(w, br, flush, false)
 	return err
 }
 

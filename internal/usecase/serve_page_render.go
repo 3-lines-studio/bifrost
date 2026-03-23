@@ -13,6 +13,10 @@ import (
 
 func (s *PageService) renderClientOnlyShell(state pageRequestState) (string, error) {
 	input := state.input
+	shell, err := s.resolveShell(state)
+	if err != nil {
+		return "", err
+	}
 
 	if input.IsDev && s.renderer != nil {
 		ssrPath := filepath.Join(".bifrost/ssr", input.EntryName+"-ssr.js")
@@ -20,23 +24,13 @@ func (s *PageService) renderClientOnlyShell(state pageRequestState) (string, err
 			page, err := s.renderer.Render(ssrPath, map[string]any{})
 			if err == nil {
 				lang, htmlClass, _ := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
-				return RenderHTMLDocumentFromPage(page, map[string]any{}, state.artifacts, lang, htmlClass)
+				return shell.Render(page.Body, nil, page.Head, lang, htmlClass)
 			}
 		}
 	}
 
 	lang, htmlClass, _ := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
-	return core.RenderHTMLShell(
-		"",
-		map[string]any{},
-		state.artifacts.Script,
-		"",
-		state.artifacts.CriticalCSS,
-		core.StylesheetHrefsFor(state.artifacts),
-		state.artifacts.Chunks,
-		lang,
-		htmlClass,
-	)
+	return shell.Render("", nil, "", lang, htmlClass)
 }
 
 func (s *PageService) renderStaticPrerender(ctx context.Context, state pageRequestState) ServePageOutput {
@@ -85,7 +79,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 			}
 		}
 
-		html, err := s.renderPageHTMLWithArtifacts(state.artifacts, propsForReact, page, lang, htmlClass)
+		html, err := s.renderPageHTMLWithArtifacts(state, propsForReact, page, lang, htmlClass)
 		return ServePageOutput{
 			Action: core.ActionRenderStaticPrerender,
 			HTML:   html,
@@ -101,7 +95,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 		}
 	}
 
-	lang, htmlClass, propsForReact := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, map[string]any{})
+	lang, htmlClass, propsForReact := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
 
 	page, err := s.renderer.Render(state.renderPath, propsForReact)
 	if err != nil {
@@ -111,7 +105,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 		}
 	}
 
-	html, err := s.renderPageHTMLWithArtifacts(state.artifacts, propsForReact, page, lang, htmlClass)
+	html, err := s.renderPageHTMLWithArtifacts(state, propsForReact, page, lang, htmlClass)
 	return ServePageOutput{
 		Action: core.ActionRenderStaticPrerender,
 		HTML:   html,
@@ -121,7 +115,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 
 func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) ServePageOutput {
 	input := state.input
-	props := map[string]any{}
+	var props map[string]any
 	if input.Config.PropsLoader != nil {
 		var err error
 		props, err = input.Config.PropsLoader(input.Request)
@@ -148,6 +142,13 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 			Error:  err,
 		}
 	}
+	shell, err := s.resolveShell(state)
+	if err != nil {
+		return ServePageOutput{
+			Action: core.ActionRenderSSR,
+			Error:  err,
+		}
+	}
 
 	flush := func(w http.ResponseWriter) func() {
 		return func() {
@@ -165,7 +166,7 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 			func(head string) error {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusOK)
-				if err := WriteSSRHTMLPreamble(w, head, state.artifacts, lang, htmlClass); err != nil {
+				if err := shell.WritePreamble(w, head, lang, htmlClass); err != nil {
 					return err
 				}
 				doFlush()
@@ -174,7 +175,7 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		if err != nil {
 			return err
 		}
-		if err := core.WriteHTMLSuffix(w, propsJSON, state.artifacts.Script, state.artifacts.Chunks); err != nil {
+		if err := shell.WriteSuffix(w, propsJSON); err != nil {
 			return err
 		}
 		doFlush()
@@ -200,9 +201,25 @@ func (s *PageService) resolveRenderPath(input ServePageInput) string {
 }
 
 func (s *PageService) renderPageHTML(input ServePageInput, props map[string]any, page core.RenderedPage, htmlLang string, htmlClass string) (string, error) {
-	return s.renderPageHTMLWithArtifacts(core.ResolvePageArtifacts(input.Manifest, input.EntryName), props, page, htmlLang, htmlClass)
+	return s.renderPageHTMLWithArtifacts(s.prepareRequest(input), props, page, htmlLang, htmlClass)
 }
 
-func (s *PageService) renderPageHTMLWithArtifacts(artifacts core.PageArtifacts, props map[string]any, page core.RenderedPage, htmlLang string, htmlClass string) (string, error) {
-	return RenderHTMLDocumentFromPage(page, props, artifacts, htmlLang, htmlClass)
+func (s *PageService) renderPageHTMLWithArtifacts(state pageRequestState, props map[string]any, page core.RenderedPage, htmlLang string, htmlClass string) (string, error) {
+	shell, err := s.resolveShell(state)
+	if err != nil {
+		return "", err
+	}
+	return shell.Render(page.Body, props, page.Head, htmlLang, htmlClass)
+}
+
+func (s *PageService) resolveShell(state pageRequestState) (core.HTMLDocumentShell, error) {
+	if state.shell != nil {
+		return *state.shell, nil
+	}
+	return core.NewHTMLDocumentShell(
+		state.artifacts.Script,
+		state.artifacts.CriticalCSS,
+		core.StylesheetHrefsFor(state.artifacts),
+		state.artifacts.Chunks,
+	)
 }

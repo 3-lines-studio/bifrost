@@ -39,6 +39,35 @@ func TestPreambleAndSuffix_MatchesRenderHTMLShell(t *testing.T) {
 	}
 }
 
+func TestHTMLDocumentShell_RenderMatchesRenderHTMLShell(t *testing.T) {
+	const body = "<main>Hello</main>"
+	props := map[string]any{"name": "World"}
+	scriptSrc := "/dist/page.js"
+	headHTML := "<title>Test</title><meta name=\"description\" content=\"x\" />"
+	criticalCSS := ".hero{display:block}"
+	cssHrefs := []string{"/dist/page.css"}
+	chunks := []string{"/dist/chunk-a.js", "/dist/chunk-b.js"}
+	lang := "en"
+	class := "dark"
+
+	want, err := RenderHTMLShell(body, props, scriptSrc, headHTML, criticalCSS, cssHrefs, chunks, lang, class)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	shell, err := NewHTMLDocumentShell(scriptSrc, criticalCSS, cssHrefs, chunks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := shell.Render(body, props, headHTML, lang, class)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("shell render mismatch\nwant: %s\ngot:  %s", want, got)
+	}
+}
+
 func TestRenderHTMLShell_Basic(t *testing.T) {
 	html, err := RenderHTMLShell(
 		"<div>Hello</div>",

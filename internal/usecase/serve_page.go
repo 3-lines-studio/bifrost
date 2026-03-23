@@ -20,6 +20,7 @@ type ServePageInput struct {
 	RequestPath     string
 	HasRenderer     bool
 	Request         *http.Request
+	Shell           *core.HTMLDocumentShell
 }
 
 type ServePageOutput struct {
@@ -47,6 +48,7 @@ type pageRequestState struct {
 	decision   core.PageDecision
 	artifacts  core.PageArtifacts
 	renderPath string
+	shell      *core.HTMLDocumentShell
 }
 
 func NewPageService(renderer Renderer, fs FileSystem, adapter core.FrameworkAdapter) *PageService {
@@ -88,6 +90,7 @@ func (s *PageService) prepareRequest(input ServePageInput) pageRequestState {
 		decision:   core.DecidePageAction(req, entry),
 		artifacts:  core.ResolvePageArtifacts(input.Manifest, input.EntryName),
 		renderPath: s.resolveRenderPath(input),
+		shell:      input.Shell,
 	}
 }
 
