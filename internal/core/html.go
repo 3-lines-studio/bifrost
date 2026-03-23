@@ -181,18 +181,8 @@ func RenderStyleTags(criticalCSS string, cssHrefs []string) string {
 		sb.WriteString(sanitizeInlineStyleText(criticalCSS))
 		sb.WriteString(`</style>`)
 	}
-	deferNonCritical := strings.TrimSpace(criticalCSS) != ""
 	for _, href := range cssHrefs {
 		if href == "" {
-			continue
-		}
-		if deferNonCritical {
-			sb.WriteString(`<link rel="stylesheet" href="`)
-			sb.WriteString(href)
-			sb.WriteString(`" media="print" onload="this.media='all'" />`)
-			sb.WriteString(`<noscript><link rel="stylesheet" href="`)
-			sb.WriteString(href)
-			sb.WriteString(`" /></noscript>`)
 			continue
 		}
 		sb.WriteString(`<link rel="stylesheet" href="`)

@@ -193,7 +193,8 @@ func derefString(p *string) string {
 	return *p
 }
 
-func (r *Renderer) postRender(ctx context.Context, path string, props map[string]any, streamBody bool) (*http.Response, error) {
+// MarshalRenderRequestJSON builds the JSON body for POST /render (exported for tests).
+func MarshalRenderRequestJSON(path string, props map[string]any, streamBody bool) ([]byte, error) {
 	reqBody := map[string]any{
 		"path":  path,
 		"props": props,
@@ -201,7 +202,11 @@ func (r *Renderer) postRender(ctx context.Context, path string, props map[string
 	if streamBody {
 		reqBody["streamBody"] = true
 	}
-	jsonBody, err := json.Marshal(reqBody)
+	return json.Marshal(reqBody)
+}
+
+func (r *Renderer) postRender(ctx context.Context, path string, props map[string]any, streamBody bool) (*http.Response, error) {
+	jsonBody, err := MarshalRenderRequestJSON(path, props, streamBody)
 	if err != nil {
 		return nil, err
 	}

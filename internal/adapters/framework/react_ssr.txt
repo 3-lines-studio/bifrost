@@ -1,5 +1,5 @@
 import React from "react";
-import { renderToString } from "react-dom/server";
+import { renderToString, renderToReadableStream } from "react-dom/server";
 import { Page, Head } from "COMPONENT_PATH";
 
 export async function render(props, options) {
@@ -12,7 +12,6 @@ export async function render(props, options) {
 	const pageEl = React.createElement(Page, props);
 	if (streamBody) {
 		try {
-			const { renderToReadableStream } = await import("react-dom/server");
 			const stream = await renderToReadableStream(BIFROST_SSR_PAGE_WRAP);
 			return { head, stream };
 		} catch {

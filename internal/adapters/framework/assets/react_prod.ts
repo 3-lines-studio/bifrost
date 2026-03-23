@@ -22,8 +22,9 @@ interface Result {
 }
 
 interface RenderResult {
-  html: string;
+  html?: string;
   head?: string;
+  stream?: ReadableStream<Uint8Array>;
 }
 
 function serializeError(error: unknown): {
@@ -61,8 +62,52 @@ function createError(
   return new Response(JSON.stringify(result) + "\n");
 }
 
+/** One JSON line with head + html (Go RenderBodyStream and RenderChunked both accept this). */
+function singleLineRenderResponse(head: string, html: string): Response {
+  return new Response(JSON.stringify({ head, html }) + "\n", {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+    },
+  });
+}
+
+function headThenRawStreamResponse(
+  head: string,
+  htmlStream: ReadableStream<Uint8Array>,
+): Response {
+  const enc = new TextEncoder();
+  const headLine = enc.encode(JSON.stringify({ head }) + "\n");
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(headLine);
+        const reader = htmlStream.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) controller.enqueue(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        controller.close();
+      },
+    }),
+    {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+      },
+    },
+  );
+}
+
 async function handleRender(req: Bun.BunRequest): Promise<Response> {
-  let body: { path?: string; props?: Record<string, unknown> };
+  let body: {
+    path?: string;
+    props?: Record<string, unknown>;
+    streamBody?: boolean;
+  };
   try {
     body = await req.json();
   } catch (err) {
@@ -70,24 +115,30 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
     return createError(`Failed to parse request: ${message}`);
   }
 
-  const { path, props } = body;
+  const { path, props, streamBody } = body;
+  const wantStream = streamBody === true;
 
   if (!path) {
     return createError("Missing 'path' in request");
   }
 
   try {
-    const importPath = path.startsWith('/') ? 'file://' + path : path;
+    const importPath = path.startsWith("/") ? "file://" + path : path;
     const mod = await import(importPath);
 
     if (typeof mod.render !== "function") {
       return createError(
-        `SSR bundle missing render function. Ensure the page was built with 'bifrost-build' and has an SSR bundle in .bifrost/ssr/. Path: ${path}`
+        `SSR bundle missing render function. Ensure the page was built with 'bifrost-build' and has an SSR bundle in .bifrost/ssr/. Path: ${path}`,
       );
     }
 
-    const result: RenderResult = await mod.render(props || {});
-    return new Response(JSON.stringify(result) + "\n");
+    const result: RenderResult = await mod.render(props || {}, {
+      streamBody: wantStream,
+    });
+    if (result.stream instanceof ReadableStream) {
+      return headThenRawStreamResponse(result.head ?? "", result.stream);
+    }
+    return singleLineRenderResponse(result.head ?? "", result.html ?? "");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return createError(`Failed to render: ${message}`, err);

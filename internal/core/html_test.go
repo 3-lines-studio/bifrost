@@ -79,14 +79,14 @@ func TestRenderHTMLShell_Basic(t *testing.T) {
 	if !strings.Contains(html, `<style data-bifrost-critical>.hero{display:block}</style>`) {
 		t.Error("expected inline critical CSS in output")
 	}
-	if !strings.Contains(html, `media="print"`) || !strings.Contains(html, `onload="this.media='all'"`) {
-		t.Error("expected deferred non-critical stylesheet when critical CSS is inlined")
+	if strings.Contains(html, `media="print"`) || strings.Contains(html, `onload="this.media='all'"`) {
+		t.Error("did not expect deferred stylesheet loading when critical CSS is inlined")
 	}
 	if !strings.Contains(html, `<link rel="stylesheet" href="/dist/page.css"`) {
 		t.Error("expected stylesheet link in output")
 	}
-	if !strings.Contains(html, `<noscript><link rel="stylesheet" href="/dist/page.css" /></noscript>`) {
-		t.Error("expected noscript stylesheet fallback")
+	if strings.Contains(html, `<noscript><link rel="stylesheet"`) {
+		t.Error("did not expect noscript stylesheet fallback")
 	}
 	if !strings.Contains(html, "<title>Test</title>") {
 		t.Error("expected custom title in output")
@@ -267,17 +267,19 @@ func TestRenderStyleTags_MultipleStylesheets(t *testing.T) {
 	}
 }
 
-func TestRenderStyleTags_CriticalWithStylesheets_Deferred(t *testing.T) {
+func TestRenderStyleTags_CriticalWithStylesheets(t *testing.T) {
 	html := RenderStyleTags(".hero{}", []string{"/dist/a.css", "/dist/b.css"})
 	if !strings.Contains(html, `data-bifrost-critical`) {
 		t.Fatal("expected critical style tag")
 	}
-	if strings.Count(html, `media="print"`) != 2 {
-		t.Fatalf("expected deferred link per href, got: %q", html)
+	if strings.Contains(html, `media="print"`) {
+		t.Fatalf("did not expect deferred stylesheet links: %q", html)
 	}
-	if !strings.Contains(html, `<noscript><link rel="stylesheet" href="/dist/a.css" /></noscript>`) ||
-		!strings.Contains(html, `<noscript><link rel="stylesheet" href="/dist/b.css" /></noscript>`) {
-		t.Fatalf("expected noscript fallback per href: %q", html)
+	if strings.Count(html, `rel="stylesheet"`) != 2 {
+		t.Fatalf("expected one stylesheet link per href, got: %q", html)
+	}
+	if !strings.Contains(html, `href="/dist/a.css"`) || !strings.Contains(html, `href="/dist/b.css"`) {
+		t.Fatalf("expected both stylesheet hrefs: %q", html)
 	}
 }
 

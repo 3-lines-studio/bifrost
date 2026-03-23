@@ -43,6 +43,10 @@ var bifrostFS embed.FS
 - **Static-only apps** — No Bun runtime included. Smallest binary size.
 - **SSR apps** — Bun runtime is embedded automatically for server-side rendering.
 
+## SSR performance
+
+For HTML responses, disable reverse-proxy buffering (for example nginx `proxy_buffering off` on page routes) so streaming and early flush reach the browser. For the fastest first paint on marketing-style routes, use static prerender (`WithStatic`) so pages are served as prebuilt HTML without invoking Bun per request.
+
 ## Routing with an API
 
 Use `app.Wrap()` to combine Bifrost pages with your API routes:

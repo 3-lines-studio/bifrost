@@ -266,6 +266,8 @@ For SSR pages, Bifrost streams the HTML response in two phases: the document hea
 
 **React body streaming (`renderToReadableStream`):** All SSR pages use `renderToReadableStream` for the page body; Bun forwards byte chunks after the usual head flush. **Suspense** (or other deferred server work) makes progressive HTML visible; synchronous trees still work but gain little. If streaming fails, Bifrost falls back to `renderToString` for that request. Errors that occur after bytes have been sent cannot be turned into an HTTP 500.
 
+**LCP-focused routing:** For marketing or landing routes where Largest Contentful Paint matters most, prefer **static prerender** (`WithStatic`) so HTML is served from prebuilt files with no Bun work per request. Pair that with hero images that use explicit dimensions and `fetchPriority="high"` where appropriate.
+
 ### Static Pages
 
 There are two static page modes:
