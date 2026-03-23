@@ -8,8 +8,6 @@ import (
 	"html"
 	"io"
 	"net/http"
-	"path"
-	"path/filepath"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
 	"github.com/3-lines-studio/bifrost/internal/usecase"
@@ -50,7 +48,16 @@ func NewPageHandler(
 var errNeedsSetup = errors.New("page needs setup but setup not implemented in adapter")
 
 func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	input := usecase.ServePageInput{
+	output := h.service.ServePage(req.Context(), h.servePageInput(req))
+	if output.Error != nil {
+		h.serveError(w, req, output.Error)
+		return
+	}
+	h.dispatchPageOutput(w, req, output)
+}
+
+func (h *PageHandler) servePageInput(req *http.Request) usecase.ServePageInput {
+	return usecase.ServePageInput{
 		Config:          h.config,
 		DefaultHTMLLang: h.defaultHTMLLang,
 		IsDev:           h.isDev,
@@ -60,14 +67,9 @@ func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		RequestPath:     req.URL.Path,
 		Request:         req,
 	}
+}
 
-	output := h.service.ServePage(req.Context(), input)
-
-	if output.Error != nil {
-		h.serveError(w, req, output.Error)
-		return
-	}
-
+func (h *PageHandler) dispatchPageOutput(w http.ResponseWriter, req *http.Request, output usecase.ServePageOutput) {
 	switch output.Action {
 	case core.ActionServeStaticFile:
 		h.serveBifrostHTMLFile(w, req, output.StaticPath, "static")
@@ -102,24 +104,9 @@ func (h *PageHandler) serveBifrostHTMLFile(w http.ResponseWriter, req *http.Requ
 		h.serveError(w, req, fmt.Errorf("invalid %s file path: %s", kind, logicalPath))
 		return
 	}
-	if h.assetsFS != (embed.FS{}) {
-		embedPath := path.Join(".bifrost", rel)
-		data, err := h.assetsFS.ReadFile(embedPath)
-		if err != nil {
-			h.serveError(w, req, fmt.Errorf("failed to read %s file %s: %w", kind, embedPath, err))
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(data)
-		return
+	if err := serveBifrostFile(w, req, h.assetsFS, rel, h.assetsFS != (embed.FS{}), "text/html; charset=utf-8"); err != nil {
+		h.serveError(w, req, fmt.Errorf("failed to read %s file %s: %w", kind, rel, err))
 	}
-
-	safePath := filepath.Join(".bifrost", filepath.FromSlash(rel))
-	if !isPathSafe(safePath, ".bifrost") {
-		http.NotFound(w, req)
-		return
-	}
-	http.ServeFile(w, req, safePath)
 }
 
 func (h *PageHandler) serveHTML(w http.ResponseWriter, htmlContent string) {

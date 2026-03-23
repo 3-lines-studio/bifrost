@@ -24,7 +24,7 @@ type Host struct {
 
 func NewHost(assetsFS embed.FS, mode core.Mode, adapter core.FrameworkAdapter) (*Host, error) {
 	if adapter == nil {
-		adapter = framework.NewReactAdapter()
+		adapter = framework.DefaultAdapter()
 	}
 
 	r := &Host{
@@ -81,13 +81,7 @@ func (r *Host) setupRuntimeForExport(exportDir string) error {
 	r.ssrTempDir = ssrTempDir
 	r.ssrCleanup = ssrCleanup
 
-	client, err := process.NewRenderer(core.ModeProd, r.adapter.ProdRendererSource())
-	if err != nil {
-		ssrCleanup()
-		return fmt.Errorf("failed to start bun runtime: %w", err)
-	}
-	r.client = client
-	return nil
+	return r.startRendererFromSource(core.ModeProd, r.adapter.ProdRendererSource(), ssrCleanup)
 }
 
 func (r *Host) initProdMode() (*Host, error) {
@@ -136,27 +130,13 @@ func (r *Host) setupEmbeddedRuntime() error {
 		return fmt.Errorf("failed to extract embedded runtime: %w", err)
 	}
 
-	combinedCleanup := func() {
-		cleanup()
-		ssrCleanup()
-	}
-
-	client, err := process.NewRendererFromExecutable(executablePath, combinedCleanup)
-	if err != nil {
-		cleanup()
-		ssrCleanup()
-		return fmt.Errorf("failed to start embedded runtime: %w", err)
-	}
-	r.client = client
-	return nil
+	return r.startRendererFromExecutable(executablePath, combineCleanup(cleanup, ssrCleanup))
 }
 
 func (r *Host) initDevMode() (*Host, error) {
-	client, err := process.NewRenderer(core.ModeDev, r.adapter.DevRendererSource())
-	if err != nil {
+	if err := r.startRendererFromSource(core.ModeDev, r.adapter.DevRendererSource(), nil); err != nil {
 		return nil, err
 	}
-	r.client = client
 	return r, nil
 }
 
@@ -182,4 +162,40 @@ func copySSRBundlesFromDisk(exportDir string, manifest *core.Manifest) (string, 
 		return os.ReadFile(srcPath)
 	}
 	return process.StageSSRBundles(read, manifest)
+}
+
+func (r *Host) startRendererFromSource(mode core.Mode, source string, cleanup func()) error {
+	client, err := process.NewRenderer(mode, source)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return fmt.Errorf("failed to start bun runtime: %w", err)
+	}
+	r.client = client
+	r.ssrCleanup = cleanup
+	return nil
+}
+
+func (r *Host) startRendererFromExecutable(executablePath string, cleanup func()) error {
+	client, err := process.NewRendererFromExecutable(executablePath, cleanup)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return fmt.Errorf("failed to start embedded runtime: %w", err)
+	}
+	r.client = client
+	r.ssrCleanup = cleanup
+	return nil
+}
+
+func combineCleanup(cleanups ...func()) func() {
+	return func() {
+		for _, cleanup := range cleanups {
+			if cleanup != nil {
+				cleanup()
+			}
+		}
+	}
 }

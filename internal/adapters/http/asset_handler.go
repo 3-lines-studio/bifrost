@@ -68,44 +68,9 @@ func (h *AssetHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if h.isDev {
-		h.serveFromFS(w, req, cleaned)
-	} else {
-		h.serveFromEmbed(w, req, cleaned)
-	}
-}
-
-func (h *AssetHandler) serveFromFS(w http.ResponseWriter, req *http.Request, p string) {
-	fullPath := filepath.Join(".bifrost", p)
-
-	if !isPathSafe(fullPath, ".bifrost") {
+	if err := serveBifrostFile(w, req, h.assetsFS, cleaned, !h.isDev, core.GetContentType(cleaned)); err != nil {
 		http.NotFound(w, req)
-		return
 	}
-
-	info, err := os.Stat(fullPath)
-	if err != nil || info.IsDir() {
-		http.NotFound(w, req)
-		return
-	}
-
-	contentType := core.GetContentType(p)
-	w.Header().Set("Content-Type", contentType)
-	http.ServeFile(w, req, fullPath)
-}
-
-func (h *AssetHandler) serveFromEmbed(w http.ResponseWriter, req *http.Request, p string) {
-	embedPath := path.Join(".bifrost", p)
-
-	data, err := h.assetsFS.ReadFile(embedPath)
-	if err != nil {
-		http.NotFound(w, req)
-		return
-	}
-
-	contentType := core.GetContentType(p)
-	w.Header().Set("Content-Type", contentType)
-	_, _ = w.Write(data)
 }
 
 type PublicHandler struct {
@@ -129,50 +94,9 @@ func (h *PublicHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if h.isDev {
-		h.servePublicFromFSDirect(w, req, cleaned)
-	} else {
-		h.servePublicFromEmbedDirect(w, req, cleaned)
-	}
-}
-
-func (h *PublicHandler) servePublicFromFSDirect(w http.ResponseWriter, req *http.Request, cleaned string) {
-	publicPath := filepath.Join("public", cleaned)
-
-	if !isPathSafe(publicPath, "public") {
+	if err := serveProjectFile(w, req, h.assetsFS, "public", cleaned, !h.isDev, core.GetContentType(cleaned)); err != nil {
 		h.next.ServeHTTP(w, req)
-		return
 	}
-
-	info, err := os.Stat(publicPath)
-	if err != nil || info.IsDir() {
-		h.next.ServeHTTP(w, req)
-		return
-	}
-
-	file, err := os.Open(publicPath)
-	if err != nil {
-		h.next.ServeHTTP(w, req)
-		return
-	}
-	defer func() { _ = file.Close() }()
-
-	contentType := core.GetContentType(publicPath)
-	w.Header().Set("Content-Type", contentType)
-	http.ServeContent(w, req, info.Name(), info.ModTime(), file)
-}
-
-func (h *PublicHandler) servePublicFromEmbedDirect(w http.ResponseWriter, req *http.Request, cleaned string) {
-	embedPath := path.Join("public", cleaned)
-	data, err := h.assetsFS.ReadFile(embedPath)
-	if err != nil {
-		h.next.ServeHTTP(w, req)
-		return
-	}
-
-	contentType := core.GetContentType(cleaned)
-	w.Header().Set("Content-Type", contentType)
-	_, _ = w.Write(data)
 }
 
 func isPathSafe(p, root string) bool {
@@ -185,4 +109,40 @@ func isPathSafe(p, root string) bool {
 		return false
 	}
 	return abs == absRoot || strings.HasPrefix(abs, absRoot+string(filepath.Separator))
+}
+
+func serveBifrostFile(w http.ResponseWriter, req *http.Request, assetsFS embed.FS, cleaned string, fromEmbed bool, contentType string) error {
+	return serveProjectFile(w, req, assetsFS, ".bifrost", cleaned, fromEmbed, contentType)
+}
+
+func serveProjectFile(w http.ResponseWriter, req *http.Request, assetsFS embed.FS, root string, cleaned string, fromEmbed bool, contentType string) error {
+	if fromEmbed {
+		return serveFileFromEmbed(w, assetsFS, path.Join(root, cleaned), contentType)
+	}
+	return serveFileFromDisk(w, req, filepath.Join(root, cleaned), root, contentType)
+}
+
+func serveFileFromDisk(w http.ResponseWriter, req *http.Request, fullPath string, root string, contentType string) error {
+	if !isPathSafe(fullPath, root) {
+		return os.ErrNotExist
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil || info.IsDir() {
+		return os.ErrNotExist
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	http.ServeFile(w, req, fullPath)
+	return nil
+}
+
+func serveFileFromEmbed(w http.ResponseWriter, assetsFS embed.FS, embedPath string, contentType string) error {
+	data, err := assetsFS.ReadFile(embedPath)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", contentType)
+	_, _ = w.Write(data)
+	return nil
 }

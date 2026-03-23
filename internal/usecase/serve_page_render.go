@@ -11,8 +11,8 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error) {
-	artifacts := core.ResolvePageArtifacts(input.Manifest, input.EntryName)
+func (s *PageService) renderClientOnlyShell(state pageRequestState) (string, error) {
+	input := state.input
 
 	if input.IsDev && s.renderer != nil {
 		ssrPath := filepath.Join(".bifrost/ssr", input.EntryName+"-ssr.js")
@@ -20,7 +20,7 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 			page, err := s.renderer.Render(ssrPath, map[string]any{})
 			if err == nil {
 				lang, htmlClass, _ := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
-				return RenderHTMLDocumentFromPage(page, map[string]any{}, artifacts, lang, htmlClass)
+				return RenderHTMLDocumentFromPage(page, map[string]any{}, state.artifacts, lang, htmlClass)
 			}
 		}
 	}
@@ -29,20 +29,19 @@ func (s *PageService) renderClientOnlyShell(input ServePageInput) (string, error
 	return core.RenderHTMLShell(
 		"",
 		map[string]any{},
-		artifacts.Script,
+		state.artifacts.Script,
 		"",
-		artifacts.CriticalCSS,
-		core.StylesheetHrefsFor(artifacts),
-		artifacts.Chunks,
+		state.artifacts.CriticalCSS,
+		core.StylesheetHrefsFor(state.artifacts),
+		state.artifacts.Chunks,
 		lang,
 		htmlClass,
 	)
 }
 
-func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePageInput) ServePageOutput {
+func (s *PageService) renderStaticPrerender(ctx context.Context, state pageRequestState) ServePageOutput {
+	input := state.input
 	requestPath := core.NormalizePath(input.RequestPath)
-
-	renderPath := s.resolveRenderPath(input)
 
 	if input.Config.StaticDataLoader != nil {
 		entries, err := input.Config.StaticDataLoader(ctx)
@@ -78,7 +77,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 			}
 		}
 
-		page, err := s.renderer.Render(renderPath, propsForReact)
+		page, err := s.renderer.Render(state.renderPath, propsForReact)
 		if err != nil {
 			return ServePageOutput{
 				Action: core.ActionRenderStaticPrerender,
@@ -86,7 +85,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 			}
 		}
 
-		html, err := s.renderPageHTML(input, propsForReact, page, lang, htmlClass)
+		html, err := s.renderPageHTMLWithArtifacts(state.artifacts, propsForReact, page, lang, htmlClass)
 		return ServePageOutput{
 			Action: core.ActionRenderStaticPrerender,
 			HTML:   html,
@@ -104,7 +103,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 
 	lang, htmlClass, propsForReact := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, map[string]any{})
 
-	page, err := s.renderer.Render(renderPath, propsForReact)
+	page, err := s.renderer.Render(state.renderPath, propsForReact)
 	if err != nil {
 		return ServePageOutput{
 			Action: core.ActionRenderStaticPrerender,
@@ -112,7 +111,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 		}
 	}
 
-	html, err := s.renderPageHTML(input, propsForReact, page, lang, htmlClass)
+	html, err := s.renderPageHTMLWithArtifacts(state.artifacts, propsForReact, page, lang, htmlClass)
 	return ServePageOutput{
 		Action: core.ActionRenderStaticPrerender,
 		HTML:   html,
@@ -120,7 +119,8 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, input ServePage
 	}
 }
 
-func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) ServePageOutput {
+func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) ServePageOutput {
+	input := state.input
 	props := map[string]any{}
 	if input.Config.PropsLoader != nil {
 		var err error
@@ -141,10 +141,6 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 			Error:  fmt.Errorf("renderer not available for SSR"),
 		}
 	}
-
-	renderPath := s.resolveRenderPath(input)
-
-	artifacts := core.ResolvePageArtifacts(input.Manifest, input.EntryName)
 	propsJSON, err := core.MarshalBifrostPropsJSON(propsForReact)
 	if err != nil {
 		return ServePageOutput{
@@ -165,11 +161,11 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 		doFlush := flush(w)
 		rCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		err := s.renderer.RenderBodyStream(rCtx, renderPath, propsForReact, w, doFlush,
+		err := s.renderer.RenderBodyStream(rCtx, state.renderPath, propsForReact, w, doFlush,
 			func(head string) error {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusOK)
-				if err := WriteSSRHTMLPreamble(w, head, artifacts, lang, htmlClass); err != nil {
+				if err := WriteSSRHTMLPreamble(w, head, state.artifacts, lang, htmlClass); err != nil {
 					return err
 				}
 				doFlush()
@@ -178,7 +174,7 @@ func (s *PageService) renderSSR(ctx context.Context, input ServePageInput) Serve
 		if err != nil {
 			return err
 		}
-		if err := core.WriteHTMLSuffix(w, propsJSON, artifacts.Script, artifacts.Chunks); err != nil {
+		if err := core.WriteHTMLSuffix(w, propsJSON, state.artifacts.Script, state.artifacts.Chunks); err != nil {
 			return err
 		}
 		doFlush()
@@ -204,6 +200,9 @@ func (s *PageService) resolveRenderPath(input ServePageInput) string {
 }
 
 func (s *PageService) renderPageHTML(input ServePageInput, props map[string]any, page core.RenderedPage, htmlLang string, htmlClass string) (string, error) {
-	artifacts := core.ResolvePageArtifacts(input.Manifest, input.EntryName)
+	return s.renderPageHTMLWithArtifacts(core.ResolvePageArtifacts(input.Manifest, input.EntryName), props, page, htmlLang, htmlClass)
+}
+
+func (s *PageService) renderPageHTMLWithArtifacts(artifacts core.PageArtifacts, props map[string]any, page core.RenderedPage, htmlLang string, htmlClass string) (string, error) {
 	return RenderHTMLDocumentFromPage(page, props, artifacts, htmlLang, htmlClass)
 }

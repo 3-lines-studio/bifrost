@@ -30,6 +30,19 @@ func NewReactAdapter() *ReactAdapter {
 	return &ReactAdapter{}
 }
 
+func DefaultAdapter() core.FrameworkAdapter {
+	return NewReactAdapter()
+}
+
+func ResolveAdapter(fw core.Framework) core.FrameworkAdapter {
+	switch fw {
+	case core.FrameworkReact:
+		fallthrough
+	default:
+		return NewReactAdapter()
+	}
+}
+
 func (a *ReactAdapter) Name() string {
 	return "react"
 }

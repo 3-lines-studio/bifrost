@@ -41,9 +41,17 @@ type PageService struct {
 	buildGroup singleflightGroup
 }
 
+type pageRequestState struct {
+	input      ServePageInput
+	entry      *core.ManifestEntry
+	decision   core.PageDecision
+	artifacts  core.PageArtifacts
+	renderPath string
+}
+
 func NewPageService(renderer Renderer, fs FileSystem, adapter core.FrameworkAdapter) *PageService {
 	if adapter == nil {
-		adapter = framework.NewReactAdapter()
+		adapter = framework.DefaultAdapter()
 	}
 	return &PageService{
 		renderer: renderer,
@@ -52,23 +60,11 @@ func NewPageService(renderer Renderer, fs FileSystem, adapter core.FrameworkAdap
 	}
 }
 
-func (s *PageService) serveRenderedForPageMode(ctx context.Context, input ServePageInput) ServePageOutput {
-	switch input.Config.Mode {
-	case core.ModeClientOnly:
-		html, err := s.renderClientOnlyShell(input)
-		return ServePageOutput{
-			Action: core.ActionRenderClientOnlyShell,
-			HTML:   html,
-			Error:  err,
-		}
-	case core.ModeStaticPrerender:
-		return s.renderStaticPrerender(ctx, input)
-	default:
-		return s.renderSSR(ctx, input)
-	}
+func (s *PageService) ServePage(ctx context.Context, input ServePageInput) ServePageOutput {
+	return s.executeRequest(ctx, s.prepareRequest(input))
 }
 
-func (s *PageService) ServePage(ctx context.Context, input ServePageInput) ServePageOutput {
+func (s *PageService) prepareRequest(input ServePageInput) pageRequestState {
 	var entry *core.ManifestEntry
 	if input.Manifest != nil {
 		if e, ok := input.Manifest.Entries[input.EntryName]; ok {
@@ -86,19 +82,27 @@ func (s *PageService) ServePage(ctx context.Context, input ServePageInput) Serve
 		HasRenderer: s.renderer != nil,
 	}
 
-	decision := core.DecidePageAction(req, entry)
+	return pageRequestState{
+		input:      input,
+		entry:      entry,
+		decision:   core.DecidePageAction(req, entry),
+		artifacts:  core.ResolvePageArtifacts(input.Manifest, input.EntryName),
+		renderPath: s.resolveRenderPath(input),
+	}
+}
 
-	switch decision.Action {
+func (s *PageService) executeRequest(ctx context.Context, state pageRequestState) ServePageOutput {
+	switch state.decision.Action {
 	case core.ActionServeStaticFile:
 		return ServePageOutput{
 			Action:     core.ActionServeStaticFile,
-			StaticPath: decision.StaticPath,
+			StaticPath: state.decision.StaticPath,
 		}
 
 	case core.ActionServeRouteFile:
 		return ServePageOutput{
 			Action:    core.ActionServeRouteFile,
-			RoutePath: decision.HTMLPath,
+			RoutePath: state.decision.HTMLPath,
 		}
 
 	case core.ActionNotFound:
@@ -107,9 +111,9 @@ func (s *PageService) ServePage(ctx context.Context, input ServePageInput) Serve
 		}
 
 	case core.ActionNeedsSetup:
-		if input.IsDev && s.renderer != nil {
-			buildErr := s.buildGroup.Do(input.EntryName, func() error {
-				return s.buildAndRender(ctx, input)
+		if state.input.IsDev && s.renderer != nil {
+			buildErr := s.buildGroup.Do(state.input.EntryName, func() error {
+				return s.buildAndRender(ctx, state.input)
 			})
 			if buildErr != nil {
 				return ServePageOutput{
@@ -117,7 +121,7 @@ func (s *PageService) ServePage(ctx context.Context, input ServePageInput) Serve
 					Error:  buildErr,
 				}
 			}
-			return s.serveRenderedForPageMode(ctx, input)
+			return s.renderForMode(ctx, s.prepareRequest(state.input))
 		}
 		return ServePageOutput{
 			Action:     core.ActionNeedsSetup,
@@ -127,13 +131,29 @@ func (s *PageService) ServePage(ctx context.Context, input ServePageInput) Serve
 	case core.ActionRenderClientOnlyShell,
 		core.ActionRenderStaticPrerender,
 		core.ActionRenderSSR:
-		return s.serveRenderedForPageMode(ctx, input)
+		return s.renderForMode(ctx, state)
 
 	default:
 		return ServePageOutput{
 			Action: core.ActionRenderSSR,
 			Error:  fmt.Errorf("unknown page action"),
 		}
+	}
+}
+
+func (s *PageService) renderForMode(ctx context.Context, state pageRequestState) ServePageOutput {
+	switch state.input.Config.Mode {
+	case core.ModeClientOnly:
+		html, err := s.renderClientOnlyShell(state)
+		return ServePageOutput{
+			Action: core.ActionRenderClientOnlyShell,
+			HTML:   html,
+			Error:  err,
+		}
+	case core.ModeStaticPrerender:
+		return s.renderStaticPrerender(ctx, state)
+	default:
+		return s.renderSSR(ctx, state)
 	}
 }
 

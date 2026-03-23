@@ -127,7 +127,7 @@ func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, string, er
 			return true
 		}
 
-		mode, hasStaticDataLoader := s.detectPageMode(callExpr.Args[argIndex:])
+		mode := s.detectPageMode(callExpr.Args[argIndex:])
 
 		var optArgs []ast.Expr
 		if len(callExpr.Args) > 2 {
@@ -144,7 +144,6 @@ func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, string, er
 				HTMLClass:        htmlClass,
 				StaticDataLoader: nil,
 			})
-			_ = hasStaticDataLoader
 		}
 
 		return true
@@ -153,10 +152,9 @@ func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, string, er
 	return configs, defaultHTMLLang, nil
 }
 
-func (s *BuildService) detectPageMode(args []ast.Expr) (core.PageMode, bool) {
+func (s *BuildService) detectPageMode(args []ast.Expr) core.PageMode {
 	hasClientOnly := false
 	hasStaticPrerender := false
-	hasStaticDataLoader := false
 
 	for _, arg := range args {
 		callExpr, ok := arg.(*ast.CallExpr)
@@ -179,23 +177,22 @@ func (s *BuildService) detectPageMode(args []ast.Expr) (core.PageMode, bool) {
 			hasStaticPrerender = true
 		case "WithStaticData":
 			hasStaticPrerender = true
-			hasStaticDataLoader = true
 		}
 	}
 
 	if hasClientOnly && hasStaticPrerender {
-		return core.ModeSSR, hasStaticDataLoader
+		return core.ModeSSR
 	}
 
 	if hasStaticPrerender {
-		return core.ModeStaticPrerender, hasStaticDataLoader
+		return core.ModeStaticPrerender
 	}
 
 	if hasClientOnly {
-		return core.ModeClientOnly, hasStaticDataLoader
+		return core.ModeClientOnly
 	}
 
-	return core.ModeSSR, hasStaticDataLoader
+	return core.ModeSSR
 }
 
 func (s *BuildService) extractTitleFromComponent(componentPath string) string {

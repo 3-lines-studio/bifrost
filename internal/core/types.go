@@ -20,6 +20,43 @@ const (
 	ModeStaticPrerender
 )
 
+func (m PageMode) IsStatic() bool {
+	return m == ModeClientOnly || m == ModeStaticPrerender
+}
+
+func (m PageMode) NeedsSSRBundle() bool {
+	return !m.IsStatic()
+}
+
+func (m PageMode) BuildLabel() string {
+	switch m {
+	case ModeClientOnly:
+		return "client"
+	case ModeStaticPrerender:
+		return "static"
+	default:
+		return "ssr"
+	}
+}
+
+func (m PageMode) DevAction(hasRenderer bool) PageDecision {
+	if !m.IsStatic() || hasRenderer {
+		return PageDecision{Action: ActionNeedsSetup, NeedsSetup: true}
+	}
+	return PageDecision{Action: m.RenderAction()}
+}
+
+func (m PageMode) RenderAction() PageAction {
+	switch m {
+	case ModeClientOnly:
+		return ActionRenderClientOnlyShell
+	case ModeStaticPrerender:
+		return ActionRenderStaticPrerender
+	default:
+		return ActionRenderSSR
+	}
+}
+
 type StaticPathData struct {
 	Path  string
 	Props map[string]any

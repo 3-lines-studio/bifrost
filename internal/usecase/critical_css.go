@@ -9,13 +9,12 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-func (s *BuildService) populateCriticalCSS(ctx context.Context, bifrostDir string, pages []pageMetadata, manifest *core.Manifest) {
-	if manifest == nil {
+func (s *BuildService) populateCriticalCSS(ctx context.Context, run *buildRun) {
+	if run.manifest == nil {
 		return
 	}
-	for i := range pages {
-		pm := pages[i]
-		entry, ok := manifest.Entries[pm.entryName]
+	for _, page := range run.pages {
+		entry, ok := run.manifest.Entries[page.entryName]
 		if !ok {
 			continue
 		}
@@ -24,14 +23,14 @@ func (s *BuildService) populateCriticalCSS(ctx context.Context, bifrostDir strin
 			continue
 		}
 
-		htmlDoc := s.renderCriticalHTML(ctx, bifrostDir, pm)
+		htmlDoc := s.renderCriticalHTML(ctx, run, page)
 		if htmlDoc == "" {
 			continue
 		}
 
 		var fullCSS strings.Builder
 		for _, href := range hrefs {
-			cssPath := resolveBuiltAssetPath(bifrostDir, href)
+			cssPath := resolveBuiltAssetPath(run.paths.bifrostDir, href)
 			if cssPath == "" {
 				continue
 			}
@@ -46,30 +45,30 @@ func (s *BuildService) populateCriticalCSS(ctx context.Context, bifrostDir strin
 		}
 
 		entry.CriticalCSS = core.ExtractCriticalCSS(htmlDoc, fullCSS.String(), core.DefaultCriticalCSSMaxBytes)
-		manifest.Entries[pm.entryName] = entry
+		run.manifest.Entries[page.entryName] = entry
 	}
 }
 
-func (s *BuildService) renderCriticalHTML(ctx context.Context, bifrostDir string, pm pageMetadata) string {
+func (s *BuildService) renderCriticalHTML(ctx context.Context, run *buildRun, page buildPage) string {
 	if s.renderer == nil {
 		return ""
 	}
 
-	switch pm.config.Mode {
+	switch page.config.Mode {
 	case core.ModeClientOnly:
 		return ""
 	case core.ModeStaticPrerender:
 		props := map[string]any{}
-		if pm.config.StaticDataLoader != nil {
-			entries, err := pm.config.StaticDataLoader(ctx)
+		if page.config.StaticDataLoader != nil {
+			entries, err := page.config.StaticDataLoader(ctx)
 			if err != nil || len(entries) == 0 {
 				return ""
 			}
 			props = entries[0].Props
 		}
-		return s.renderCriticalPage(filepath.Join(bifrostDir, "ssr", pm.entryName+"-ssr.js"), props)
+		return s.renderCriticalPage(filepath.Join(run.paths.bifrostDir, "ssr", page.entryName+"-ssr.js"), props)
 	default:
-		return s.renderCriticalPage(filepath.Join(bifrostDir, "ssr", pm.entryName+"-ssr.js"), map[string]any{})
+		return s.renderCriticalPage(filepath.Join(run.paths.bifrostDir, "ssr", page.entryName+"-ssr.js"), map[string]any{})
 	}
 }
 

@@ -29,6 +29,7 @@ type App struct {
 	manifest     *core.Manifest
 	pageConfigs  map[string]*core.PageConfig
 	config       *core.Config
+	adapter      core.FrameworkAdapter
 	routesSealed bool
 }
 
@@ -63,6 +64,7 @@ func newApp(assetsFS embed.FS, routes []core.Route, config *core.Config) *App {
 		isDev:       mode == core.ModeDev,
 		pageConfigs: make(map[string]*core.PageConfig),
 		config:      config,
+		adapter:     framework.ResolveAdapter(config.Framework),
 	}
 	app.addRoutes(routes)
 
@@ -74,7 +76,7 @@ func newApp(assetsFS embed.FS, routes []core.Route, config *core.Config) *App {
 		return app
 	}
 
-	h, err := runtime.NewHost(assetsFS, mode, app.getAdapter())
+	h, err := runtime.NewHost(assetsFS, mode, app.adapter)
 	if err != nil {
 		panic(fmt.Sprintf("failed to create bifrost renderer: %v", err))
 	}
@@ -82,10 +84,6 @@ func newApp(assetsFS embed.FS, routes []core.Route, config *core.Config) *App {
 	app.manifest = h.Manifest()
 
 	return app
-}
-
-func (a *App) getAdapter() core.FrameworkAdapter {
-	return framework.NewReactAdapter()
 }
 
 func (a *App) addRoutes(routes []core.Route) {
@@ -104,7 +102,7 @@ func (a *App) Handle(routes ...core.Route) {
 }
 
 func (a *App) runExportMode() {
-	h, err := runtime.NewHost(a.assetsFS, core.ModeExport, a.getAdapter())
+	h, err := runtime.NewHost(a.assetsFS, core.ModeExport, a.adapter)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Export failed: %v\n", err)
 		os.Exit(1)
@@ -155,7 +153,7 @@ func (a *App) Wrap(api Router) http.Handler {
 		staticPath := a.getStaticPath(config)
 
 		fsAdapter := adaptersfs.NewEmbedFileSystem(a.assetsFS)
-		pageService := usecase.NewPageService(a.host.Client(), fsAdapter, a.getAdapter())
+		pageService := usecase.NewPageService(a.host.Client(), fsAdapter, a.adapter)
 
 		handler := adaptershttp.NewPageHandler(pageService, config, a.manifest, a.assetsFS, a.isDev, staticPath, defaultLang)
 		api.Handle(route.Pattern, handler)

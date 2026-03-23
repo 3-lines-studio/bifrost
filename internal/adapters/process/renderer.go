@@ -42,6 +42,14 @@ type Renderer struct {
 	cleanup func()
 }
 
+type rendererProcessConfig struct {
+	command []string
+	cwd     string
+	source  string
+	env     []string
+	cleanup func()
+}
+
 func uniqueSocketPath() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
@@ -56,14 +64,6 @@ func removeStaleSocket(path string) {
 }
 
 func NewRenderer(mode core.Mode, source string, extraEnv ...string) (*Renderer, error) {
-	socket := uniqueSocketPath()
-	removeStaleSocket(socket)
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get working directory: %w", err)
-	}
-
 	if source == "" {
 		source = BunRendererProdSource
 		if mode == core.ModeDev {
@@ -71,60 +71,24 @@ func NewRenderer(mode core.Mode, source string, extraEnv ...string) (*Renderer, 
 		}
 	}
 
-	cmd := exec.Command("bun", "run", "--smol", "-")
-	cmd.Dir = cwd
-	env := append(os.Environ(), "BIFROST_SOCKET="+socket)
-	cmd.Env = append(env, extraEnv...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = strings.NewReader(source)
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start bun: %w", err)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	if err := waitForSocket(socket, socketTimeout); err != nil {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-		return nil, err
-	}
-
-	transport := newUnixTransport(socket)
-
-	return &Renderer{
-		cmd:    cmd,
-		socket: socket,
-		client: &http.Client{Transport: transport, Timeout: buildTimeout},
-	}, nil
+	return startRendererProcess(rendererProcessConfig{
+		command: []string{"bun", "run", "--smol", "-"},
+		cwd:     cwd,
+		source:  source,
+		env:     extraEnv,
+	})
 }
 
 func NewRendererFromExecutable(executablePath string, cleanup func()) (*Renderer, error) {
-	socket := uniqueSocketPath()
-	removeStaleSocket(socket)
-
-	cmd := exec.Command(executablePath)
-	cmd.Env = append(os.Environ(), "BIFROST_SOCKET="+socket)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start embedded runtime: %w", err)
-	}
-
-	if err := waitForSocket(socket, socketTimeout); err != nil {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-		return nil, err
-	}
-
-	transport := newUnixTransport(socket)
-
-	return &Renderer{
-		cmd:     cmd,
-		socket:  socket,
-		client:  &http.Client{Transport: transport, Timeout: buildTimeout},
+	return startRendererProcess(rendererProcessConfig{
+		command: []string{executablePath},
 		cleanup: cleanup,
-	}, nil
+	})
 }
 
 func newUnixTransport(socket string) *http.Transport {
@@ -140,8 +104,63 @@ func newUnixTransport(socket string) *http.Transport {
 	}
 }
 
+func newHTTPClient(socket string) *http.Client {
+	return &http.Client{
+		Transport: newUnixTransport(socket),
+		Timeout:   buildTimeout,
+	}
+}
+
+func startRendererProcess(cfg rendererProcessConfig) (*Renderer, error) {
+	socket := uniqueSocketPath()
+	removeStaleSocket(socket)
+
+	cmd := exec.Command(cfg.command[0], cfg.command[1:]...)
+	cmd.Dir = cfg.cwd
+	cmd.Env = append(os.Environ(), append([]string{"BIFROST_SOCKET=" + socket}, cfg.env...)...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if cfg.source != "" {
+		cmd.Stdin = strings.NewReader(cfg.source)
+	}
+
+	if err := cmd.Start(); err != nil {
+		if cfg.cleanup != nil {
+			cfg.cleanup()
+		}
+		return nil, fmt.Errorf("failed to start runtime process: %w", err)
+	}
+
+	if err := waitForStartedSocket(cmd, socket, cfg.cleanup); err != nil {
+		return nil, err
+	}
+
+	return &Renderer{
+		cmd:     cmd,
+		socket:  socket,
+		client:  newHTTPClient(socket),
+		cleanup: cfg.cleanup,
+	}, nil
+}
+
+func waitForStartedSocket(cmd *exec.Cmd, socket string, cleanup func()) error {
+	if err := waitForSocket(socket, socketTimeout); err != nil {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+		_ = os.Remove(socket)
+		if cleanup != nil {
+			cleanup()
+		}
+		return err
+	}
+	return nil
+}
+
 func (r *Renderer) Stop() error {
 	if r.cmd == nil || r.cmd.Process == nil {
+		if r.cleanup != nil {
+			r.cleanup()
+		}
 		return nil
 	}
 	err := r.cmd.Process.Kill()
@@ -210,12 +229,20 @@ func (r *Renderer) postRender(ctx context.Context, path string, props map[string
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", "http://localhost/render", bytes.NewReader(jsonBody))
+	req, err := newJSONRequest(ctx, "/render", jsonBody)
+	if err != nil {
+		return nil, err
+	}
+	return r.client.Do(req)
+}
+
+func newJSONRequest(ctx context.Context, endpoint string, body []byte) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost"+endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return r.client.Do(req)
+	return req, nil
 }
 
 // renderChunkedFromDecoder consumes Bun /render output: one legacy JSON object or two NDJSON lines (head then html).
@@ -535,11 +562,10 @@ func (r *Renderer) postJSON(ctx context.Context, endpoint string, body any, resu
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "http://localhost"+endpoint, bytes.NewReader(jsonBody))
+	req, err := newJSONRequest(ctx, endpoint, jsonBody)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := r.client.Do(req)
 	if err != nil {

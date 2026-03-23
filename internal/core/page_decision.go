@@ -30,28 +30,10 @@ type PageDecision struct {
 }
 
 func DecidePageAction(req PageRequest, entry *ManifestEntry) PageDecision {
-
 	if !req.IsDev {
 		return decideProductionAction(req, entry)
 	}
-
-	needsSetup := !IsStaticMode(req.Mode)
-	if IsStaticMode(req.Mode) && req.HasRenderer {
-		needsSetup = true
-	}
-
-	if needsSetup {
-		return PageDecision{Action: ActionNeedsSetup, NeedsSetup: true}
-	}
-
-	switch req.Mode {
-	case ModeClientOnly:
-		return PageDecision{Action: ActionRenderClientOnlyShell}
-	case ModeStaticPrerender:
-		return PageDecision{Action: ActionRenderStaticPrerender}
-	default:
-		return PageDecision{Action: ActionRenderSSR}
-	}
+	return req.Mode.DevAction(req.HasRenderer)
 }
 
 func decideProductionAction(req PageRequest, entry *ManifestEntry) PageDecision {

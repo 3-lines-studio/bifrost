@@ -62,7 +62,7 @@ func parseFlags(args []string) (mainFile string, fw core.Framework, remaining []
 }
 
 func getAdapter(fw core.Framework) core.FrameworkAdapter {
-	return framework.NewReactAdapter()
+	return framework.ResolveAdapter(fw)
 }
 
 func main() {
