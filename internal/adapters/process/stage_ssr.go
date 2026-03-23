@@ -37,7 +37,7 @@ func StageSSRBundles(read ReadSSRBundle, manifest *core.Manifest) (tempDir strin
 			cleanup()
 			return "", nil, fmt.Errorf("failed to read SSR bundle %s: %w", entry.SSR, rerr)
 		}
-		destPath := filepath.Join(tempDir, filepath.FromSlash(strings.TrimPrefix(filepath.ToSlash(entry.SSR), "/")))
+		destPath := ResolveStagedSSRBundlePath(tempDir, entry.SSR)
 		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 			cleanup()
 			return "", nil, fmt.Errorf("failed to create SSR dest dir: %w", err)
@@ -49,4 +49,11 @@ func StageSSRBundles(read ReadSSRBundle, manifest *core.Manifest) (tempDir strin
 	}
 
 	return tempDir, cleanup, nil
+}
+
+// ResolveStagedSSRBundlePath maps a manifest SSR path such as /ssr/page-ssr.js to the
+// absolute path used inside an extracted SSR temp directory.
+func ResolveStagedSSRBundlePath(tempDir string, manifestSSRPath string) string {
+	clean := strings.TrimPrefix(filepath.ToSlash(manifestSSRPath), "/")
+	return filepath.Join(tempDir, filepath.FromSlash(clean))
 }

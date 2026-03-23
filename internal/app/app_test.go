@@ -6,12 +6,22 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"path/filepath"
+	"reflect"
 	"testing"
+	"unsafe"
 
+	"github.com/3-lines-studio/bifrost/internal/adapters/runtime"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
 var testFS embed.FS
+
+func setSSRTempDir(t *testing.T, host *runtime.Host, tempDir string) {
+	t.Helper()
+	field := reflect.ValueOf(host).Elem().FieldByName("ssrTempDir")
+	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().SetString(tempDir)
+}
 
 func bunAvailable() bool {
 	_, err := exec.LookPath("bun")
@@ -86,6 +96,64 @@ func TestStrictProductionRequirements(t *testing.T) {
 		}()
 		New(testFS)
 	})
+}
+
+func TestGetStaticPathUsesExtractedSSRBundleInProduction(t *testing.T) {
+	t.Setenv("BIFROST_DEV", "")
+
+	a := &App{
+		isDev: false,
+		host:  &runtime.Host{},
+		manifest: &core.Manifest{
+			Entries: map[string]core.ManifestEntry{
+				"pages-home-entry": {SSR: "/ssr/pages-home-entry-ssr.js", Mode: "ssr"},
+			},
+		},
+	}
+	config := core.PageConfig{
+		ComponentPath: "./pages/home.tsx",
+		Mode:          core.ModeSSR,
+	}
+
+	if got := a.getStaticPath(config); got != "/ssr/pages-home-entry-ssr.js" {
+		t.Fatalf("getStaticPath() without staged bundles = %q", got)
+	}
+
+	tempDir := t.TempDir()
+	a.host = &runtime.Host{}
+	setSSRTempDir(t, a.host, tempDir)
+
+	got := a.getStaticPath(config)
+	want := filepath.Join(tempDir, "ssr", "pages-home-entry-ssr.js")
+	if got != want {
+		t.Fatalf("getStaticPath() with staged bundles = %q, want %q", got, want)
+	}
+}
+
+func TestGetSSBundlePathUsesExtractedSSRBundleInProduction(t *testing.T) {
+	t.Setenv("BIFROST_DEV", "")
+
+	a := &App{
+		host: &runtime.Host{},
+		manifest: &core.Manifest{
+			Entries: map[string]core.ManifestEntry{
+				"pages-home-entry": {SSR: "/ssr/pages-home-entry-ssr.js", Mode: "ssr"},
+			},
+		},
+	}
+
+	if got := a.getSSBundlePath("pages-home-entry"); got != "/ssr/pages-home-entry-ssr.js" {
+		t.Fatalf("getSSBundlePath() without staged bundles = %q", got)
+	}
+
+	tempDir := t.TempDir()
+	setSSRTempDir(t, a.host, tempDir)
+
+	got := a.getSSBundlePath("pages-home-entry")
+	want := filepath.Join(tempDir, "ssr", "pages-home-entry-ssr.js")
+	if got != want {
+		t.Fatalf("getSSBundlePath() with staged bundles = %q, want %q", got, want)
+	}
 }
 
 func TestAppWrapWithServeMux(t *testing.T) {

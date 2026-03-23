@@ -146,6 +146,16 @@ func (h *Host) Manifest() *core.Manifest { return h.manifest }
 
 func (h *Host) SSRTempDir() string { return h.ssrTempDir }
 
+func (h *Host) ResolveSSRBundlePath(manifestSSRPath string) string {
+	if manifestSSRPath == "" {
+		return ""
+	}
+	if h == nil || h.ssrTempDir == "" {
+		return manifestSSRPath
+	}
+	return process.ResolveStagedSSRBundlePath(h.ssrTempDir, manifestSSRPath)
+}
+
 func (h *Host) IsDev() bool { return h.isDev }
 
 func (h *Host) Stop() error {

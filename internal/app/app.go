@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 
 	"github.com/3-lines-studio/bifrost/internal/adapters/env"
 	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
@@ -180,8 +179,8 @@ func (a *App) getStaticPath(config core.PageConfig) string {
 	case core.ModeClientOnly:
 		return entry.HTML
 	default:
-		if !a.isDev && a.host != nil && a.host.SSRTempDir() != "" && entry.SSR != "" {
-			return filepath.Join(a.host.SSRTempDir(), entry.SSR)
+		if !a.isDev && a.host != nil && entry.SSR != "" {
+			return a.host.ResolveSSRBundlePath(entry.SSR)
 		}
 		return entry.SSR
 	}
@@ -195,8 +194,8 @@ func (a *App) getSSBundlePath(entryName string) string {
 	if !ok || entry.SSR == "" {
 		return ""
 	}
-	if a.host != nil && a.host.SSRTempDir() != "" {
-		return filepath.Join(a.host.SSRTempDir(), entry.SSR)
+	if a.host != nil {
+		return a.host.ResolveSSRBundlePath(entry.SSR)
 	}
 	return entry.SSR
 }
