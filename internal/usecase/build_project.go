@@ -24,22 +24,25 @@ type BuildError struct {
 }
 
 type BuildService struct {
-	renderer Renderer
-	fs       FileSystem
-	cli      CLIOutput
-	adapter  core.FrameworkAdapter
+	renderer         Renderer
+	fs               FileSystem
+	cli              CLIOutput
+	adapter          core.FrameworkAdapter
+	compileRuntimeFn func(bifrostDir string) error
 }
 
 func NewBuildService(renderer Renderer, fs FileSystem, cli CLIOutput, adapter core.FrameworkAdapter) *BuildService {
 	if adapter == nil {
 		adapter = framework.DefaultAdapter()
 	}
-	return &BuildService{
+	svc := &BuildService{
 		renderer: renderer,
 		fs:       fs,
 		cli:      cli,
 		adapter:  adapter,
 	}
+	svc.compileRuntimeFn = svc.compileEmbeddedRuntime
+	return svc
 }
 
 func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) BuildOutput {

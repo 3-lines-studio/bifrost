@@ -439,7 +439,7 @@ func (s *BuildService) compileRuntime(run *buildRun) error {
 	}
 
 	step := run.report.StartStep("Compiling Bun runtime")
-	if err := s.compileEmbeddedRuntime(run.paths.bifrostDir); err != nil {
+	if err := s.compileRuntimeFn(run.paths.bifrostDir); err != nil {
 		run.report.AddError("Runtime", "Failed to compile embedded runtime", []string{err.Error()})
 		run.report.EndStep(step, false, "")
 		return fmt.Errorf("runtime compilation failed: %w", err)
