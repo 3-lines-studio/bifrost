@@ -2,6 +2,7 @@ node_modules/
 dist/
 .bifrost/
 !internal/templates/*/.bifrost/
+!internal/adapters/process/testembed/.bifrost/
 tmp/
 bifrost
 !bifrost/

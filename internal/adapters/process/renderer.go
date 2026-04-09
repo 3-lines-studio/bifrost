@@ -397,7 +397,7 @@ func (r *Renderer) RenderBodyStream(ctx context.Context, path string, props map[
 	if err := onHead(head); err != nil {
 		return err
 	}
-	_, err = copyResponseBodyWithFlush(w, br, flush, false)
+	_, err = copyResponseBodyWithFlush(w, br, flush, true)
 	return err
 }
 

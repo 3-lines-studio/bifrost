@@ -114,13 +114,31 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 	}
 }
 
+type pageTiming struct {
+	propsDur    time.Duration
+	renderStart time.Time
+	renderDur   time.Duration
+	deferredDur time.Duration
+	entryName   string
+	path        string
+}
+
+func (t pageTiming) serverTimingHeader() string {
+	return fmt.Sprintf("props;dur=%d,render;dur=%d", t.propsDur.Milliseconds(), t.renderDur.Milliseconds())
+}
+
 func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) ServePageOutput {
 	input := state.input
+	var timing pageTiming
+	timing.entryName = input.EntryName
+	timing.path = input.RequestPath
 
 	var syncProps map[string]any
 	if input.Config.PropsLoader != nil {
+		propsStart := time.Now()
 		var err error
 		syncProps, err = input.Config.PropsLoader(input.Request)
+		timing.propsDur = time.Since(propsStart)
 		if err != nil {
 			return ServePageOutput{
 				Action: core.ActionRenderSSR,
@@ -132,6 +150,7 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 	type deferredResult struct {
 		props map[string]any
 		err   error
+		dur   time.Duration
 	}
 	var deferredCh chan deferredResult
 	if input.Config.DeferredPropsLoader != nil {
@@ -139,8 +158,9 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		loader := input.Config.DeferredPropsLoader
 		req := input.Request
 		go func() {
+			deferredStart := time.Now()
 			p, err := loader(req)
-			deferredCh <- deferredResult{props: p, err: err}
+			deferredCh <- deferredResult{props: p, err: err, dur: time.Since(deferredStart)}
 		}()
 	}
 
@@ -173,9 +193,12 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		rCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 
+		timing.renderStart = time.Now()
 		err := s.renderer.RenderBodyStream(rCtx, state.renderPath, syncPropsForReact, w, doFlush,
 			func(head string) error {
+				timing.renderDur = time.Since(timing.renderStart)
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.Header().Set("Server-Timing", timing.serverTimingHeader())
 				w.WriteHeader(http.StatusOK)
 				if err := shell.WritePreamble(w, head, lang, htmlClass); err != nil {
 					return err
@@ -191,6 +214,7 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		if deferredCh != nil {
 			select {
 			case d := <-deferredCh:
+				timing.deferredDur = d.dur
 				if d.err != nil {
 					slog.Error("deferred loader failed", "error", d.err)
 				} else {
@@ -209,6 +233,14 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 			return err
 		}
 		doFlush()
+
+		slog.Info("bifrost page timing",
+			"entry", timing.entryName,
+			"path", timing.path,
+			"props_ms", timing.propsDur.Milliseconds(),
+			"render_ms", timing.renderDur.Milliseconds(),
+			"deferred_ms", timing.deferredDur.Milliseconds(),
+		)
 		return nil
 	}
 
