@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"net/http"
+	"testing"
+)
 
 func TestPageModeIsStatic(t *testing.T) {
 	tests := []struct {
@@ -110,4 +113,72 @@ func TestPageModeDevAction(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWithDeferredLoader(t *testing.T) {
+	route := Page("/test", "./test.tsx",
+		WithLoader(func(*http.Request) (map[string]any, error) {
+			return map[string]any{"locale": "en"}, nil
+		}),
+		WithDeferredLoader(func(*http.Request) (map[string]any, error) {
+			return map[string]any{"user": "test"}, nil
+		}),
+	)
+
+	config := PageConfigFromRoute(route)
+	if config.PropsLoader == nil {
+		t.Fatal("expected PropsLoader to be set")
+	}
+	if config.DeferredPropsLoader == nil {
+		t.Fatal("expected DeferredPropsLoader to be set")
+	}
+}
+
+func TestMergeProps(t *testing.T) {
+	t.Run("both non-nil", func(t *testing.T) {
+		result := MergeProps(
+			map[string]any{"locale": "en", "href": "/"},
+			map[string]any{"user": "alice", "carts": 3},
+		)
+		if len(result) != 4 {
+			t.Fatalf("expected 4 keys, got %d", len(result))
+		}
+		if result["locale"] != "en" {
+			t.Errorf("expected locale=en, got %v", result["locale"])
+		}
+		if result["user"] != "alice" {
+			t.Errorf("expected user=alice, got %v", result["user"])
+		}
+	})
+
+	t.Run("deferred overrides sync on key collision", func(t *testing.T) {
+		result := MergeProps(
+			map[string]any{"key": "sync"},
+			map[string]any{"key": "deferred"},
+		)
+		if result["key"] != "deferred" {
+			t.Errorf("expected deferred to override, got %v", result["key"])
+		}
+	})
+
+	t.Run("empty sync", func(t *testing.T) {
+		result := MergeProps(nil, map[string]any{"user": "alice"})
+		if result["user"] != "alice" {
+			t.Errorf("expected user=alice, got %v", result["user"])
+		}
+	})
+
+	t.Run("empty deferred", func(t *testing.T) {
+		result := MergeProps(map[string]any{"locale": "en"}, nil)
+		if result["locale"] != "en" {
+			t.Errorf("expected locale=en, got %v", result["locale"])
+		}
+	})
+
+	t.Run("both empty", func(t *testing.T) {
+		result := MergeProps(nil, nil)
+		if result != nil {
+			t.Errorf("expected nil, got %v", result)
+		}
+	})
 }

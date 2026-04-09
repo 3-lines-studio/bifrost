@@ -7,6 +7,8 @@ import (
 
 type PropsLoader func(*http.Request) (map[string]any, error)
 
+type DeferredPropsLoader func(*http.Request) (map[string]any, error)
+
 type RedirectError interface {
 	RedirectURL() string
 	RedirectStatusCode() int
@@ -65,12 +67,13 @@ type StaticPathData struct {
 type StaticDataLoader func(context.Context) ([]StaticPathData, error)
 
 type PageConfig struct {
-	ComponentPath    string
-	Mode             PageMode
-	PropsLoader      PropsLoader
-	StaticDataLoader StaticDataLoader
-	HTMLLang         string
-	HTMLClass        string
+	ComponentPath       string
+	Mode                PageMode
+	PropsLoader         PropsLoader
+	DeferredPropsLoader DeferredPropsLoader
+	StaticDataLoader    StaticDataLoader
+	HTMLLang            string
+	HTMLClass           string
 }
 
 type PageOption func(*PageConfig)
@@ -78,6 +81,12 @@ type PageOption func(*PageConfig)
 func WithLoader(loader PropsLoader) PageOption {
 	return func(c *PageConfig) {
 		c.PropsLoader = loader
+	}
+}
+
+func WithDeferredLoader(loader DeferredPropsLoader) PageOption {
+	return func(c *PageConfig) {
+		c.DeferredPropsLoader = loader
 	}
 }
 
@@ -110,6 +119,23 @@ func WithHTMLClass(class string) PageOption {
 	return func(c *PageConfig) {
 		c.HTMLClass = class
 	}
+}
+
+func MergeProps(sync map[string]any, deferred map[string]any) map[string]any {
+	if len(sync) == 0 {
+		return deferred
+	}
+	if len(deferred) == 0 {
+		return sync
+	}
+	merged := make(map[string]any, len(sync)+len(deferred))
+	for k, v := range sync {
+		merged[k] = v
+	}
+	for k, v := range deferred {
+		merged[k] = v
+	}
+	return merged
 }
 
 type RenderedPage struct {

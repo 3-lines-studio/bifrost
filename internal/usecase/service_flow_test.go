@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
@@ -532,5 +534,202 @@ func writeTestFile(t *testing.T, path string, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeferredLoaderRunsConcurrentlyWithRender(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "export default function Page(){ return <div>Hello</div> }")
+
+	var deferredStart time.Time
+	var renderStart time.Time
+	var mu sync.Mutex
+
+	renderer := &fakeRenderer{
+		buildSSRFn: func(entrypoints []string, outdir string) error {
+			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
+			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
+			return nil
+		},
+		streamFn: func(ctx context.Context, componentPath string, props map[string]any, w http.ResponseWriter, flush func(), onHead func(head string) error) error {
+			mu.Lock()
+			renderStart = time.Now()
+			mu.Unlock()
+
+			if err := onHead("<title>Home</title>"); err != nil {
+				return err
+			}
+			_, err := w.Write([]byte("<div>Hello</div>"))
+			return err
+		},
+	}
+	service := NewPageService(renderer, nil, nil)
+
+	restore := chdirForTest(t, tmpDir)
+	defer restore()
+
+	input := ServePageInput{
+		Config: core.PageConfig{
+			ComponentPath: "./pages/home.tsx",
+			Mode:          core.ModeSSR,
+			PropsLoader: func(*http.Request) (map[string]any, error) {
+				return map[string]any{"locale": "en"}, nil
+			},
+			DeferredPropsLoader: func(*http.Request) (map[string]any, error) {
+				mu.Lock()
+				deferredStart = time.Now()
+				mu.Unlock()
+				time.Sleep(50 * time.Millisecond)
+				return map[string]any{"user": "alice"}, nil
+			},
+		},
+		DefaultHTMLLang: "en",
+		IsDev:           true,
+		EntryName:       core.EntryNameForPath("./pages/home.tsx"),
+		RequestPath:     "/",
+		Request:         httptest.NewRequest(http.MethodGet, "/", nil),
+	}
+
+	output := service.ServePage(context.Background(), input)
+	if output.Error != nil {
+		t.Fatalf("ServePage() error = %v", output.Error)
+	}
+	if output.Stream == nil {
+		t.Fatal("expected stream response")
+	}
+
+	rec := httptest.NewRecorder()
+	if err := output.Stream(rec); err != nil {
+		t.Fatalf("stream error = %v", err)
+	}
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `"user":"alice"`) {
+		t.Fatalf("expected deferred props in __BIFROST_PROPS__, got %q", body)
+	}
+	if !strings.Contains(body, `"locale":"en"`) {
+		t.Fatalf("expected sync props in __BIFROST_PROPS__, got %q", body)
+	}
+
+	mu.Lock()
+	started := deferredStart
+	rendStart := renderStart
+	mu.Unlock()
+	if started.IsZero() || rendStart.IsZero() {
+		t.Fatal("expected both deferred loader and render to run")
+	}
+}
+
+func TestDeferredLoaderErrorFallsBackToSyncProps(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "export default function Page(){ return <div>Hello</div> }")
+
+	renderer := &fakeRenderer{
+		buildSSRFn: func(entrypoints []string, outdir string) error {
+			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
+			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
+			return nil
+		},
+		streamFn: func(ctx context.Context, componentPath string, props map[string]any, w http.ResponseWriter, flush func(), onHead func(head string) error) error {
+			if err := onHead("<title>Home</title>"); err != nil {
+				return err
+			}
+			_, err := w.Write([]byte("<div>Hello</div>"))
+			return err
+		},
+	}
+	service := NewPageService(renderer, nil, nil)
+
+	restore := chdirForTest(t, tmpDir)
+	defer restore()
+
+	input := ServePageInput{
+		Config: core.PageConfig{
+			ComponentPath: "./pages/home.tsx",
+			Mode:          core.ModeSSR,
+			PropsLoader: func(*http.Request) (map[string]any, error) {
+				return map[string]any{"locale": "en"}, nil
+			},
+			DeferredPropsLoader: func(*http.Request) (map[string]any, error) {
+				return nil, errors.New("db connection failed")
+			},
+		},
+		DefaultHTMLLang: "en",
+		IsDev:           true,
+		EntryName:       core.EntryNameForPath("./pages/home.tsx"),
+		RequestPath:     "/",
+		Request:         httptest.NewRequest(http.MethodGet, "/", nil),
+	}
+
+	output := service.ServePage(context.Background(), input)
+	if output.Error != nil {
+		t.Fatalf("ServePage() error = %v", output.Error)
+	}
+
+	rec := httptest.NewRecorder()
+	if err := output.Stream(rec); err != nil {
+		t.Fatalf("stream error = %v", err)
+	}
+	body := rec.Body.String()
+
+	if strings.Contains(body, `"user"`) {
+		t.Fatalf("did not expect deferred props when loader errors, got %q", body)
+	}
+	if !strings.Contains(body, `"locale":"en"`) {
+		t.Fatalf("expected sync props in __BIFROST_PROPS__, got %q", body)
+	}
+}
+
+func TestDeferredLoaderWithoutSyncLoader(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "export default function Page(){ return <div>Hello</div> }")
+
+	renderer := &fakeRenderer{
+		buildSSRFn: func(entrypoints []string, outdir string) error {
+			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
+			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
+			return nil
+		},
+		streamFn: func(ctx context.Context, componentPath string, props map[string]any, w http.ResponseWriter, flush func(), onHead func(head string) error) error {
+			if err := onHead("<title>Home</title>"); err != nil {
+				return err
+			}
+			_, err := w.Write([]byte("<div>Hello</div>"))
+			return err
+		},
+	}
+	service := NewPageService(renderer, nil, nil)
+
+	restore := chdirForTest(t, tmpDir)
+	defer restore()
+
+	input := ServePageInput{
+		Config: core.PageConfig{
+			ComponentPath: "./pages/home.tsx",
+			Mode:          core.ModeSSR,
+			DeferredPropsLoader: func(*http.Request) (map[string]any, error) {
+				return map[string]any{"user": "bob"}, nil
+			},
+		},
+		DefaultHTMLLang: "en",
+		IsDev:           true,
+		EntryName:       core.EntryNameForPath("./pages/home.tsx"),
+		RequestPath:     "/",
+		Request:         httptest.NewRequest(http.MethodGet, "/", nil),
+	}
+
+	output := service.ServePage(context.Background(), input)
+	if output.Error != nil {
+		t.Fatalf("ServePage() error = %v", output.Error)
+	}
+
+	rec := httptest.NewRecorder()
+	if err := output.Stream(rec); err != nil {
+		t.Fatalf("stream error = %v", err)
+	}
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `"user":"bob"`) {
+		t.Fatalf("expected deferred props in __BIFROST_PROPS__, got %q", body)
 	}
 }

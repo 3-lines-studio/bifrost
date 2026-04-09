@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -115,10 +116,11 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 
 func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) ServePageOutput {
 	input := state.input
-	var props map[string]any
+
+	var syncProps map[string]any
 	if input.Config.PropsLoader != nil {
 		var err error
-		props, err = input.Config.PropsLoader(input.Request)
+		syncProps, err = input.Config.PropsLoader(input.Request)
 		if err != nil {
 			return ServePageOutput{
 				Action: core.ActionRenderSSR,
@@ -127,19 +129,27 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		}
 	}
 
-	lang, htmlClass, propsForReact := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, props)
+	type deferredResult struct {
+		props map[string]any
+		err   error
+	}
+	var deferredCh chan deferredResult
+	if input.Config.DeferredPropsLoader != nil {
+		deferredCh = make(chan deferredResult, 1)
+		loader := input.Config.DeferredPropsLoader
+		req := input.Request
+		go func() {
+			p, err := loader(req)
+			deferredCh <- deferredResult{props: p, err: err}
+		}()
+	}
+
+	lang, htmlClass, syncPropsForReact := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, syncProps)
 
 	if s.renderer == nil {
 		return ServePageOutput{
 			Action: core.ActionRenderSSR,
 			Error:  fmt.Errorf("renderer not available for SSR"),
-		}
-	}
-	propsJSON, err := core.MarshalBifrostPropsJSON(propsForReact)
-	if err != nil {
-		return ServePageOutput{
-			Action: core.ActionRenderSSR,
-			Error:  err,
 		}
 	}
 	shell, err := s.resolveShell(state)
@@ -162,7 +172,8 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		doFlush := flush(w)
 		rCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		err := s.renderer.RenderBodyStream(rCtx, state.renderPath, propsForReact, w, doFlush,
+
+		err := s.renderer.RenderBodyStream(rCtx, state.renderPath, syncPropsForReact, w, doFlush,
 			func(head string) error {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusOK)
@@ -172,6 +183,25 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 				doFlush()
 				return nil
 			})
+		if err != nil {
+			return err
+		}
+
+		mergedProps := syncPropsForReact
+		if deferredCh != nil {
+			select {
+			case d := <-deferredCh:
+				if d.err != nil {
+					slog.Error("deferred loader failed", "error", d.err)
+				} else {
+					mergedProps = core.MergeProps(syncPropsForReact, d.props)
+				}
+			case <-rCtx.Done():
+				slog.Error("deferred loader timed out", "error", rCtx.Err())
+			}
+		}
+
+		propsJSON, err := core.MarshalBifrostPropsJSON(mergedProps)
 		if err != nil {
 			return err
 		}
@@ -185,7 +215,7 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 	return ServePageOutput{
 		Action: core.ActionRenderSSR,
 		Stream: streamFn,
-		Props:  propsForReact,
+		Props:  syncPropsForReact,
 	}
 }
 
