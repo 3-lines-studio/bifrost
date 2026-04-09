@@ -30,6 +30,9 @@ const (
 var (
 	//go:embed react_runtime.ts
 	ReactRuntimeSource string
+
+	//go:embed react_compiler_plugin.ts
+	reactCompilerPluginSource string
 )
 
 func RuntimeSource(mode core.Mode) string {
@@ -37,7 +40,10 @@ func RuntimeSource(mode core.Mode) string {
 	if mode == core.ModeProd {
 		tailwindPlugin = "undefined"
 	}
-	return strings.ReplaceAll(ReactRuntimeSource, "BIFROST_TAILWIND_PLUGIN", tailwindPlugin)
+	reactCompilerPlugin := strings.TrimSpace(reactCompilerPluginSource)
+	src := strings.ReplaceAll(ReactRuntimeSource, "BIFROST_TAILWIND_PLUGIN", tailwindPlugin)
+	src = strings.ReplaceAll(src, "BIFROST_REACT_COMPILER_PLUGIN", reactCompilerPlugin)
+	return src
 }
 
 type Renderer struct {
@@ -85,7 +91,7 @@ func NewRenderer(mode core.Mode, source string, extraEnv ...string) (*Renderer, 
 	}
 
 	return startRendererProcess(rendererProcessConfig{
-		command: []string{"bun", "run", "--smol", "-"},
+		command: []string{"bun", "run", "-"},
 		cwd:     cwd,
 		source:  source,
 		env:     extraEnv,

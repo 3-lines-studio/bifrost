@@ -6,6 +6,7 @@ const isDev =
   process.env.BIFROST_DEV === "1" || process.env.BIFROST_DEV === "true";
 
 const tailwindPlugin: Bun.BunPlugin | undefined = BIFROST_TAILWIND_PLUGIN;
+const reactCompilerPlugin: Bun.BunPlugin | undefined = BIFROST_REACT_COMPILER_PLUGIN;
 
 interface ErrorDetail {
   message: string;
@@ -526,8 +527,10 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
     !isSSR;
 
   try {
-    const plugins =
-      isSSR || !tailwindPlugin ? [] : [tailwindPlugin];
+    const plugins = [
+      ...(reactCompilerPlugin ? [reactCompilerPlugin] : []),
+      ...(!isSSR && tailwindPlugin ? [tailwindPlugin] : []),
+    ];
 
     const naming = hashClientAssets
       ? {
