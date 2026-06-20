@@ -117,10 +117,10 @@ func TestPageModeDevAction(t *testing.T) {
 
 func TestWithDeferredLoader(t *testing.T) {
 	route := Page("/test", "./test.tsx",
-		WithLoader(func(*http.Request) (map[string]any, error) {
+		WithLoader(func(*http.Request) (any, error) {
 			return map[string]any{"locale": "en"}, nil
 		}),
-		WithDeferredLoader(func(*http.Request) (map[string]any, error) {
+		WithDeferredLoader(func(*http.Request) (any, error) {
 			return map[string]any{"user": "test"}, nil
 		}),
 	)
@@ -140,14 +140,18 @@ func TestMergeProps(t *testing.T) {
 			map[string]any{"locale": "en", "href": "/"},
 			map[string]any{"user": "alice", "carts": 3},
 		)
-		if len(result) != 4 {
-			t.Fatalf("expected 4 keys, got %d", len(result))
+		m, ok := result.(map[string]any)
+		if !ok {
+			t.Fatal("expected map result")
 		}
-		if result["locale"] != "en" {
-			t.Errorf("expected locale=en, got %v", result["locale"])
+		if len(m) != 4 {
+			t.Fatalf("expected 4 keys, got %d", len(m))
 		}
-		if result["user"] != "alice" {
-			t.Errorf("expected user=alice, got %v", result["user"])
+		if m["locale"] != "en" {
+			t.Errorf("expected locale=en, got %v", m["locale"])
+		}
+		if m["user"] != "alice" {
+			t.Errorf("expected user=alice, got %v", m["user"])
 		}
 	})
 
@@ -156,22 +160,34 @@ func TestMergeProps(t *testing.T) {
 			map[string]any{"key": "sync"},
 			map[string]any{"key": "deferred"},
 		)
-		if result["key"] != "deferred" {
-			t.Errorf("expected deferred to override, got %v", result["key"])
+		m, ok := result.(map[string]any)
+		if !ok {
+			t.Fatal("expected map result")
+		}
+		if m["key"] != "deferred" {
+			t.Errorf("expected deferred to override, got %v", m["key"])
 		}
 	})
 
 	t.Run("empty sync", func(t *testing.T) {
 		result := MergeProps(nil, map[string]any{"user": "alice"})
-		if result["user"] != "alice" {
-			t.Errorf("expected user=alice, got %v", result["user"])
+		m, ok := result.(map[string]any)
+		if !ok {
+			t.Fatal("expected map result")
+		}
+		if m["user"] != "alice" {
+			t.Errorf("expected user=alice, got %v", m["user"])
 		}
 	})
 
 	t.Run("empty deferred", func(t *testing.T) {
 		result := MergeProps(map[string]any{"locale": "en"}, nil)
-		if result["locale"] != "en" {
-			t.Errorf("expected locale=en, got %v", result["locale"])
+		m, ok := result.(map[string]any)
+		if !ok {
+			t.Fatal("expected map result")
+		}
+		if m["locale"] != "en" {
+			t.Errorf("expected locale=en, got %v", m["locale"])
 		}
 	})
 
@@ -179,6 +195,105 @@ func TestMergeProps(t *testing.T) {
 		result := MergeProps(nil, nil)
 		if result != nil {
 			t.Errorf("expected nil, got %v", result)
+		}
+	})
+
+	t.Run("struct sync empty deferred", func(t *testing.T) {
+		type myProps struct {
+			Name string `json:"name"`
+		}
+		original := myProps{Name: "World"}
+		result := MergeProps(original, nil)
+		// Struct returned as-is when deferred is nil
+		p, ok := result.(myProps)
+		if !ok {
+			t.Fatalf("expected myProps struct, got %T", result)
+		}
+		if p.Name != "World" {
+			t.Errorf("expected name=World, got %v", p.Name)
+		}
+	})
+
+	t.Run("struct sync struct deferred", func(t *testing.T) {
+		type p1 struct {
+			Name string `json:"name"`
+		}
+		type p2 struct {
+			Count int `json:"count"`
+		}
+		result := MergeProps(p1{Name: "World"}, p2{Count: 42})
+		m, ok := result.(map[string]any)
+		if !ok {
+			t.Fatal("expected map result from structs")
+		}
+		if m["name"] != "World" {
+			t.Errorf("expected name=World, got %v", m["name"])
+		}
+		if m["count"] != float64(42) {
+			t.Errorf("expected count=42, got %v", m["count"])
+		}
+	})
+
+	t.Run("struct with map deferred", func(t *testing.T) {
+		type p1 struct {
+			Name string `json:"name"`
+		}
+		result := MergeProps(p1{Name: "sync"}, map[string]any{"name": "deferred"})
+		m, ok := result.(map[string]any)
+		if !ok {
+			t.Fatal("expected map result")
+		}
+		if m["name"] != "deferred" {
+			t.Errorf("expected deferred to override, got %v", m["name"])
+		}
+	})
+
+	t.Run("map sync struct deferred adds new key", func(t *testing.T) {
+		type deferred struct {
+			Count int `json:"count"`
+		}
+		result := MergeProps(map[string]any{"name": "sync"}, deferred{Count: 7})
+		m, ok := result.(map[string]any)
+		if !ok {
+			t.Fatal("expected map result")
+		}
+		if m["name"] != "sync" {
+			t.Errorf("expected name=sync, got %v", m["name"])
+		}
+		if m["count"] != float64(7) {
+			t.Errorf("expected count=7, got %v", m["count"])
+		}
+	})
+
+	t.Run("struct struct collision deferred wins", func(t *testing.T) {
+		type syncProps struct {
+			Name  string `json:"name"`
+			Count int    `json:"count"`
+		}
+		type deferredProps struct {
+			Name string `json:"name"`
+		}
+		result := MergeProps(syncProps{Name: "sync", Count: 1}, deferredProps{Name: "deferred"})
+		m, ok := result.(map[string]any)
+		if !ok {
+			t.Fatal("expected map result")
+		}
+		if m["name"] != "deferred" {
+			t.Errorf("expected deferred to override name, got %v", m["name"])
+		}
+		if m["count"] != float64(1) {
+			t.Errorf("expected count=1, got %v", m["count"])
+		}
+	})
+
+	t.Run("non map struct fallback returns other", func(t *testing.T) {
+		result := MergeProps([]int{1, 2}, map[string]any{"name": "ok"})
+		m, ok := result.(map[string]any)
+		if !ok {
+			t.Fatal("expected map result")
+		}
+		if m["name"] != "ok" {
+			t.Errorf("expected name=ok, got %v", m["name"])
 		}
 	})
 }

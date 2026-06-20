@@ -133,7 +133,7 @@ func TestMyPage_Dev(t *testing.T) {
 
     routes := []bifrost.Route{
         bifrost.Page("/my-page", "./pages/my-page.tsx", 
-            bifrost.WithLoader(func(*http.Request) (map[string]any, error) {
+            bifrost.WithLoader(func(*http.Request) (any, error) {
                 return map[string]any{"title": "My Page"}, nil
             }),
         ),

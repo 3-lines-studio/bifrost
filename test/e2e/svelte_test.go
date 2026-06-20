@@ -12,7 +12,7 @@ func TestSvelteSSRPage_Dev(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/svelte", "./pages/svelte/hello.svelte", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/svelte", "./pages/svelte/hello.svelte", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Svelte"}, nil
 		})),
 	}
@@ -34,7 +34,7 @@ func TestSvelteSSRPage_Prod(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/svelte", "./pages/svelte/hello.svelte", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/svelte", "./pages/svelte/hello.svelte", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Svelte"}, nil
 		})),
 	}
@@ -84,7 +84,7 @@ func TestSvelteNestedComponents_Dev(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/svelte", "./pages/svelte/hello.svelte", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/svelte", "./pages/svelte/hello.svelte", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Svelte"}, nil
 		})),
 	}
@@ -166,7 +166,7 @@ func TestSvelteNestedComponents_Prod(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/svelte", "./pages/svelte/hello.svelte", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/svelte", "./pages/svelte/hello.svelte", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Svelte"}, nil
 		})),
 	}

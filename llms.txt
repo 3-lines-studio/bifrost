@@ -1,17 +1,17 @@
 # Bifrost
 
-> Bifrost is a Go library for server-side rendering React components using Bun. It bridges Go backends with React frontends via Unix socket communication.
+> Bifrost is a Go library for server-side rendering React and Svelte components using Bun. It bridges Go backends with React and Svelte frontends via Unix socket communication.
 
-Bifrost enables Go HTTP servers to render React components on the server, providing full SSR capabilities while maintaining a simple API. Static pages are pre-rendered at build time into HTML with client-side React hydration (MPA-style), requiring no Bun runtime to serve. Development hot reload is handled by Air with proxy configuration. Production deployment uses embedded assets for single binary distribution.
+Bifrost enables Go HTTP servers to render React and Svelte components on the server, providing full SSR capabilities while maintaining a simple API. Static pages are pre-rendered at build time into HTML with client-side React hydration (MPA-style), requiring no Bun runtime to serve. Development hot reload is handled by Air with proxy configuration. Production deployment uses embedded assets for single binary distribution.
 
 ## Features
 
-- Server-side rendering of React components
-- Props loading from Go to React
+- Server-side rendering of React and Svelte components
+- Props loading from Go to React or Svelte
 - MPA-style static pages with pre-rendered HTML + client hydration (no runtime Bun)
 - Hot reload via Air with proxy configuration
 - Single binary deployment with embedded assets
-- Project scaffolding with templates (`minimal`, `spa`, `desktop`)
+- Project scaffolding with templates (`minimal`, `spa`, `desktop`, `svelte`)
 
 ## Docs
 
@@ -45,6 +45,7 @@ When creating a new project, choose from:
 - `minimal` (default): Basic SSR setup with props loading
 - `spa`: Client-only single page application with `WithClient()`
 - `desktop`: Desktop app with webview and system tray support
+- `svelte`: Svelte SSR setup with props loading and scoped styles
 
 ## New API
 
@@ -59,4 +60,17 @@ defer app.Stop()
 
 api := chi.NewRouter()
 http.ListenAndServe(":8080", app.Wrap(api))
+```
+
+### Svelte Example
+
+```go
+app := bifrost.New(
+    bifrostFS,
+    bifrost.Page("/", "./pages/home.svelte", bifrost.WithLoader(loadProps)),
+    bifrost.Page("/about", "./pages/about.svelte", bifrost.WithClient()),
+)
+defer app.Stop()
+
+http.ListenAndServe(":8080", app.Handler())
 ```

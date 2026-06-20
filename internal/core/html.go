@@ -29,8 +29,8 @@ func NewHTMLDocumentShell(scriptSrc string, criticalCSS string, cssHrefs []strin
 }
 
 // MarshalBifrostPropsJSON marshals props for embedding in the __BIFROST_PROPS__ script tag.
-func MarshalBifrostPropsJSON(props map[string]any) ([]byte, error) {
-	if len(props) == 0 {
+func MarshalBifrostPropsJSON(props any) ([]byte, error) {
+	if isNilOrEmptyProps(props) {
 		return emptyPropsJSON, nil
 	}
 	propsJSON, err := json.Marshal(props)
@@ -61,7 +61,7 @@ func WriteHTMLSuffix(w io.Writer, propsJSON []byte, scriptSrc string, chunks []s
 	return shell.WriteSuffix(w, propsJSON)
 }
 
-func RenderHTMLShell(bodyHTML string, props map[string]any, scriptSrc string, headHTML string, criticalCSS string, cssHrefs []string, chunks []string, htmlLang string, htmlClass string) (string, error) {
+func RenderHTMLShell(bodyHTML string, props any, scriptSrc string, headHTML string, criticalCSS string, cssHrefs []string, chunks []string, htmlLang string, htmlClass string) (string, error) {
 	shell, err := NewHTMLDocumentShell(scriptSrc, criticalCSS, cssHrefs, chunks)
 	if err != nil {
 		return "", err
@@ -182,7 +182,7 @@ func (s HTMLDocumentShell) WriteSuffix(w io.Writer, propsJSON []byte) error {
 	return err
 }
 
-func (s HTMLDocumentShell) Render(bodyHTML string, props map[string]any, headHTML string, htmlLang string, htmlClass string) (string, error) {
+func (s HTMLDocumentShell) Render(bodyHTML string, props any, headHTML string, htmlLang string, htmlClass string) (string, error) {
 	propsJSON, err := MarshalBifrostPropsJSON(props)
 	if err != nil {
 		return "", err

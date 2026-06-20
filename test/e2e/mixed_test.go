@@ -14,7 +14,7 @@ func TestMixedMode_AllThree_Dev(t *testing.T) {
 
 	routes := []bifrost.Route{
 		// SSR page - needs runtime
-		bifrost.Page("/dashboard", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/dashboard", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Dashboard"}, nil
 		})),
 		// Static page - pre-rendered
@@ -59,7 +59,7 @@ func TestMixedMode_AllThree_Prod(t *testing.T) {
 
 	// Use example app's actual routes
 	routes := []bifrost.Route{
-		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{
 				"user": map[string]string{"name": "Dashboard", "role": "Admin"},
 			}, nil
@@ -93,7 +93,7 @@ func TestMixedMode_SSRAndStatic_Dev(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Home"}, nil
 		})),
 		bifrost.Page("/product", "./pages/product.tsx", bifrost.WithStatic()),
@@ -120,7 +120,7 @@ func TestMixedMode_SSRAndStatic_Prod(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Home"}, nil
 		})),
 		bifrost.Page("/product", "./pages/product.tsx", bifrost.WithStatic()),
@@ -203,7 +203,7 @@ func TestMixedMode_SSRAndClient_Dev(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/app", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/app", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "App"}, nil
 		})),
 		bifrost.Page("/login", "./pages/login.tsx", bifrost.WithClient()),
@@ -233,7 +233,7 @@ func TestMixedMode_SSRAndClient_Prod(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/app", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/app", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "App"}, nil
 		})),
 		bifrost.Page("/login", "./pages/login.tsx", bifrost.WithClient()),
@@ -264,10 +264,10 @@ func TestMixedMode_MultipleEach_Dev(t *testing.T) {
 
 	routes := []bifrost.Route{
 		// Multiple SSR
-		bifrost.Page("/dashboard", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/dashboard", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Dashboard"}, nil
 		})),
-		bifrost.Page("/profile", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/profile", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Profile"}, nil
 		})),
 		// Multiple Static
@@ -308,7 +308,7 @@ func TestMixedMode_MultipleEach_Prod(t *testing.T) {
 	// Use example app's actual routes
 	routes := []bifrost.Route{
 		// Multiple SSR pages
-		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Home"}, nil
 		})),
 		bifrost.Page("/simple", "./pages/home.tsx"),

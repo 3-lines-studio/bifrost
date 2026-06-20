@@ -15,7 +15,7 @@ export function Head() {
       <title>Bifrost — SSR for Go</title>
       <meta
         name="description"
-        content="Server-side rendering for React components in Go. Bridge your backend with modern frontends."
+        content="Server-side rendering for React and Svelte components in Go. Bridge your backend with modern frontends."
       />
     </>
   );
@@ -25,7 +25,7 @@ export function Page({ nav }: HomeProps) {
   const features = [
     {
       title: "Multi-Framework",
-      desc: "React with identical Go APIs.",
+      desc: "React and Svelte with identical Go APIs.",
     },
     {
       title: "Server-Side Rendering",
@@ -66,7 +66,7 @@ func main() {
     app := bifrost.New(
         bifrostFS,
         bifrost.Page("/", "./pages/home.tsx",
-            bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+            bifrost.WithLoader(func(req *http.Request) (any, error) {
                 return map[string]any{"name": "World"}, nil
             }),
         ),
@@ -86,7 +86,7 @@ func main() {
             for <span className="text-accent">Go</span>
           </h1>
           <p className="text-lg text-muted leading-relaxed mb-10 max-w-lg">
-            Bridge your Go backend with React frontends. SSR, static generation,
+            Bridge your Go backend with React and Svelte frontends. SSR, static generation,
             and single-binary deployment.
           </p>
 

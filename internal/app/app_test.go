@@ -254,7 +254,7 @@ func TestPageModeTypes(t *testing.T) {
 		skipIfNoBun(t)
 		t.Setenv("BIFROST_DEV", "1")
 
-		a := New(testFS, core.Page("/test", "./test.tsx", core.WithLoader(func(*http.Request) (map[string]any, error) {
+		a := New(testFS, core.Page("/test", "./test.tsx", core.WithLoader(func(*http.Request) (any, error) {
 			return map[string]any{}, nil
 		})))
 		defer func() { _ = a.Stop() }()

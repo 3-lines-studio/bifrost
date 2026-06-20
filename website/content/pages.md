@@ -31,7 +31,7 @@ Render the component on every request with fresh data from a loader function:
 
 ```go
 bifrost.Page("/user/{id}", "./pages/user.tsx",
-    bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+    bifrost.WithLoader(func(req *http.Request) (any, error) {
         user, err := db.GetUser(req.PathValue("id"))
         if err != nil {
             return nil, err
@@ -83,6 +83,18 @@ bifrost.Page("/blog/{slug...}", "./pages/blog.tsx",
 )
 ```
 
+`StaticPathData.Props` accepts both `map[string]any` and structs. For example:
+
+```go
+type PostProps struct {
+    Title string `json:"title"`
+    Body  string `json:"body"`
+}
+
+// ... then in WithStaticData:
+Props: PostProps{Title: post.Title, Body: post.Body},
+```
+
 ## URL Patterns
 
 Bifrost uses Go's standard `net/http` pattern syntax:
@@ -111,3 +123,20 @@ return map[string]any{
 ```
 
 Props are serialized as JSON. Keep them minimal — pass only what the component needs.
+
+### Struct Props
+
+You can also return typed structs from loaders. They are serialized via JSON tags:
+
+```go
+type PageProps struct {
+    Title string `json:"title"`
+    Count int    `json:"count"`
+}
+
+bifrost.Page("/", "./pages/home.tsx",
+    bifrost.WithLoader(func(req *http.Request) (any, error) {
+        return PageProps{Title: "Hello", Count: 42}, nil
+    }),
+)
+```

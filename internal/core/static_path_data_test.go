@@ -18,8 +18,12 @@ func TestStaticPathDataStructure(t *testing.T) {
 		t.Errorf("Expected Path to be /blog/test, got %s", data.Path)
 	}
 
-	if data.Props["title"] != "Test Post" {
-		t.Errorf("Expected title prop, got %v", data.Props["title"])
+	props, ok := data.Props.(map[string]any)
+	if !ok {
+		t.Fatal("expected map props")
+	}
+	if props["title"] != "Test Post" {
+		t.Errorf("Expected title prop, got %v", props["title"])
 	}
 }
 
@@ -37,7 +41,7 @@ func TestStaticDataLoaderPathMatching(t *testing.T) {
 	}
 
 	targetPath := "/blog/hello"
-	var matchedProps map[string]any
+	var matchedProps any
 	found := false
 
 	for _, entry := range entries {
@@ -52,7 +56,34 @@ func TestStaticDataLoaderPathMatching(t *testing.T) {
 		t.Error("Expected to find path /blog/hello")
 	}
 
-	if matchedProps["title"] != "Hello" {
-		t.Errorf("Expected title 'Hello', got %v", matchedProps["title"])
+	m, ok := matchedProps.(map[string]any)
+	if !ok {
+		t.Fatal("expected map props")
+	}
+	if m["title"] != "Hello" {
+		t.Errorf("Expected title 'Hello', got %v", m["title"])
+	}
+}
+
+func TestStaticPathData_StructProps(t *testing.T) {
+	type blogProps struct {
+		Title string `json:"title"`
+	}
+
+	data := StaticPathData{
+		Path:  "/blog/typed",
+		Props: blogProps{Title: "Typed Post"},
+	}
+
+	if data.Path != "/blog/typed" {
+		t.Errorf("Expected Path /blog/typed, got %s", data.Path)
+	}
+
+	p, ok := data.Props.(blogProps)
+	if !ok {
+		t.Fatalf("expected original struct props, got %T", data.Props)
+	}
+	if p.Title != "Typed Post" {
+		t.Errorf("Expected title 'Typed Post', got %v", p.Title)
 	}
 }

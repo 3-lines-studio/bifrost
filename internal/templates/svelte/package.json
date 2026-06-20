@@ -1,0 +1,9 @@
+{
+  "name": "app",
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "svelte": "^5.0.0",
+    "bun-plugin-tailwind": "^0.1.2"
+  }
+}

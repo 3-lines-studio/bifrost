@@ -10,7 +10,7 @@ When a loader returns an error, Bifrost responds with a 500 status and an error 
 
 ```go
 bifrost.Page("/data", "./pages/data.tsx",
-    bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+    bifrost.WithLoader(func(req *http.Request) (any, error) {
         data, err := fetchData()
         if err != nil {
             return nil, err
@@ -28,7 +28,7 @@ Return a redirect error from a loader to send the user to a different URL:
 
 ```go
 bifrost.Page("/dashboard", "./pages/dashboard.tsx",
-    bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+    bifrost.WithLoader(func(req *http.Request) (any, error) {
         if !isAuthenticated(req) {
             return nil, &AuthRedirect{url: "/login", status: http.StatusFound}
         }

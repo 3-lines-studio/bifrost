@@ -12,7 +12,7 @@ func TestProd_RuntimeInitialized_SSR(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "SSR App"}, nil
 		})),
 	}
@@ -80,7 +80,7 @@ func TestProd_RuntimeInitialized_MixedWithSSR(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{
 				"user": map[string]string{"name": "Dashboard", "role": "Admin"},
 			}, nil

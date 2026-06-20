@@ -124,6 +124,28 @@ func (h *PageHandler) serveHTML(w http.ResponseWriter, htmlContent string) {
 	_, _ = io.WriteString(w, htmlContent)
 }
 
+func computeNextSteps(se *core.StructuredError) []string {
+	switch se.ErrorType {
+	case "Build Error":
+		if se.Specifier != "" {
+			return []string{
+				fmt.Sprintf("Check that %q is a valid import.", se.Specifier),
+				"Try running: bun install",
+			}
+		}
+		if se.File != "" {
+			return []string{fmt.Sprintf("Fix the error in %s:%d", se.File, se.Line)}
+		}
+		return []string{"Check the server logs for more details"}
+	case "Import Error":
+		return []string{"Verify the import path exists and the module is installed"}
+	case "Render Error":
+		return []string{"Check the component rendering logic in the stack trace"}
+	default:
+		return []string{"Check the server logs for more details"}
+	}
+}
+
 func (h *PageHandler) serveError(w http.ResponseWriter, req *http.Request, err error) {
 	if redirectErr, ok := err.(core.RedirectError); ok {
 		status := redirectErr.RedirectStatusCode()
@@ -137,6 +159,15 @@ func (h *PageHandler) serveError(w http.ResponseWriter, req *http.Request, err e
 	data := core.ErrorData{
 		Message: err.Error(),
 		IsDev:   h.isDev,
+	}
+
+	var se *core.StructuredError
+	if errors.As(err, &se) && h.isDev {
+		data.Structured = se
+		if se.LineText != "" {
+			data.CodeSnippet = se.LineText
+		}
+		data.NextSteps = computeNextSteps(se)
 	}
 
 	var buf bytes.Buffer

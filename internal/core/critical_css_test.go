@@ -64,3 +64,24 @@ func TestExtractCriticalCSS_RespectsSizeCap(t *testing.T) {
 		t.Fatal("expected extraction to skip oversized critical CSS")
 	}
 }
+
+func TestExtractCriticalCSS_SvelteScopedStyles(t *testing.T) {
+	html := `<body><div class="svelte-1abc234"><h1 class="svelte-1abc234">Hello</h1></div></body>`
+	css := `
+		div.svelte-1abc234{display:grid;}
+		h1.svelte-1abc234{color:red;}
+		span.svelte-9xyz789{font-size:16px;}
+	`
+
+	critical := ExtractCriticalCSS(html, css, DefaultCriticalCSSMaxBytes)
+
+	if !strings.Contains(critical, "div.svelte-1abc234") {
+		t.Fatal("expected div.svelte-1abc234 in critical CSS")
+	}
+	if !strings.Contains(critical, "h1.svelte-1abc234") {
+		t.Fatal("expected h1.svelte-1abc234 in critical CSS")
+	}
+	if strings.Contains(critical, "span.svelte-9xyz789") {
+		t.Fatal("did not expect span.svelte-9xyz789 in critical CSS (no span in HTML)")
+	}
+}

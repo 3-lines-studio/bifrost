@@ -3,20 +3,24 @@ package process
 import (
 	"strings"
 	"testing"
+
+	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
 func TestFormatRenderError_CompileError(t *testing.T) {
-	e := &renderErrJSON{
+	e := &bunErrorJSON{
 		Message: "Build failed - Expected whitespace https://svelte.dev/e/expected_whitespace (expected_whitespace)",
-		Stack:   "",
 	}
 
-	err := formatRenderError(e)
-	if err == nil {
+	se := formatRenderError(e)
+	if se == nil {
 		t.Fatal("expected error, got nil")
 	}
+	if _, ok := interface{}(se).(*core.StructuredError); !ok {
+		t.Fatalf("expected *core.StructuredError, got %T", se)
+	}
 
-	errStr := err.Error()
+	errStr := se.Error()
 	if !strings.Contains(errStr, "expected_whitespace") {
 		t.Errorf("expected 'expected_whitespace' in error, got: %s", errStr)
 	}
@@ -26,17 +30,20 @@ func TestFormatRenderError_CompileError(t *testing.T) {
 }
 
 func TestFormatRenderError_WithStack(t *testing.T) {
-	e := &renderErrJSON{
+	e := &bunErrorJSON{
 		Message: "Build failed",
 		Stack:   "at compile (/src/svelte/compiler.js:123:4)",
 	}
 
-	err := formatRenderError(e)
-	if err == nil {
+	se := formatRenderError(e)
+	if se == nil {
 		t.Fatal("expected error, got nil")
 	}
+	if _, ok := interface{}(se).(*core.StructuredError); !ok {
+		t.Fatalf("expected *core.StructuredError, got %T", se)
+	}
 
-	errStr := err.Error()
+	errStr := se.Error()
 	if !strings.Contains(errStr, "Build failed") {
 		t.Errorf("expected 'Build failed' in error, got: %s", errStr)
 	}
@@ -46,23 +53,23 @@ func TestFormatRenderError_WithStack(t *testing.T) {
 }
 
 func TestFormatRenderError_WithSubErrors(t *testing.T) {
-	e := &renderErrJSON{
+	e := &bunErrorJSON{
 		Message: "Build failed",
-		Errors: []struct {
-			Message string `json:"message"`
-			Stack   string `json:"stack"`
-		}{
+		Errors: []errorDetailJSON{
 			{Message: "Expected whitespace", Stack: "line 2"},
 			{Message: "Unexpected token", Stack: "line 3"},
 		},
 	}
 
-	err := formatRenderError(e)
-	if err == nil {
+	se := formatRenderError(e)
+	if se == nil {
 		t.Fatal("expected error, got nil")
 	}
+	if _, ok := interface{}(se).(*core.StructuredError); !ok {
+		t.Fatalf("expected *core.StructuredError, got %T", se)
+	}
 
-	errStr := err.Error()
+	errStr := se.Error()
 	if !strings.Contains(errStr, "Expected whitespace") {
 		t.Errorf("expected 'Expected whitespace' in error, got: %s", errStr)
 	}
@@ -75,8 +82,47 @@ func TestFormatRenderError_WithSubErrors(t *testing.T) {
 }
 
 func TestFormatRenderError_Nil(t *testing.T) {
-	err := formatRenderError(nil)
-	if err != nil {
-		t.Fatalf("expected nil for nil input, got: %v", err)
+	se := formatRenderError(nil)
+	if se != nil {
+		t.Fatalf("expected nil for nil input, got: %v", se)
+	}
+}
+
+func TestFormatRenderError_WithPosition(t *testing.T) {
+	e := &bunErrorJSON{
+		Message: "Build failed",
+		Errors: []errorDetailJSON{
+			{
+				Message: "Expected whitespace",
+				Position: &errorPositionJSON{
+					File:     "src/App.svelte",
+					Line:     2,
+					Column:   1,
+					LineText: "{#if}",
+				},
+			},
+		},
+	}
+
+	se := formatRenderError(e)
+	if se == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if len(se.SubErrors) != 1 {
+		t.Fatalf("expected 1 sub-error, got %d", len(se.SubErrors))
+	}
+	sub := se.SubErrors[0]
+	if sub.File != "src/App.svelte" {
+		t.Errorf("expected file 'src/App.svelte', got %q", sub.File)
+	}
+	if sub.Line != 2 {
+		t.Errorf("expected line 2, got %d", sub.Line)
+	}
+	if sub.Column != 1 {
+		t.Errorf("expected column 1, got %d", sub.Column)
+	}
+	if sub.LineText != "{#if}" {
+		t.Errorf("expected LineText '{#if}', got %q", sub.LineText)
 	}
 }

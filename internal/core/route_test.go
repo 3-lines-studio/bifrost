@@ -6,7 +6,7 @@ import (
 )
 
 func TestPageCreatesRoute(t *testing.T) {
-	route := Page("/", "./pages/home.tsx", WithLoader(func(*http.Request) (map[string]any, error) {
+	route := Page("/", "./pages/home.tsx", WithLoader(func(*http.Request) (any, error) {
 		return map[string]any{"name": "World"}, nil
 	}))
 
@@ -49,7 +49,7 @@ func TestPageWithStatic(t *testing.T) {
 
 func TestPageOptions(t *testing.T) {
 	t.Run("WithLoader creates route with loader", func(t *testing.T) {
-		route := Page("/test", "./test.tsx", WithLoader(func(*http.Request) (map[string]any, error) {
+		route := Page("/test", "./test.tsx", WithLoader(func(*http.Request) (any, error) {
 			return map[string]any{"test": "value"}, nil
 		}))
 

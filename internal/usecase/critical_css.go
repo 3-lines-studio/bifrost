@@ -55,7 +55,7 @@ func (s *BuildService) renderCriticalHTML(ctx context.Context, run *buildRun, pa
 	case core.ModeClientOnly:
 		return ""
 	case core.ModeStaticPrerender:
-		props := map[string]any{}
+		var props any
 		if page.config.StaticDataLoader != nil {
 			entries, err := page.config.StaticDataLoader(ctx)
 			if err != nil || len(entries) == 0 {
@@ -69,7 +69,7 @@ func (s *BuildService) renderCriticalHTML(ctx context.Context, run *buildRun, pa
 	}
 }
 
-func (s *BuildService) renderCriticalPage(renderPath string, props map[string]any) string {
+func (s *BuildService) renderCriticalPage(renderPath string, props any) string {
 	page, err := s.renderer.Render(renderPath, props)
 	if err != nil {
 		return ""

@@ -13,10 +13,14 @@ func TestResolveHTMLLang_Precedence(t *testing.T) {
 	if lang != "de" {
 		t.Fatalf("loader wins: got %q", lang)
 	}
-	if _, ok := out[PropHTMLLang]; ok {
+	outMap, ok := out.(map[string]any)
+	if !ok {
+		t.Fatal("expected map output")
+	}
+	if _, ok := outMap[PropHTMLLang]; ok {
 		t.Fatal("reserved key should be stripped")
 	}
-	if out["title"] != "x" {
+	if outMap["title"] != "x" {
 		t.Fatal("other props preserved")
 	}
 
@@ -24,7 +28,11 @@ func TestResolveHTMLLang_Precedence(t *testing.T) {
 	if lang2 != "fr" {
 		t.Fatalf("page option: got %q", lang2)
 	}
-	if len(out2) != 1 {
+	out2Map, ok := out2.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map, got %T", out2)
+	}
+	if len(out2Map) != 1 {
 		t.Fatalf("expected one prop, got %v", out2)
 	}
 
@@ -49,6 +57,78 @@ func TestResolveHTMLLang_NilProps(t *testing.T) {
 	}
 }
 
+func TestResolveHTMLDocumentAttrs_StructWithReservedKeys(t *testing.T) {
+	type myProps struct {
+		Title            string `json:"title"`
+		BifrostHTMLLang  string `json:"__bifrost_html_lang"`
+		BifrostHTMLClass string `json:"__bifrost_html_class"`
+	}
+	lang, class, out := ResolveHTMLDocumentAttrs("en", "fr", "light", myProps{
+		Title:            "x",
+		BifrostHTMLLang:  "de",
+		BifrostHTMLClass: "dark",
+	})
+	if lang != "de" {
+		t.Fatalf("expected de from struct, got %q", lang)
+	}
+	if class != "dark" {
+		t.Fatalf("expected dark from struct, got %q", class)
+	}
+	outMap, ok := out.(map[string]any)
+	if !ok {
+		t.Fatal("expected map output when reserved keys stripped from struct")
+	}
+	if _, ok := outMap["__bifrost_html_lang"]; ok {
+		t.Fatal("reserved lang key should be stripped")
+	}
+	if outMap["title"] != "x" {
+		t.Fatal("other props preserved")
+	}
+}
+
+func TestResolveHTMLDocumentAttrs_StructWithoutReservedKeys(t *testing.T) {
+	type myProps struct {
+		Title string `json:"title"`
+		Name  string `json:"name"`
+	}
+	original := myProps{Title: "x", Name: "y"}
+	lang, class, out := ResolveHTMLDocumentAttrs("en", "fr", "", original)
+	if lang != "fr" {
+		t.Fatalf("expected page lang, got %q", lang)
+	}
+	if class != "" {
+		t.Fatalf("expected empty class, got %q", class)
+	}
+	// Struct without reserved keys passes through as-is
+	if out != original {
+		t.Fatalf("expected original struct returned, got %v", out)
+	}
+}
+
+func TestResolveHTMLDocumentAttrs_StructWithClass(t *testing.T) {
+	type myProps struct {
+		Title            string `json:"title"`
+		BifrostHTMLClass string `json:"__bifrost_html_class"`
+	}
+	lang, class, out := ResolveHTMLDocumentAttrs("en", "", "", myProps{
+		Title:            "x",
+		BifrostHTMLClass: "dark contrast",
+	})
+	if lang != "en" {
+		t.Fatalf("expected en, got %q", lang)
+	}
+	if class != "dark contrast" {
+		t.Fatalf("expected class from struct, got %q", class)
+	}
+	outMap, ok := out.(map[string]any)
+	if !ok {
+		t.Fatal("expected map output when reserved keys stripped")
+	}
+	if _, ok := outMap["__bifrost_html_class"]; ok {
+		t.Fatal("reserved class key should be stripped")
+	}
+}
+
 func TestResolveHTMLDocumentAttrs_ClassPrecedence(t *testing.T) {
 	props := map[string]any{
 		PropHTMLClass: "dark  contrast",
@@ -61,10 +141,14 @@ func TestResolveHTMLDocumentAttrs_ClassPrecedence(t *testing.T) {
 	if class != "dark contrast" {
 		t.Fatalf("expected loader class, got %q", class)
 	}
-	if _, ok := out[PropHTMLClass]; ok {
+	outMap, ok := out.(map[string]any)
+	if !ok {
+		t.Fatal("expected map output")
+	}
+	if _, ok := outMap[PropHTMLClass]; ok {
 		t.Fatal("reserved html class key should be stripped")
 	}
-	if out["title"] != "x" {
+	if outMap["title"] != "x" {
 		t.Fatal("other props preserved")
 	}
 }
@@ -78,10 +162,14 @@ func TestResolveHTMLDocumentAttrs_PageClassFallback(t *testing.T) {
 	if class != "dark" {
 		t.Fatalf("expected sanitized page class, got %q", class)
 	}
-	if len(out) != 1 {
+	outMap, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map, got %T", out)
+	}
+	if len(outMap) != 1 {
 		t.Fatalf("expected one prop, got %v", out)
 	}
-	out["copy_check"] = true
+	outMap["copy_check"] = true
 	if props["copy_check"] != true {
 		t.Fatal("expected props map to be reused when no reserved keys are present")
 	}
@@ -113,15 +201,43 @@ func TestResolveHTMLDocumentAttrs_ReservedKeysForceCopy(t *testing.T) {
 	if class != "contrast" {
 		t.Fatalf("expected loader class, got %q", class)
 	}
-	out["copy_check"] = true
+	outMap, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map, got %T", out)
+	}
+	outMap["copy_check"] = true
 	if _, ok := props["copy_check"]; ok {
 		t.Fatal("expected props map to be copied when reserved keys are stripped")
 	}
-	if _, ok := out[PropHTMLLang]; ok {
+	if _, ok := outMap[PropHTMLLang]; ok {
 		t.Fatal("reserved lang key should be stripped")
 	}
-	if _, ok := out[PropHTMLClass]; ok {
+	if _, ok := outMap[PropHTMLClass]; ok {
 		t.Fatal("reserved class key should be stripped")
+	}
+}
+
+func TestResolveHTMLDocumentAttrs_StructOnlyReservedKeys(t *testing.T) {
+	type myProps struct {
+		BifrostHTMLLang  string `json:"__bifrost_html_lang"`
+		BifrostHTMLClass string `json:"__bifrost_html_class"`
+	}
+	lang, class, out := ResolveHTMLDocumentAttrs("en", "", "", myProps{
+		BifrostHTMLLang:  "es",
+		BifrostHTMLClass: "dark",
+	})
+	if lang != "es" {
+		t.Fatalf("expected es, got %q", lang)
+	}
+	if class != "dark" {
+		t.Fatalf("expected dark, got %q", class)
+	}
+	outMap, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map output, got %T", out)
+	}
+	if len(outMap) != 0 {
+		t.Fatalf("expected empty cleaned map, got %v", outMap)
 	}
 }
 

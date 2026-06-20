@@ -331,3 +331,45 @@ func TestRenderHTMLShell_MultipleStylesheets(t *testing.T) {
 		t.Fatalf("expected 2 stylesheet links, got: %q", html)
 	}
 }
+
+func TestRenderHTMLShell_StructProps(t *testing.T) {
+	type pageProps struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	}
+
+	html, err := RenderHTMLShell(
+		"<div>Hello</div>",
+		pageProps{Name: "World", Count: 42},
+		"/dist/page.js",
+		"<title>Test</title>",
+		"",
+		nil,
+		nil,
+		"en",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(html, `"name":"World"`) {
+		t.Error("expected name prop serialized from struct")
+	}
+	if !strings.Contains(html, `"count":42`) {
+		t.Error("expected count prop serialized from struct")
+	}
+}
+
+func TestMarshalBifrostPropsJSON_Struct(t *testing.T) {
+	type pageProps struct {
+		Name string `json:"name"`
+	}
+
+	b, err := MarshalBifrostPropsJSON(pageProps{Name: "World"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(b) != `{"name":"World"}` {
+		t.Errorf("unexpected JSON: %s", string(b))
+	}
+}

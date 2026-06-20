@@ -11,7 +11,7 @@ func TestWrapWithServeMux_Dev(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(*http.Request) (map[string]any, error) {
+		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(*http.Request) (any, error) {
 			return map[string]any{"name": "Wrapped"}, nil
 		})),
 		bifrost.Page("/about", "./pages/about.tsx", bifrost.WithClient()),
@@ -39,7 +39,7 @@ func TestWrapWithServeMux_Prod(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(*http.Request) (map[string]any, error) {
+		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(*http.Request) (any, error) {
 			return map[string]any{"name": "Wrapped"}, nil
 		})),
 		bifrost.Page("/about", "./pages/about.tsx", bifrost.WithClient()),

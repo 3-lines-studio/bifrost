@@ -2,12 +2,13 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 )
 
-type PropsLoader func(*http.Request) (map[string]any, error)
+type PropsLoader func(*http.Request) (any, error)
 
-type DeferredPropsLoader func(*http.Request) (map[string]any, error)
+type DeferredPropsLoader func(*http.Request) (any, error)
 
 type RedirectError interface {
 	RedirectURL() string
@@ -61,7 +62,7 @@ func (m PageMode) RenderAction() PageAction {
 
 type StaticPathData struct {
 	Path  string
-	Props map[string]any
+	Props any
 }
 
 type StaticDataLoader func(context.Context) ([]StaticPathData, error)
@@ -121,13 +122,15 @@ func WithHTMLClass(class string) PageOption {
 	}
 }
 
-func MergeProps(sync map[string]any, deferred map[string]any) map[string]any {
-	if len(sync) == 0 {
-		return deferred
+func isNilOrEmptyProps(p any) bool {
+	if p == nil {
+		return true
 	}
-	if len(deferred) == 0 {
-		return sync
-	}
+	m, ok := p.(map[string]any)
+	return ok && len(m) == 0
+}
+
+func mergeMaps(sync, deferred map[string]any) map[string]any {
 	merged := make(map[string]any, len(sync)+len(deferred))
 	for k, v := range sync {
 		merged[k] = v
@@ -136,6 +139,44 @@ func MergeProps(sync map[string]any, deferred map[string]any) map[string]any {
 		merged[k] = v
 	}
 	return merged
+}
+
+func propsToMap(v any) (map[string]any, bool) {
+	if m, ok := v.(map[string]any); ok {
+		return m, true
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, false
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, false
+	}
+	return m, true
+}
+
+func MergeProps(sync any, deferred any) any {
+	if isNilOrEmptyProps(sync) {
+		return deferred
+	}
+	if isNilOrEmptyProps(deferred) {
+		return sync
+	}
+	if sm, ok := sync.(map[string]any); ok {
+		if dm, ok := deferred.(map[string]any); ok {
+			return mergeMaps(sm, dm)
+		}
+	}
+	syncMap, syncOK := propsToMap(sync)
+	deferredMap, deferredOK := propsToMap(deferred)
+	if !syncOK {
+		return deferred
+	}
+	if !deferredOK {
+		return sync
+	}
+	return mergeMaps(syncMap, deferredMap)
 }
 
 type RenderedPage struct {
@@ -152,7 +193,7 @@ const (
 )
 
 type Renderer interface {
-	Render(componentPath string, props map[string]any) (RenderedPage, error)
+	Render(componentPath string, props any) (RenderedPage, error)
 	Build(entrypoints []string, outdir string) error
 }
 

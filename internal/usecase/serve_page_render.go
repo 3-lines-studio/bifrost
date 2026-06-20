@@ -46,7 +46,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 			}
 		}
 
-		var props map[string]any
+		var props any
 		found := false
 		for _, entry := range entries {
 			if core.NormalizePath(entry.Path) == requestPath {
@@ -128,7 +128,7 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 	timing.entryName = input.EntryName
 	timing.path = input.RequestPath
 
-	var syncProps map[string]any
+	var syncProps any
 	if input.Config.PropsLoader != nil {
 		propsStart := time.Now()
 		var err error
@@ -143,7 +143,7 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 	}
 
 	type deferredResult struct {
-		props map[string]any
+		props any
 		err   error
 		dur   time.Duration
 	}
@@ -234,11 +234,11 @@ func (s *PageService) resolveRenderPath(input ServePageInput) string {
 	return input.Config.ComponentPath
 }
 
-func (s *PageService) renderPageHTML(input ServePageInput, props map[string]any, page core.RenderedPage, htmlLang string, htmlClass string) (string, error) {
+func (s *PageService) renderPageHTML(input ServePageInput, props any, page core.RenderedPage, htmlLang string, htmlClass string) (string, error) {
 	return s.renderPageHTMLWithArtifacts(s.prepareRequest(input), props, page, htmlLang, htmlClass)
 }
 
-func (s *PageService) renderPageHTMLWithArtifacts(state pageRequestState, props map[string]any, page core.RenderedPage, htmlLang string, htmlClass string) (string, error) {
+func (s *PageService) renderPageHTMLWithArtifacts(state pageRequestState, props any, page core.RenderedPage, htmlLang string, htmlClass string) (string, error) {
 	shell, err := s.resolveShell(state)
 	if err != nil {
 		return "", err

@@ -169,6 +169,11 @@ func TestGetTemplate(t *testing.T) {
 			wantErr:  false,
 		},
 		{
+			name:     "svelte template",
+			template: "svelte",
+			wantErr:  false,
+		},
+		{
 			name:      "invalid template",
 			template:  "invalid",
 			wantErr:   true,
@@ -259,6 +264,108 @@ func TestGetDesktopTemplate_Content(t *testing.T) {
 	}
 }
 
+func TestGetSvelteTemplate_Content(t *testing.T) {
+	templateFS, err := GetTemplate("svelte")
+	if err != nil {
+		t.Fatalf("GetTemplate('svelte') error = %v", err)
+	}
+
+	content, err := fs.ReadFile(templateFS, "pages/home.svelte")
+	if err != nil {
+		t.Fatalf("Failed to read pages/home.svelte: %v", err)
+	}
+
+	if !strings.Contains(string(content), "$props()") {
+		t.Error("svelte pages/home.svelte should contain $props()")
+	}
+	if !strings.Contains(string(content), "<svelte:head>") {
+		t.Error("svelte pages/home.svelte should contain <svelte:head>")
+	}
+
+	mainContent, err := fs.ReadFile(templateFS, "main.go.tmpl")
+	if err != nil {
+		t.Fatalf("Failed to read main.go.tmpl: %v", err)
+	}
+
+	if !strings.Contains(string(mainContent), "WithLoader(") {
+		t.Error("svelte main.go.tmpl should contain WithLoader(")
+	}
+	if !strings.Contains(string(mainContent), "./pages/home.svelte") {
+		t.Error("svelte main.go.tmpl should contain ./pages/home.svelte")
+	}
+
+	pkgContent, err := fs.ReadFile(templateFS, "package.json")
+	if err != nil {
+		t.Fatalf("Failed to read package.json: %v", err)
+	}
+
+	if !strings.Contains(string(pkgContent), "\"svelte\"") {
+		t.Error("svelte package.json should contain svelte dependency")
+	}
+	if strings.Contains(string(pkgContent), "react") {
+		t.Error("svelte package.json should NOT contain react")
+	}
+	if strings.Contains(string(pkgContent), "@babel") {
+		t.Error("svelte package.json should NOT contain @babel")
+	}
+}
+
+func TestGetSvelteTemplate_AirTomlWatchesSvelte(t *testing.T) {
+	templateFS, err := GetTemplate("svelte")
+	if err != nil {
+		t.Fatalf("GetTemplate('svelte') error = %v", err)
+	}
+
+	content, err := fs.ReadFile(templateFS, ".air.toml")
+	if err != nil {
+		t.Fatalf("Failed to read .air.toml: %v", err)
+	}
+
+	if !strings.Contains(string(content), `"svelte"`) {
+		t.Error("svelte .air.toml should include svelte in include_ext")
+	}
+}
+
+func TestGetSvelteTemplate_TsconfigHasNoJSX(t *testing.T) {
+	templateFS, err := GetTemplate("svelte")
+	if err != nil {
+		t.Fatalf("GetTemplate('svelte') error = %v", err)
+	}
+
+	content, err := fs.ReadFile(templateFS, "tsconfig.json")
+	if err != nil {
+		t.Fatalf("Failed to read tsconfig.json: %v", err)
+	}
+
+	if strings.Contains(string(content), `"jsx"`) {
+		t.Error("svelte tsconfig.json should NOT contain jsx")
+	}
+}
+
+func TestGetSvelteTemplate_DockerfileExists(t *testing.T) {
+	templateFS, err := GetTemplate("svelte")
+	if err != nil {
+		t.Fatalf("GetTemplate('svelte') error = %v", err)
+	}
+
+	_, err = fs.ReadFile(templateFS, "Dockerfile")
+	if err != nil {
+		t.Fatalf("svelte template should include Dockerfile: %v", err)
+	}
+}
+
+func TestGetSvelteTemplate_FaviconExists(t *testing.T) {
+	templateFS, err := GetTemplate("svelte")
+	if err != nil {
+		t.Fatalf("GetTemplate('svelte') error = %v", err)
+	}
+
+	_, err = fs.ReadFile(templateFS, "public/favicon.ico")
+	if err != nil {
+		t.Fatalf("svelte template should include public/favicon.ico: %v", err)
+	}
+}
+
 func TestGetMinimalTemplate_DockerfileExists(t *testing.T) {
 	templateFS, err := GetTemplate("minimal")
 	if err != nil {
@@ -308,7 +415,7 @@ func TestGetSpaTemplate_FaviconExists(t *testing.T) {
 }
 
 func TestBifrostGitkeepExists(t *testing.T) {
-	templates := []string{"minimal", "spa", "desktop"}
+	templates := []string{"minimal", "spa", "desktop", "svelte"}
 
 	for _, tmpl := range templates {
 		t.Run(tmpl, func(t *testing.T) {

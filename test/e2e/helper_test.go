@@ -243,8 +243,14 @@ func normalizeHTML(html string) string {
 
 	html = regexp.MustCompile(`\s+`).ReplaceAllString(html, " ")
 
-	// Normalize all file paths in error stack traces
+	// Normalize absolute file paths in error stack traces (with parentheses)
 	html = regexp.MustCompile(`\(/(?:home|Users)/[^)]+\)`).ReplaceAllString(html, "([FILE_PATH])")
+
+	// Normalize relative file paths in error templates (e.g. src/App.svelte:2:1)
+	html = regexp.MustCompile(`src/[^\s<>"'&;]+\.[a-z]+(:\d+(:\d+)?)?`).ReplaceAllString(html, "src/[FILE]:[LINE]:[COL]")
+
+	// Normalize any absolute path (e.g. /home/user/project/src/...)
+	html = regexp.MustCompile(`/(?:home|Users|tmp)/[^\s<>"'&;]+\.[a-z]+`).ReplaceAllString(html, "/[FILE_PATH]")
 
 	// Async stack labels vary between Bun/runtime source shapes.
 	html = strings.ReplaceAll(html, "async handleRender", "handleRender")

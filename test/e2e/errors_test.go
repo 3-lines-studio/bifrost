@@ -26,7 +26,7 @@ func TestRedirectError_Unauthenticated_Dev(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
 			return nil, &authRequiredError{}
 		})),
 	}
@@ -41,7 +41,7 @@ func TestRedirectError_Unauthenticated_Prod(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
 			return nil, &authRequiredError{}
 		})),
 	}
@@ -56,7 +56,7 @@ func TestRedirectError_Authenticated_Dev(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
 			if req.URL.Query().Get("demo") == "true" {
 				return map[string]any{
 					"user": map[string]string{
@@ -82,7 +82,7 @@ func TestRedirectError_Authenticated_Prod(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
 			if req.URL.Query().Get("demo") == "true" {
 				return map[string]any{
 					"user": map[string]string{
@@ -108,7 +108,7 @@ func TestErrorLoaderError_Dev(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/error", "./pages/home.tsx", bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+		bifrost.Page("/error", "./pages/home.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
 			return nil, fmt.Errorf("loader error occurred")
 		})),
 	}
@@ -126,7 +126,7 @@ func TestErrorLoaderError_Prod(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/error", "./pages/home.tsx", bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+		bifrost.Page("/error", "./pages/home.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
 			return nil, fmt.Errorf("loader error occurred")
 		})),
 	}
@@ -222,7 +222,7 @@ func TestRedirectError_307_Dev(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/admin", "./pages/dashboard.tsx", bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+		bifrost.Page("/admin", "./pages/dashboard.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
 			return nil, &adminRequiredError{}
 		})),
 	}
@@ -237,7 +237,7 @@ func TestRedirectError_307_Prod(t *testing.T) {
 	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
-		bifrost.Page("/admin", "./pages/dashboard.tsx", bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+		bifrost.Page("/admin", "./pages/dashboard.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
 			return nil, &adminRequiredError{}
 		})),
 	}

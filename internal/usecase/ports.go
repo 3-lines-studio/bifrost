@@ -6,7 +6,7 @@ import (
 )
 
 type Renderer interface {
-	Render(componentPath string, props map[string]any) (core.RenderedPage, error)
+	Render(componentPath string, props any) (core.RenderedPage, error)
 	Build(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error)
 	BuildSSR(entrypoints []string, outdir string, framework string) error
 }

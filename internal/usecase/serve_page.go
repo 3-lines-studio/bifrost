@@ -28,7 +28,7 @@ type ServePageOutput struct {
 	HTML       string
 	StaticPath string
 	RoutePath  string
-	Props      map[string]any
+	Props      any
 	NeedsSetup bool
 	Error      error
 }

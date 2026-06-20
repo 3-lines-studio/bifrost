@@ -56,14 +56,14 @@ var blogPosts = []BlogPost{
 func main() {
 	routes := []bifrost.Route{
 		// SSR Pages
-		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "World"}, nil
 		})),
 		bifrost.Page("/simple", "./pages/home.tsx"),
-		bifrost.Page("/user/{id}", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/user/{id}", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": r.PathValue("id")}, nil
 		})),
-		bifrost.Page("/search", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/search", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			query := r.URL.Query().Get("q")
 			if query == "" {
 				query = "empty"
@@ -72,23 +72,23 @@ func main() {
 		})),
 
 		// SSR - Shared component at multiple routes
-		bifrost.Page("/shared-a", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/shared-a", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Route A"}, nil
 		})),
-		bifrost.Page("/shared-b", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/shared-b", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Route B"}, nil
 		})),
 
 		// SSR - Empty and nil loaders
-		bifrost.Page("/empty", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/empty", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{}, nil
 		})),
 
 		// SSR - Pages needed for e2e tests
-		bifrost.Page("/nested", "./pages/nested/page.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/nested", "./pages/nested/page.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Nested"}, nil
 		})),
-		bifrost.Page("/api-demo", "./pages/api-demo.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/api-demo", "./pages/api-demo.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{
 				"users": []map[string]any{
 					{"id": 1, "name": "Alice", "email": "alice@example.com"},
@@ -97,7 +97,7 @@ func main() {
 				"loadTime": time.Now().Format("2006-01-02 15:04:05"),
 			}, nil
 		})),
-		bifrost.Page("/message/{message}", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/message/{message}", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			path := r.URL.Path
 			message := "World"
 			if len(path) > 9 && path[:9] == "/message/" {
@@ -107,7 +107,7 @@ func main() {
 		})),
 
 		// Svelte Pages
-		bifrost.Page("/svelte", "./pages/svelte/hello.svelte", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/svelte", "./pages/svelte/hello.svelte", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Svelte"}, nil
 		})),
 		bifrost.Page("/svelte-client", "./pages/svelte/counter.svelte", bifrost.WithClient()),
@@ -139,7 +139,7 @@ func main() {
 			})),
 
 		// Dashboard with redirect demo
-		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			// Check for demo mode - in a real app, check authentication here
 			if r.URL.Query().Get("demo") == "true" {
 				return map[string]any{
@@ -154,16 +154,16 @@ func main() {
 		})),
 
 		// Error Scenarios
-		bifrost.Page("/error", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/error", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return nil, fmt.Errorf("this is a test error to verify the error page works correctly")
 		})),
-		bifrost.Page("/error-loader", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/error-loader", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return nil, fmt.Errorf("loader failed")
 		})),
-		bifrost.Page("/error-redirect-302", "./pages/dashboard.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/error-redirect-302", "./pages/dashboard.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return nil, &AuthRequiredError{}
 		})),
-		bifrost.Page("/error-redirect-307", "./pages/dashboard.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/error-redirect-307", "./pages/dashboard.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return nil, &AdminRequiredError{}
 		})),
 		bifrost.Page("/error-render", "./pages/error-render.tsx"),

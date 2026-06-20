@@ -37,12 +37,21 @@ interface RenderResult {
 function serializeError(error: unknown): {
   message: string;
   stack?: string;
+  position?: {
+    file?: string;
+    line: number;
+    column: number;
+    lineText?: string;
+  };
+  specifier?: string;
+  referrer?: string;
 } {
   if (error instanceof Error) {
-    return {
-      message: error.message,
-      stack: error.stack,
-    };
+    const result: any = { message: error.message, stack: error.stack };
+    if ((error as any).position) result.position = (error as any).position;
+    if ((error as any).specifier) result.specifier = (error as any).specifier;
+    if ((error as any).referrer) result.referrer = (error as any).referrer;
+    return result;
   }
   return { message: String(error) };
 }
@@ -69,6 +78,14 @@ function createError(
     } else if (err instanceof Error) {
       const serialized = serializeError(err);
       result.error.stack = serialized.stack;
+      if (serialized.position || serialized.specifier || serialized.referrer) {
+        result.error.errors = [{
+          message: serialized.message,
+          position: serialized.position,
+          specifier: serialized.specifier,
+          referrer: serialized.referrer,
+        }];
+      }
     }
   }
 

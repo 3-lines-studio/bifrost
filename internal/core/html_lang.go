@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 )
@@ -28,28 +29,55 @@ func SanitizeHTMLClass(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-func ResolveHTMLDocumentAttrs(appDefaultLang, pageLang, pageClass string, props map[string]any) (lang string, htmlClass string, propsForReact map[string]any) {
+func stripReservedKeysFromMap(m map[string]any) (cleaned map[string]any, lang string, class string, hasReserved bool) {
+	rawLang, hasLang := m[PropHTMLLang].(string)
+	rawClass, hasClass := m[PropHTMLClass].(string)
+	if !hasLang && !hasClass {
+		return m, "", "", false
+	}
+	cleaned = make(map[string]any, len(m))
+	for k, v := range m {
+		switch k {
+		case PropHTMLLang, PropHTMLClass:
+			continue
+		}
+		cleaned[k] = v
+	}
+	return cleaned, rawLang, rawClass, true
+}
+
+func ResolveHTMLDocumentAttrs(appDefaultLang, pageLang, pageClass string, props any) (lang string, htmlClass string, propsForReact any) {
 	var fromLoaderLang string
 	var fromLoaderClass string
+
 	if props != nil {
-		_, hasLang := props[PropHTMLLang]
-		_, hasClass := props[PropHTMLClass]
-		if rawLang, ok := props[PropHTMLLang].(string); ok {
+		if m, ok := props.(map[string]any); ok {
+			cleaned, rawLang, rawClass, hasReserved := stripReservedKeysFromMap(m)
 			fromLoaderLang = rawLang
-		}
-		if rawClass, ok := props[PropHTMLClass].(string); ok {
 			fromLoaderClass = rawClass
-		}
-		if !hasLang && !hasClass {
-			propsForReact = props
+			if hasReserved {
+				propsForReact = cleaned
+			} else {
+				propsForReact = props
+			}
 		} else {
-			propsForReact = make(map[string]any, len(props))
-			for k, v := range props {
-				switch k {
-				case PropHTMLLang, PropHTMLClass:
-					continue
+			data, err := json.Marshal(props)
+			if err == nil {
+				var m map[string]any
+				if err := json.Unmarshal(data, &m); err == nil {
+					var cleaned map[string]any
+					var hasReserved bool
+					cleaned, fromLoaderLang, fromLoaderClass, hasReserved = stripReservedKeysFromMap(m)
+					if hasReserved {
+						propsForReact = cleaned
+					} else {
+						propsForReact = props
+					}
+				} else {
+					propsForReact = props
 				}
-				propsForReact[k] = v
+			} else {
+				propsForReact = props
 			}
 		}
 	}
@@ -77,7 +105,7 @@ func ResolveHTMLDocumentAttrs(appDefaultLang, pageLang, pageClass string, props 
 	return lang, htmlClass, propsForReact
 }
 
-func ResolveHTMLLang(appDefault, pageLang string, props map[string]any) (lang string, propsForReact map[string]any) {
+func ResolveHTMLLang(appDefault, pageLang string, props any) (lang string, propsForReact any) {
 	lang, _, propsForReact = ResolveHTMLDocumentAttrs(appDefault, pageLang, "", props)
 	return lang, propsForReact
 }

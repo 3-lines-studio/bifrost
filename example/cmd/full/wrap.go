@@ -19,7 +19,7 @@ import (
 func main() {
 	// Bifrost routes
 	bifrostRoutes := []bifrost.Route{
-		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
 			return map[string]any{"name": "Chi Integration"}, nil
 		})),
 		bifrost.Page("/about", "./pages/about.tsx", bifrost.WithClient()),

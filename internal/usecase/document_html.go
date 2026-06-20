@@ -7,7 +7,7 @@ import (
 )
 
 // RenderHTMLDocumentFromPage assembles a full HTML document from a rendered React page and resolved artifacts.
-func RenderHTMLDocumentFromPage(page core.RenderedPage, props map[string]any, artifacts core.PageArtifacts, htmlLang, htmlClass string) (string, error) {
+func RenderHTMLDocumentFromPage(page core.RenderedPage, props any, artifacts core.PageArtifacts, htmlLang, htmlClass string) (string, error) {
 	shell, err := core.NewHTMLDocumentShell(
 		artifacts.Script,
 		artifacts.CriticalCSS,

@@ -65,8 +65,8 @@ type rendererProcessConfig struct {
 }
 
 type renderRequestPayload struct {
-	Path  string         `json:"path"`
-	Props map[string]any `json:"props"`
+	Path  string `json:"path"`
+	Props any    `json:"props"`
 }
 
 func uniqueSocketPath() string {
@@ -188,37 +188,65 @@ func (r *Renderer) Stop() error {
 	return err
 }
 
-type renderErrJSON struct {
-	Message string `json:"message"`
-	Stack   string `json:"stack"`
-	Errors  []struct {
-		Message string `json:"message"`
-		Stack   string `json:"stack"`
-	} `json:"errors"`
+type errorPositionJSON struct {
+	File     string `json:"file"`
+	Line     int    `json:"line"`
+	Column   int    `json:"column"`
+	LineText string `json:"lineText"`
 }
 
-func formatRenderError(e *renderErrJSON) error {
+type errorDetailJSON struct {
+	Message   string             `json:"message"`
+	Stack     string             `json:"stack"`
+	Position  *errorPositionJSON `json:"position"`
+	Specifier string             `json:"specifier"`
+	Referrer  string             `json:"referrer"`
+}
+
+type bunErrorJSON struct {
+	Message string            `json:"message"`
+	Stack   string            `json:"stack"`
+	Errors  []errorDetailJSON `json:"errors"`
+}
+
+func bunErrorToStructured(e *bunErrorJSON, errorType string) *core.StructuredError {
 	if e == nil {
 		return nil
 	}
-	var sb strings.Builder
-	sb.WriteString(e.Message)
-
-	if len(e.Errors) > 0 {
-		sb.WriteString("\n\nErrors:")
-		for i, err := range e.Errors {
-			fmt.Fprintf(&sb, "\n  %d. %s", i+1, err.Message)
-			if err.Stack != "" {
-				fmt.Fprintf(&sb, "\n     Stack: %s", err.Stack)
-			}
+	se := &core.StructuredError{
+		ErrorType: errorType,
+		Message:   e.Message,
+		Stack:     e.Stack,
+	}
+	for _, detail := range e.Errors {
+		sub := core.StructuredError{
+			Message:   detail.Message,
+			Stack:     detail.Stack,
+			Specifier: detail.Specifier,
+			Referrer:  detail.Referrer,
 		}
+		if detail.Position != nil {
+			sub.File = detail.Position.File
+			sub.Line = detail.Position.Line
+			sub.Column = detail.Position.Column
+			sub.LineText = detail.Position.LineText
+		}
+		se.SubErrors = append(se.SubErrors, sub)
 	}
-
-	if e.Stack != "" {
-		fmt.Fprintf(&sb, "\n\nStack:\n%s", e.Stack)
+	if len(se.SubErrors) > 0 && se.File == "" {
+		first := se.SubErrors[0]
+		se.File = first.File
+		se.Line = first.Line
+		se.Column = first.Column
+		se.LineText = first.LineText
+		se.Specifier = first.Specifier
+		se.Referrer = first.Referrer
 	}
+	return se
+}
 
-	return fmt.Errorf("%s", sb.String())
+func formatRenderError(e *bunErrorJSON) *core.StructuredError {
+	return bunErrorToStructured(e, "Render Error")
 }
 
 func derefString(p *string) string {
@@ -229,14 +257,14 @@ func derefString(p *string) string {
 }
 
 // MarshalRenderRequestJSON builds the JSON body for POST /render (exported for tests).
-func MarshalRenderRequestJSON(path string, props map[string]any) ([]byte, error) {
+func MarshalRenderRequestJSON(path string, props any) ([]byte, error) {
 	return json.Marshal(renderRequestPayload{
 		Path:  path,
 		Props: props,
 	})
 }
 
-func (r *Renderer) postRender(ctx context.Context, path string, props map[string]any) (*http.Response, error) {
+func (r *Renderer) postRender(ctx context.Context, path string, props any) (*http.Response, error) {
 	jsonBody, err := MarshalRenderRequestJSON(path, props)
 	if err != nil {
 		return nil, err
@@ -260,9 +288,9 @@ func newJSONRequest(ctx context.Context, endpoint string, body []byte) (*http.Re
 // renderFromDecoder consumes Bun /render output: one legacy JSON object or two NDJSON lines (head then html).
 func renderFromDecoder(dec *json.Decoder) (head, html string, err error) {
 	type firstMsg struct {
-		Error *renderErrJSON `json:"error"`
-		Head  *string        `json:"head"`
-		HTML  *string        `json:"html"`
+		Error *bunErrorJSON `json:"error"`
+		Head  *string       `json:"head"`
+		HTML  *string       `json:"html"`
 	}
 
 	var first firstMsg
@@ -270,7 +298,11 @@ func renderFromDecoder(dec *json.Decoder) (head, html string, err error) {
 		return "", "", fmt.Errorf("render response: %w", err)
 	}
 	if first.Error != nil {
-		return "", "", formatRenderError(first.Error)
+		se := formatRenderError(first.Error)
+		if se != nil {
+			return "", "", se
+		}
+		return "", "", fmt.Errorf("render error")
 	}
 
 	if first.HTML != nil {
@@ -280,14 +312,18 @@ func renderFromDecoder(dec *json.Decoder) (head, html string, err error) {
 	head = derefString(first.Head)
 
 	var second struct {
-		Error *renderErrJSON `json:"error"`
-		HTML  *string        `json:"html"`
+		Error *bunErrorJSON `json:"error"`
+		HTML  *string       `json:"html"`
 	}
 	if err := dec.Decode(&second); err != nil {
 		return "", "", fmt.Errorf("render body: %w", err)
 	}
 	if second.Error != nil {
-		return "", "", formatRenderError(second.Error)
+		se := formatRenderError(second.Error)
+		if se != nil {
+			return "", "", se
+		}
+		return "", "", fmt.Errorf("render error")
 	}
 	if second.HTML == nil {
 		return "", "", fmt.Errorf("missing html in render response")
@@ -295,7 +331,7 @@ func renderFromDecoder(dec *json.Decoder) (head, html string, err error) {
 	return head, *second.HTML, nil
 }
 
-func (r *Renderer) Render(path string, props map[string]any) (core.RenderedPage, error) {
+func (r *Renderer) Render(path string, props any) (core.RenderedPage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
 	defer cancel()
 
@@ -338,19 +374,7 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 	var result struct {
 		OK      bool                              `json:"ok"`
 		Entries map[string]core.ClientBuildResult `json:"entries"`
-		Error   *struct {
-			Message string `json:"message"`
-			Stack   string `json:"stack"`
-			Errors  []struct {
-				Message   string `json:"message"`
-				File      string `json:"file"`
-				Line      int    `json:"line"`
-				Column    int    `json:"column"`
-				LineText  string `json:"lineText"`
-				Specifier string `json:"specifier"`
-				Referrer  string `json:"referrer"`
-			} `json:"errors"`
-		} `json:"error"`
+		Error   *bunErrorJSON                     `json:"error"`
 	}
 
 	if err := r.postJSON(ctx, "/build", reqBody, &result); err != nil {
@@ -358,19 +382,11 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 	}
 
 	if result.Error != nil {
-		var errorDetails strings.Builder
-		errorDetails.WriteString(result.Error.Message)
-		if len(result.Error.Errors) > 0 {
-			errorDetails.WriteString("\n")
-			for _, e := range result.Error.Errors {
-				_, _ = fmt.Fprintf(&errorDetails, "  - %s", e.Message)
-				if e.File != "" {
-					_, _ = fmt.Fprintf(&errorDetails, " (%s:%d:%d)", e.File, e.Line, e.Column)
-				}
-				errorDetails.WriteString("\n")
-			}
+		se := bunErrorToStructured(result.Error, "Build Error")
+		if se != nil {
+			return nil, fmt.Errorf("build failed: %w", se)
 		}
-		return nil, fmt.Errorf("build failed: %s", errorDetails.String())
+		return nil, fmt.Errorf("build failed: %s", result.Error.Message)
 	}
 
 	if !result.OK {
@@ -418,20 +434,8 @@ func (r *Renderer) BuildSSR(entrypoints []string, outdir string, framework strin
 	}
 
 	var result struct {
-		OK    bool `json:"ok"`
-		Error *struct {
-			Message string `json:"message"`
-			Stack   string `json:"stack"`
-			Errors  []struct {
-				Message   string `json:"message"`
-				File      string `json:"file"`
-				Line      int    `json:"line"`
-				Column    int    `json:"column"`
-				LineText  string `json:"lineText"`
-				Specifier string `json:"specifier"`
-				Referrer  string `json:"referrer"`
-			} `json:"errors"`
-		} `json:"error"`
+		OK    bool          `json:"ok"`
+		Error *bunErrorJSON `json:"error"`
 	}
 
 	if err := r.postJSON(ctx, "/build", reqBody, &result); err != nil {
@@ -439,19 +443,11 @@ func (r *Renderer) BuildSSR(entrypoints []string, outdir string, framework strin
 	}
 
 	if result.Error != nil {
-		var errorDetails strings.Builder
-		errorDetails.WriteString(result.Error.Message)
-		if len(result.Error.Errors) > 0 {
-			errorDetails.WriteString("\n")
-			for _, e := range result.Error.Errors {
-				_, _ = fmt.Fprintf(&errorDetails, "  - %s", e.Message)
-				if e.File != "" {
-					_, _ = fmt.Fprintf(&errorDetails, " (%s:%d:%d)", e.File, e.Line, e.Column)
-				}
-				errorDetails.WriteString("\n")
-			}
+		se := bunErrorToStructured(result.Error, "Build Error")
+		if se != nil {
+			return fmt.Errorf("ssr build failed: %w", se)
 		}
-		return fmt.Errorf("ssr build failed: %s", errorDetails.String())
+		return fmt.Errorf("ssr build failed: %s", result.Error.Message)
 	}
 
 	if !result.OK {

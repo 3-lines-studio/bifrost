@@ -22,8 +22,8 @@ type staticPageExport struct {
 }
 
 type staticPathExport struct {
-	Path  string         `json:"path"`
-	Props map[string]any `json:"props"`
+	Path  string `json:"path"`
+	Props any    `json:"props"`
 }
 
 func WriteStaticBuildExport(w io.Writer, routes []core.Route, pageConfigs map[string]*core.PageConfig) error {

@@ -23,10 +23,10 @@ type fakeRenderer struct {
 	renderCalls          int
 	buildFn              func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error)
 	buildSSRFn           func(entrypoints []string, outdir string, framework string) error
-	renderFn             func(componentPath string, props map[string]any) (core.RenderedPage, error)
+	renderFn             func(componentPath string, props any) (core.RenderedPage, error)
 }
 
-func (f *fakeRenderer) Render(componentPath string, props map[string]any) (core.RenderedPage, error) {
+func (f *fakeRenderer) Render(componentPath string, props any) (core.RenderedPage, error) {
 	f.renderCalls++
 	if f.renderFn != nil {
 		return f.renderFn(componentPath, props)
@@ -64,7 +64,7 @@ func TestPageServiceDevSSRBuildsThenRenders(t *testing.T) {
 			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
 			return nil
 		},
-		renderFn: func(componentPath string, props map[string]any) (core.RenderedPage, error) {
+		renderFn: func(componentPath string, props any) (core.RenderedPage, error) {
 			if componentPath == "" {
 				t.Fatal("expected render path")
 			}
@@ -270,8 +270,8 @@ func TestExportStaticPages_UsesRouteSpecificCriticalCSS(t *testing.T) {
 	}
 
 	renderer := &fakeRenderer{
-		renderFn: func(componentPath string, props map[string]any) (core.RenderedPage, error) {
-			switch props["kind"] {
+		renderFn: func(componentPath string, props any) (core.RenderedPage, error) {
+			m, _ := props.(map[string]any); switch m["kind"] {
 			case "hero":
 				return core.RenderedPage{Body: `<div class="hero">Hero</div>`}, nil
 			case "cta":
@@ -528,7 +528,7 @@ func TestDeferredLoaderRunsConcurrentlyWithRender(t *testing.T) {
 			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
 			return nil
 		},
-		renderFn: func(componentPath string, props map[string]any) (core.RenderedPage, error) {
+		renderFn: func(componentPath string, props any) (core.RenderedPage, error) {
 			mu.Lock()
 			renderStart = time.Now()
 			mu.Unlock()
@@ -544,10 +544,10 @@ func TestDeferredLoaderRunsConcurrentlyWithRender(t *testing.T) {
 		Config: core.PageConfig{
 			ComponentPath: "./pages/home.tsx",
 			Mode:          core.ModeSSR,
-			PropsLoader: func(*http.Request) (map[string]any, error) {
+			PropsLoader: func(*http.Request) (any, error) {
 				return map[string]any{"locale": "en"}, nil
 			},
-			DeferredPropsLoader: func(*http.Request) (map[string]any, error) {
+			DeferredPropsLoader: func(*http.Request) (any, error) {
 				mu.Lock()
 				deferredStart = time.Now()
 				mu.Unlock()
@@ -596,7 +596,7 @@ func TestDeferredLoaderErrorFallsBackToSyncProps(t *testing.T) {
 			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
 			return nil
 		},
-		renderFn: func(componentPath string, props map[string]any) (core.RenderedPage, error) {
+		renderFn: func(componentPath string, props any) (core.RenderedPage, error) {
 			return core.RenderedPage{Head: "<title>Home</title>", Body: "<div>Hello</div>"}, nil
 		},
 	}
@@ -609,10 +609,10 @@ func TestDeferredLoaderErrorFallsBackToSyncProps(t *testing.T) {
 		Config: core.PageConfig{
 			ComponentPath: "./pages/home.tsx",
 			Mode:          core.ModeSSR,
-			PropsLoader: func(*http.Request) (map[string]any, error) {
+			PropsLoader: func(*http.Request) (any, error) {
 				return map[string]any{"locale": "en"}, nil
 			},
-			DeferredPropsLoader: func(*http.Request) (map[string]any, error) {
+			DeferredPropsLoader: func(*http.Request) (any, error) {
 				return nil, errors.New("db connection failed")
 			},
 		},
@@ -646,7 +646,7 @@ func TestDeferredLoaderWithoutSyncLoader(t *testing.T) {
 			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
 			return nil
 		},
-		renderFn: func(componentPath string, props map[string]any) (core.RenderedPage, error) {
+		renderFn: func(componentPath string, props any) (core.RenderedPage, error) {
 			return core.RenderedPage{Head: "<title>Home</title>", Body: "<div>Hello</div>"}, nil
 		},
 	}
@@ -659,7 +659,7 @@ func TestDeferredLoaderWithoutSyncLoader(t *testing.T) {
 		Config: core.PageConfig{
 			ComponentPath: "./pages/home.tsx",
 			Mode:          core.ModeSSR,
-			DeferredPropsLoader: func(*http.Request) (map[string]any, error) {
+			DeferredPropsLoader: func(*http.Request) (any, error) {
 				return map[string]any{"user": "bob"}, nil
 			},
 		},
@@ -758,7 +758,7 @@ func TestDevSSRUsesFrameworkAdapterFromComponentPath(t *testing.T) {
 			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
 			return nil
 		},
-		renderFn: func(componentPath string, props map[string]any) (core.RenderedPage, error) {
+		renderFn: func(componentPath string, props any) (core.RenderedPage, error) {
 			return core.RenderedPage{Body: "<h1>Hello Svelte</h1>"}, nil
 		},
 	}
