@@ -13,5 +13,5 @@ make check
 
 - Bun is required for SSR functionality
 - Uses Unix sockets for Go-Bun communication
-- Supports hot reload in development mode via air
+- Supports hot reload in development mode via bifrost dev
 - Production builds embed assets using `embed.FS`

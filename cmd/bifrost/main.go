@@ -19,6 +19,8 @@ func main() {
 		runInit(args)
 	case "build":
 		runBuild(args)
+	case "dev":
+		runDev(args)
 	case "doctor":
 		runDoctor(args)
 	case "--help", "-h", "help":
@@ -39,6 +41,7 @@ func printRootUsage() {
 	fmt.Println("Subcommands:")
 	fmt.Println("  init     Scaffold a new Bifrost project from a template")
 	fmt.Println("  build    Run the production asset build")
+	fmt.Println("  dev      Start the development server with live reload and reverse proxy")
 	fmt.Println("  doctor   Repair the .bifrost directory")
 	fmt.Println()
 	fmt.Println("Use 'bifrost <subcommand> --help' for subcommand-specific help")

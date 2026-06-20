@@ -136,15 +136,10 @@ Bifrost determines mode by checking the `BIFROST_DEV` environment variable:
 ### Development Mode
 
 ```bash
-export BIFROST_DEV=1
-go run main.go
+bifrost dev ./main.go
 ```
 
-Features:
-- Renders source component files directly
-- Hot reload on file changes
-- No embedded assets required
-- Detailed error pages
+`bifrost dev` sets `BIFROST_DEV=1`, builds and restarts on `.go` changes, reverse-proxies `:<port>` → `:8080`, and relies on Bun's per-request module re-import for frontend hot reload.
 
 ### Production Mode
 
@@ -159,7 +154,7 @@ go build -o myapp main.go
 ./myapp
 ```
 
-`go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest` installs a binary named `bifrost`; run `bifrost init`, `bifrost build`, or `bifrost doctor`.
+`go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest` installs a binary named `bifrost`; run `bifrost init`, `bifrost dev`, `bifrost build`, or `bifrost doctor`.
 
 Requirements:
 - `embed.FS` is **mandatory** - panics at startup if missing
@@ -674,7 +669,7 @@ go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init myapp
 This scaffolds a complete working project with all required files.
 
 Options:
-- `--template <name>`: Choose from `minimal` (default), `spa`, `desktop`, `svelte`
+- `--template <name>`: Choose from `minimal` (default), `spa`, `svelte`
 
 Examples:
 ```bash

@@ -1,5 +1,5 @@
 dev:
-	BIFROST_DEV=1 air -c .air.toml
+	go run ../cmd/bifrost dev main.go
 
 build:
 	go run ../cmd/bifrost build main.go

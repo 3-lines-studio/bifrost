@@ -3,7 +3,6 @@ package templates
 import (
 	"errors"
 	"io/fs"
-	"os"
 	"strings"
 	"testing"
 )
@@ -164,11 +163,6 @@ func TestGetTemplate(t *testing.T) {
 			wantErr:  false,
 		},
 		{
-			name:     "desktop template",
-			template: "desktop",
-			wantErr:  false,
-		},
-		{
 			name:     "svelte template",
 			template: "svelte",
 			wantErr:  false,
@@ -230,40 +224,6 @@ func TestGetSpaTemplate_Content(t *testing.T) {
 	}
 }
 
-func TestGetDesktopTemplate_Content(t *testing.T) {
-	templateFS, err := GetTemplate("desktop")
-	if err != nil {
-		t.Fatalf("GetTemplate('desktop') error = %v", err)
-	}
-
-	mainContent, err := fs.ReadFile(templateFS, "main.go.tmpl")
-	if err != nil {
-		t.Fatalf("Failed to read main.go.tmpl: %v", err)
-	}
-
-	if !strings.Contains(string(mainContent), "systray.Run") {
-		t.Error("desktop main.go.tmpl should contain systray.Run")
-	}
-
-	if !strings.Contains(string(mainContent), "webview.New") {
-		t.Error("desktop main.go.tmpl should contain webview.New")
-	}
-
-	if !strings.Contains(string(mainContent), "//go:embed public/icon.png") {
-		t.Error("desktop main.go.tmpl should embed icon.png")
-	}
-
-	_, err = fs.ReadFile(templateFS, "public/icon.png")
-	if err != nil {
-		t.Fatalf("desktop template should include public/icon.png: %v", err)
-	}
-
-	_, err = fs.ReadFile(templateFS, "Dockerfile")
-	if !os.IsNotExist(err) {
-		t.Error("desktop template should NOT include Dockerfile")
-	}
-}
-
 func TestGetSvelteTemplate_Content(t *testing.T) {
 	templateFS, err := GetTemplate("svelte")
 	if err != nil {
@@ -307,22 +267,6 @@ func TestGetSvelteTemplate_Content(t *testing.T) {
 	}
 	if strings.Contains(string(pkgContent), "@babel") {
 		t.Error("svelte package.json should NOT contain @babel")
-	}
-}
-
-func TestGetSvelteTemplate_AirTomlWatchesSvelte(t *testing.T) {
-	templateFS, err := GetTemplate("svelte")
-	if err != nil {
-		t.Fatalf("GetTemplate('svelte') error = %v", err)
-	}
-
-	content, err := fs.ReadFile(templateFS, ".air.toml")
-	if err != nil {
-		t.Fatalf("Failed to read .air.toml: %v", err)
-	}
-
-	if !strings.Contains(string(content), `"svelte"`) {
-		t.Error("svelte .air.toml should include svelte in include_ext")
 	}
 }
 
@@ -415,7 +359,7 @@ func TestGetSpaTemplate_FaviconExists(t *testing.T) {
 }
 
 func TestBifrostGitkeepExists(t *testing.T) {
-	templates := []string{"minimal", "spa", "desktop", "svelte"}
+	templates := []string{"minimal", "spa", "svelte"}
 
 	for _, tmpl := range templates {
 		t.Run(tmpl, func(t *testing.T) {

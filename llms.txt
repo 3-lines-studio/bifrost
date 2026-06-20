@@ -2,22 +2,22 @@
 
 > Bifrost is a Go library for server-side rendering React and Svelte components using Bun. It bridges Go backends with React and Svelte frontends via Unix socket communication.
 
-Bifrost enables Go HTTP servers to render React and Svelte components on the server, providing full SSR capabilities while maintaining a simple API. Static pages are pre-rendered at build time into HTML with client-side React hydration (MPA-style), requiring no Bun runtime to serve. Development hot reload is handled by Air with proxy configuration. Production deployment uses embedded assets for single binary distribution.
+Bifrost enables Go HTTP servers to render React and Svelte components on the server, providing full SSR capabilities while maintaining a simple API. Static pages are pre-rendered at build time into HTML with client-side React hydration (MPA-style), requiring no Bun runtime to serve. Development hot reload is handled by `bifrost dev` with built-in reverse proxy. Production deployment uses embedded assets for single binary distribution.
 
 ## Features
 
 - Server-side rendering of React and Svelte components
 - Props loading from Go to React or Svelte
 - MPA-style static pages with pre-rendered HTML + client hydration (no runtime Bun)
-- Hot reload via Air with proxy configuration
+- Hot reload via `bifrost dev` (build+proxy+watcher)
 - Single binary deployment with embedded assets
-- Project scaffolding with templates (`minimal`, `spa`, `desktop`, `svelte`)
+- Project scaffolding with templates (`minimal`, `spa`, `svelte`)
 
 ## Docs
 
 - [API Reference](docs.md): Complete API documentation including App, Page, static generation, and configuration options
 - [Example Application](example/cmd/full/main.go): Working example with SSR pages, static pages, and dynamic routes
-- [Air Configuration](example/.air.toml): Hot reload proxy configuration for development
+- [Dev Command](cmd/bifrost/dev.go): Development server with live reload and reverse proxy
 
 ### Internal implementation
 
@@ -35,7 +35,7 @@ Bifrost enables Go HTTP servers to render React and Svelte components on the ser
 
 ### CLI commands
 
-- [Bifrost CLI](cmd/bifrost/main.go): unified CLI with `init`, `build`, and `doctor` subcommands
+- [Bifrost CLI](cmd/bifrost/main.go): unified CLI with `init`, `dev`, `build`, and `doctor` subcommands
 - [Init logic](internal/usecase/init_project.go): template processing and project creation
 - [Templates](internal/templates/embed.go): embedded template filesystem
 
@@ -44,7 +44,6 @@ Bifrost enables Go HTTP servers to render React and Svelte components on the ser
 When creating a new project, choose from:
 - `minimal` (default): Basic SSR setup with props loading
 - `spa`: Client-only single page application with `WithClient()`
-- `desktop`: Desktop app with webview and system tray support
 - `svelte`: Svelte SSR setup with props loading and scoped styles
 
 ## New API

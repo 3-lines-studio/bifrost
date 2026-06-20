@@ -153,6 +153,35 @@ func TestCLI_BuildHelp(t *testing.T) {
 	}
 }
 
+func TestCLI_DevHelp(t *testing.T) {
+	for _, flag := range []string{"--help", "-h"} {
+		t.Run(flag, func(t *testing.T) {
+			cmd := runCLI(t, "dev", flag)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("expected zero exit for dev %s, got error: %v\n%s", flag, err, out)
+			}
+			if !strings.Contains(string(out), "bifrost dev") {
+				t.Errorf("expected dev usage, got:\n%s", out)
+			}
+			if !strings.Contains(string(out), "--port") {
+				t.Errorf("expected --port flag in dev usage, got:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestCLI_DevMissingFile(t *testing.T) {
+	cmd := runCLI(t, "dev")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected non-zero exit for dev without main file")
+	}
+	if !strings.Contains(string(out), "Missing main.go file argument") {
+		t.Errorf("expected missing file error, got:\n%s", out)
+	}
+}
+
 func TestCLI_BuildMissingFile(t *testing.T) {
 	cmd := runCLI(t, "build")
 	out, err := cmd.CombinedOutput()
@@ -196,7 +225,6 @@ func TestCLI_InitScaffoldsSvelteProject(t *testing.T) {
 		filepath.Join(dir, "main.go"),
 		filepath.Join(dir, "pages", "home.svelte"),
 		filepath.Join(dir, "package.json"),
-		filepath.Join(dir, ".air.toml"),
 		filepath.Join(dir, "tsconfig.json"),
 	}
 	for _, path := range expected {

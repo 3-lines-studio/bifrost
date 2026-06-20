@@ -14,9 +14,6 @@ var minimalFS embed.FS
 //go:embed all:spa
 var spaFS embed.FS
 
-//go:embed all:desktop
-var desktopFS embed.FS
-
 //go:embed all:svelte
 var svelteFS embed.FS
 
@@ -28,8 +25,6 @@ func GetTemplate(name string) (fs.FS, error) {
 		return fs.Sub(minimalFS, "minimal")
 	case "spa":
 		return fs.Sub(spaFS, "spa")
-	case "desktop":
-		return fs.Sub(desktopFS, "desktop")
 	case "svelte":
 		return fs.Sub(svelteFS, "svelte")
 	default:

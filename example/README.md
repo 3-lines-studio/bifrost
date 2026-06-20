@@ -6,7 +6,6 @@ This is an example application demonstrating Bifrost's SSR capabilities.
 
 - Go 1.25+
 - Bun
-- Air (`go install github.com/air-verse/air@latest`)
 
 ## Development
 
@@ -16,7 +15,7 @@ Run the development server with hot reload:
 make dev
 ```
 
-Then open <http://localhost:8080>
+Then open <http://localhost:3000>
 
 **Note:** The `.bifrost` directory is created automatically for the embed directive to work.
 
@@ -26,31 +25,6 @@ Then open <http://localhost:8080>
 make build
 ./bifrost
 ```
-
-## Desktop Build (Linux)
-
-Build a native desktop app using webview (no external browser needed):
-
-### Prerequisites
-
-- Go 1.25+
-- Bun
-- Linux: GTK 3 and WebKitGTK development libraries
-
-### Development (Hot Reload)
-
-```bash
-make dev-desktop
-```
-
-### Production Build
-
-```bash
-make build-desktop
-./bifrost-desktop
-```
-
-The desktop app uses static pages (no SSR runtime embedded), producing a minimal single binary.
 
 ## Available Routes
 

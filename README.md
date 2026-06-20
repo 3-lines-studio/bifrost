@@ -23,7 +23,15 @@ go get github.com/3-lines-studio/bifrost
 go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init myapp
 ```
 
-Templates: `minimal` (default), `spa`, `desktop`, `svelte` — e.g. `go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init --template spa myapp`.
+Templates: `minimal` (default), `spa`, `svelte` — e.g. `go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init --template spa myapp`.
+
+## Development
+
+```bash
+bifrost dev ./main.go
+```
+
+Hot reload on `.go` file changes with reverse proxy on `:3000` → `:8080`. Frontend changes (`.tsx`, `.ts`, `.svelte`, `.css`) are picked up live via Bun per-request re-import.
 
 ## Production build
 
@@ -36,7 +44,7 @@ Templates: `minimal` (default), `spa`, `desktop`, `svelte` — e.g. `go run gith
 
 3. `go build` your app and run it **without** `BIFROST_DEV=1`.
 
-`go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest` installs a binary named `bifrost`; run `bifrost init`, `bifrost build`, or `bifrost doctor`.
+`go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest` installs a binary named `bifrost`; run `bifrost init`, `bifrost dev`, `bifrost build`, or `bifrost doctor`.
 
 ## `.bifrost` directory
 

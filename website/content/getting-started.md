@@ -22,7 +22,7 @@ The fastest way to get started is with the init command:
 go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init myapp
 ```
 
-This scaffolds a complete project. Then `cd myapp`, run `go mod tidy` and `bun install`, and start the dev server (for example `make dev` if the template includes it) — typically at `http://localhost:8080`.
+This scaffolds a complete project. Then `cd myapp`, run `go mod tidy` and `bun install`, and start the dev server: `bifrost dev main.go` — at `http://localhost:3000`.
 
 ### Templates
 
@@ -30,7 +30,6 @@ Choose a template that fits your use case:
 
 - **minimal** (default) — React SSR app with a single page
 - **spa** — Single-page application with client-only rendering
-- **desktop** — Desktop application template
 - **svelte** — Svelte SSR app with a single page
 
 ## Project Structure
@@ -55,7 +54,7 @@ myapp/
 Set `BIFROST_DEV=1` to enable development mode with hot reload:
 
 ```bash
-BIFROST_DEV=1 go run main.go
+bifrost dev main.go
 ```
 
 In dev mode, source files are rendered directly and the browser refreshes on every change.
