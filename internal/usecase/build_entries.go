@@ -50,15 +50,3 @@ func (s *BuildService) writeClientOnlyHTML(htmlPath, title, script, criticalCSS 
 	html = strings.ReplaceAll(html, "SCRIPT_SRC_PLACEHOLDER", script)
 	return os.WriteFile(htmlPath, []byte(html), 0644)
 }
-
-func (s *BuildService) writeSSREntry(entryPath, importPath string) error {
-	return WriteSSREntryFile(s.adapter, entryPath, importPath)
-}
-
-func (s *BuildService) writeClientOnlyEntry(entryPath, importPath string) error {
-	return WriteClientEntryFile(s.adapter, entryPath, importPath, core.ModeClientOnly)
-}
-
-func (s *BuildService) writeHydrationEntry(entryPath, importPath string) error {
-	return WriteClientEntryFile(s.adapter, entryPath, importPath, core.ModeSSR)
-}

@@ -7,6 +7,7 @@ const isDev =
 
 const tailwindPlugin: Bun.BunPlugin | undefined = BIFROST_TAILWIND_PLUGIN;
 const reactCompilerPlugin: Bun.BunPlugin | undefined = BIFROST_REACT_COMPILER_PLUGIN;
+const sveltePluginFactory: ((generate: string) => Bun.BunPlugin) | undefined = BIFROST_SVELTE_PLUGIN;
 
 interface ErrorDetail {
   message: string;
@@ -31,7 +32,6 @@ interface BuildEntryResult {
 interface RenderResult {
   html?: string;
   head?: string;
-  stream?: ReadableStream<Uint8Array>;
 }
 
 function serializeError(error: unknown): {
@@ -92,37 +92,6 @@ function ndjsonRenderResponse(head: string, html: string): Response {
       start(controller) {
         controller.enqueue(enc.encode(line1));
         controller.enqueue(enc.encode(line2));
-        controller.close();
-      },
-    }),
-    {
-      headers: {
-        "Content-Type": "application/x-ndjson; charset=utf-8",
-      },
-    },
-  );
-}
-
-function headThenRawStreamResponse(
-  head: string,
-  htmlStream: ReadableStream<Uint8Array>,
-): Response {
-  const enc = new TextEncoder();
-  const headLine = enc.encode(JSON.stringify({ head }) + "\n");
-  return new Response(
-    new ReadableStream<Uint8Array>({
-      async start(controller) {
-        controller.enqueue(headLine);
-        const reader = htmlStream.getReader();
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            if (value) controller.enqueue(value);
-          }
-        } finally {
-          reader.releaseLock();
-        }
         controller.close();
       },
     }),
@@ -384,7 +353,7 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
   let body: {
     path?: string;
     props?: Record<string, unknown>;
-    streamBody?: boolean;
+    framework?: string;
   };
   try {
     body = await req.json();
@@ -393,8 +362,8 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
     return createError(`Failed to parse request: ${message}`);
   }
 
-  const { path, props, streamBody } = body;
-  const wantStream = streamBody === true;
+  const { path, props, framework } = body;
+  const fw = framework ?? "react";
 
   if (!path) {
     return createError("Missing 'path' in request");
@@ -410,12 +379,7 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
     const mod = await import(importPath);
 
     if (typeof mod.render === "function") {
-      const result: RenderResult = await mod.render(props || {}, {
-        streamBody: wantStream,
-      });
-      if (result.stream instanceof ReadableStream) {
-        return headThenRawStreamResponse(result.head ?? "", result.stream);
-      }
+      const result: RenderResult = await mod.render(props || {});
       return renderResponse(result.head ?? "", result.html ?? "");
     }
 
@@ -461,24 +425,6 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
 
     const el = React.createElement(Component, componentProps);
 
-    if (wantStream) {
-      try {
-        const { renderToReadableStream } = await import("react-dom/server");
-        const stream = await renderToReadableStream(el);
-        return headThenRawStreamResponse(head, stream);
-      } catch {
-        let html: string;
-        try {
-          html = renderToString(el);
-        } catch (renderErr) {
-          const message =
-            renderErr instanceof Error ? renderErr.message : String(renderErr);
-          return createError(`Render error: ${message}`, renderErr);
-        }
-        return renderResponse(head, html);
-      }
-    }
-
     let html: string;
     try {
       html = renderToString(el);
@@ -501,6 +447,7 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
     outdir?: string;
     target?: string;
     entryNames?: string[];
+    framework?: string;
   };
   try {
     body = await req.json();
@@ -509,7 +456,7 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
     return createError(`Failed to parse request: ${message}`);
   }
 
-  const { entrypoints, outdir, target, entryNames } = body;
+  const { entrypoints, outdir, target, entryNames, framework } = body;
 
   if (!Array.isArray(entrypoints) || entrypoints.length === 0) {
     return createError("Missing entrypoints");
@@ -526,11 +473,21 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
       process.env.BIFROST_PROD === "true") &&
     !isSSR;
 
+  const fw = framework ?? "react";
+
   try {
-    const plugins = [
-      ...(reactCompilerPlugin ? [reactCompilerPlugin] : []),
-      ...(!isSSR && tailwindPlugin ? [tailwindPlugin] : []),
-    ];
+    let plugins: any[];
+    if (fw === "svelte") {
+      plugins = [
+        ...(sveltePluginFactory ? [sveltePluginFactory(isSSR ? "server" : "client")] : []),
+        ...(!isSSR && tailwindPlugin ? [tailwindPlugin] : []),
+      ];
+    } else {
+      plugins = [
+        ...(reactCompilerPlugin ? [reactCompilerPlugin] : []),
+        ...(!isSSR && tailwindPlugin ? [tailwindPlugin] : []),
+      ];
+    }
 
     const naming = hashClientAssets
       ? {

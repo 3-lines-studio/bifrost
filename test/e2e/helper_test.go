@@ -234,7 +234,7 @@ func normalizeHTML(html string) string {
 
 	html = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?`).ReplaceAllString(html, "[ISO-TIMESTAMP]")
 
-	html = regexp.MustCompile(`"[^"]*\.[a-f0-9]{8,}\.(js|css|mjs)"`).ReplaceAllString(html, `"[HASHED.$1]"`)
+	html = regexp.MustCompile(`"[^"]*[-.][a-z0-9]{6,}\.(js|css|mjs)"`).ReplaceAllString(html, `"[HASHED.$1]"`)
 
 	html = regexp.MustCompile(`id="[^"]*-[a-f0-9]{6,}"`).ReplaceAllString(html, `id="[ID]"`)
 

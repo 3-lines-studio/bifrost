@@ -1,0 +1,8 @@
+import { hydrate } from "svelte";
+import Page from "COMPONENT_PATH";
+const script = document.getElementById("__BIFROST_PROPS__");
+const props = script ? JSON.parse(script.textContent || "{}") : {};
+const target = document.getElementById("app");
+if (target) {
+	hydrate(BIFROST_CLIENT_ROOT, { target, props });
+}

@@ -32,11 +32,15 @@ func DefaultAdapter() core.FrameworkAdapter {
 
 func ResolveAdapter(fw core.Framework) core.FrameworkAdapter {
 	switch fw {
-	case core.FrameworkReact:
-		fallthrough
+	case core.FrameworkSvelte:
+		return NewSvelteAdapter()
 	default:
 		return NewReactAdapter()
 	}
+}
+
+func ResolveAdapterForPath(componentPath string) core.FrameworkAdapter {
+	return ResolveAdapter(core.FrameworkFromComponentPath(componentPath))
 }
 
 func (a *ReactAdapter) Name() string {

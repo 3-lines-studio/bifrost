@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -123,10 +122,6 @@ type pageTiming struct {
 	path        string
 }
 
-func (t pageTiming) serverTimingHeader() string {
-	return fmt.Sprintf("props;dur=%d,render;dur=%d", t.propsDur.Milliseconds(), t.renderDur.Milliseconds())
-}
-
 func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) ServePageOutput {
 	input := state.input
 	var timing pageTiming
@@ -180,73 +175,50 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		}
 	}
 
-	flush := func(w http.ResponseWriter) func() {
-		return func() {
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
-			}
+	timing.renderStart = time.Now()
+	page, err := s.renderer.Render(state.renderPath, syncPropsForReact)
+	timing.renderDur = time.Since(timing.renderStart)
+	if err != nil {
+		return ServePageOutput{
+			Action: core.ActionRenderSSR,
+			Error:  err,
 		}
 	}
 
-	streamFn := func(w http.ResponseWriter) error {
-		doFlush := flush(w)
-		rCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-
-		timing.renderStart = time.Now()
-		err := s.renderer.RenderBodyStream(rCtx, state.renderPath, syncPropsForReact, w, doFlush,
-			func(head string) error {
-				timing.renderDur = time.Since(timing.renderStart)
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.Header().Set("Server-Timing", timing.serverTimingHeader())
-				w.WriteHeader(http.StatusOK)
-				if err := shell.WritePreamble(w, head, lang, htmlClass); err != nil {
-					return err
-				}
-				doFlush()
-				return nil
-			})
-		if err != nil {
-			return err
-		}
-
-		mergedProps := syncPropsForReact
-		if deferredCh != nil {
-			select {
-			case d := <-deferredCh:
-				timing.deferredDur = d.dur
-				if d.err != nil {
-					slog.Error("deferred loader failed", "error", d.err)
-				} else {
-					mergedProps = core.MergeProps(syncPropsForReact, d.props)
-				}
-			case <-rCtx.Done():
-				slog.Error("deferred loader timed out", "error", rCtx.Err())
+	mergedProps := syncPropsForReact
+	if deferredCh != nil {
+		select {
+		case d := <-deferredCh:
+			timing.deferredDur = d.dur
+			if d.err != nil {
+				slog.Error("deferred loader failed", "error", d.err)
+			} else {
+				mergedProps = core.MergeProps(syncPropsForReact, d.props)
 			}
+		case <-ctx.Done():
+			slog.Error("deferred loader timed out", "error", ctx.Err())
 		}
-
-		propsJSON, err := core.MarshalBifrostPropsJSON(mergedProps)
-		if err != nil {
-			return err
-		}
-		if err := shell.WriteSuffix(w, propsJSON); err != nil {
-			return err
-		}
-		doFlush()
-
-		slog.Info("bifrost page timing",
-			"entry", timing.entryName,
-			"path", timing.path,
-			"props_ms", timing.propsDur.Milliseconds(),
-			"render_ms", timing.renderDur.Milliseconds(),
-			"deferred_ms", timing.deferredDur.Milliseconds(),
-		)
-		return nil
 	}
+
+	html, err := shell.Render(page.Body, mergedProps, page.Head, lang, htmlClass)
+	if err != nil {
+		return ServePageOutput{
+			Action: core.ActionRenderSSR,
+			Error:  err,
+		}
+	}
+
+	slog.Info("bifrost page timing",
+		"entry", timing.entryName,
+		"path", timing.path,
+		"props_ms", timing.propsDur.Milliseconds(),
+		"render_ms", timing.renderDur.Milliseconds(),
+		"deferred_ms", timing.deferredDur.Milliseconds(),
+	)
 
 	return ServePageOutput{
 		Action: core.ActionRenderSSR,
-		Stream: streamFn,
+		HTML:   html,
 		Props:  syncPropsForReact,
 	}
 }

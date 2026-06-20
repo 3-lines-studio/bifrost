@@ -99,12 +99,6 @@ func (h *PageHandler) dispatchPageOutput(w http.ResponseWriter, req *http.Reques
 		h.serveError(w, req, errNeedsSetup)
 
 	case core.ActionRenderSSR:
-		if output.Stream != nil {
-			if err := output.Stream(w); err != nil {
-				h.serveError(w, req, err)
-			}
-			return
-		}
 		h.serveHTML(w, output.HTML)
 
 	case core.ActionRenderClientOnlyShell,

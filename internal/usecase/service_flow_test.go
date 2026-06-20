@@ -3,7 +3,6 @@ package usecase
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,11 +21,9 @@ type fakeRenderer struct {
 	buildSSRBatchSizes   []int
 	individualBuildCalls int
 	renderCalls          int
-	streamCalls          int
-	buildFn              func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error)
-	buildSSRFn           func(entrypoints []string, outdir string) error
+	buildFn              func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error)
+	buildSSRFn           func(entrypoints []string, outdir string, framework string) error
 	renderFn             func(componentPath string, props map[string]any) (core.RenderedPage, error)
-	streamFn             func(ctx context.Context, componentPath string, props map[string]any, w http.ResponseWriter, flush func(), onHead func(head string) error) error
 }
 
 func (f *fakeRenderer) Render(componentPath string, props map[string]any) (core.RenderedPage, error) {
@@ -37,58 +34,41 @@ func (f *fakeRenderer) Render(componentPath string, props map[string]any) (core.
 	return core.RenderedPage{}, nil
 }
 
-func (f *fakeRenderer) RenderChunked(ctx context.Context, componentPath string, props map[string]any, onHead func(head string) error, onBody func(body string) error) error {
-	return nil
-}
-
-func (f *fakeRenderer) RenderBodyStream(ctx context.Context, componentPath string, props map[string]any, w io.Writer, flush func(), onHead func(head string) error) error {
-	httpWriter, _ := w.(http.ResponseWriter)
-	f.streamCalls++
-	if f.streamFn != nil {
-		return f.streamFn(ctx, componentPath, props, httpWriter, flush, onHead)
-	}
-	return nil
-}
-
-func (f *fakeRenderer) Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+func (f *fakeRenderer) Build(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
 	f.buildCalls++
 	if len(entryNames) == 1 {
 		f.individualBuildCalls++
 	}
 	if f.buildFn != nil {
-		return f.buildFn(entrypoints, outdir, entryNames)
+		return f.buildFn(entrypoints, outdir, entryNames, framework)
 	}
 	return map[string]core.ClientBuildResult{}, nil
 }
 
-func (f *fakeRenderer) BuildSSR(entrypoints []string, outdir string) error {
+func (f *fakeRenderer) BuildSSR(entrypoints []string, outdir string, framework string) error {
 	f.buildSSRCalls++
 	f.buildSSRBatchSizes = append(f.buildSSRBatchSizes, len(entrypoints))
 	if f.buildSSRFn != nil {
-		return f.buildSSRFn(entrypoints, outdir)
+		return f.buildSSRFn(entrypoints, outdir, framework)
 	}
 	return nil
 }
 
-func TestPageServiceDevSSRBuildsThenStreams(t *testing.T) {
+func TestPageServiceDevSSRBuildsThenRenders(t *testing.T) {
 	tmpDir := t.TempDir()
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "export default function Page(){ return <div>Hello</div> }")
 
 	renderer := &fakeRenderer{
-		buildSSRFn: func(entrypoints []string, outdir string) error {
+		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
 			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
 			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
 			return nil
 		},
-		streamFn: func(ctx context.Context, componentPath string, props map[string]any, w http.ResponseWriter, flush func(), onHead func(head string) error) error {
+		renderFn: func(componentPath string, props map[string]any) (core.RenderedPage, error) {
 			if componentPath == "" {
 				t.Fatal("expected render path")
 			}
-			if err := onHead("<title>Home</title>"); err != nil {
-				return err
-			}
-			_, err := w.Write([]byte("<div>Hello</div>"))
-			return err
+			return core.RenderedPage{Head: "<title>Home</title>", Body: "<div>Hello</div>"}, nil
 		},
 	}
 	service := NewPageService(renderer, nil, nil)
@@ -115,23 +95,17 @@ func TestPageServiceDevSSRBuildsThenStreams(t *testing.T) {
 	if output.Action != core.ActionRenderSSR {
 		t.Fatalf("ServePage() action = %v", output.Action)
 	}
-	if output.Stream == nil {
-		t.Fatal("expected stream response")
+	if output.HTML == "" {
+		t.Fatal("expected HTML output")
+	}
+	if !strings.Contains(output.HTML, "<div>Hello</div>") {
+		t.Fatalf("expected rendered body, got %q", output.HTML)
+	}
+	if !strings.Contains(output.HTML, "<title>Home</title>") {
+		t.Fatalf("expected head, got %q", output.HTML)
 	}
 	if renderer.buildCalls != 1 || renderer.buildSSRCalls != 1 {
 		t.Fatalf("expected one dev setup build, got Build=%d BuildSSR=%d", renderer.buildCalls, renderer.buildSSRCalls)
-	}
-
-	rec := httptest.NewRecorder()
-	if err := output.Stream(rec); err != nil {
-		t.Fatalf("stream error = %v", err)
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "<div>Hello</div>") {
-		t.Fatalf("expected streamed body, got %q", body)
-	}
-	if !strings.Contains(body, "<title>Home</title>") {
-		t.Fatalf("expected streamed head, got %q", body)
 	}
 }
 
@@ -140,7 +114,7 @@ func TestPageServiceStaticPrerenderReturnsNotFoundForMissingPath(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "blog.tsx"), "export default function Page(){ return <div>Blog</div> }")
 
 	renderer := &fakeRenderer{
-		buildSSRFn: func(entrypoints []string, outdir string) error {
+		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
 			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
 			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
 			return nil
@@ -186,7 +160,7 @@ func main() {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "about.tsx"), "<title>About</title>")
 
 	renderer := &fakeRenderer{
-		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
 			if len(entryNames) > 1 {
 				return nil, errors.New("batch failed")
 			}
@@ -247,7 +221,7 @@ func main() {
 	writeTestFile(t, filepath.Join(tmpDir, ".bifrost", "public", "stale.txt"), "stale")
 
 	renderer := &fakeRenderer{
-		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
 			name := entryNames[0]
 			return map[string]core.ClientBuildResult{
 				name: {Script: "/dist/" + name + ".js"},
@@ -379,14 +353,14 @@ func main() {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "about.tsx"), "<title>About</title>")
 
 	renderer := &fakeRenderer{
-		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
 			result := make(map[string]core.ClientBuildResult, len(entryNames))
 			for _, name := range entryNames {
 				result[name] = core.ClientBuildResult{Script: "/dist/" + name + ".js"}
 			}
 			return result, nil
 		},
-		buildSSRFn: func(entrypoints []string, outdir string) error {
+		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
 			for _, entryPath := range entrypoints {
 				name := strings.TrimSuffix(filepath.Base(entryPath), filepath.Ext(entryPath))
 				writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
@@ -433,14 +407,14 @@ func main() {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "about.tsx"), "<title>About</title>")
 
 	renderer := &fakeRenderer{
-		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
 			result := make(map[string]core.ClientBuildResult, len(entryNames))
 			for _, name := range entryNames {
 				result[name] = core.ClientBuildResult{Script: "/dist/" + name + ".js"}
 			}
 			return result, nil
 		},
-		buildSSRFn: func(entrypoints []string, outdir string) error {
+		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
 			if len(entrypoints) > 1 {
 				return errors.New("batch failed")
 			}
@@ -479,12 +453,12 @@ func main() {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "<title>Home</title>")
 
 	renderer := &fakeRenderer{
-		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
 			return map[string]core.ClientBuildResult{
 				entryNames[0]: {Script: "/dist/" + entryNames[0] + ".js"},
 			}, nil
 		},
-		buildSSRFn: func(entrypoints []string, outdir string) error {
+		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
 			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
 			writeTestFile(t, filepath.Join(outdir, ".bifrost", "entries", name+".js"), "// misplaced ssr")
 			writeTestFile(t, filepath.Join(outdir, "nested", name+".js"), "// misplaced ssr duplicate")
@@ -549,21 +523,16 @@ func TestDeferredLoaderRunsConcurrentlyWithRender(t *testing.T) {
 	var mu sync.Mutex
 
 	renderer := &fakeRenderer{
-		buildSSRFn: func(entrypoints []string, outdir string) error {
+		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
 			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
 			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
 			return nil
 		},
-		streamFn: func(ctx context.Context, componentPath string, props map[string]any, w http.ResponseWriter, flush func(), onHead func(head string) error) error {
+		renderFn: func(componentPath string, props map[string]any) (core.RenderedPage, error) {
 			mu.Lock()
 			renderStart = time.Now()
 			mu.Unlock()
-
-			if err := onHead("<title>Home</title>"); err != nil {
-				return err
-			}
-			_, err := w.Write([]byte("<div>Hello</div>"))
-			return err
+			return core.RenderedPage{Head: "<title>Home</title>", Body: "<div>Hello</div>"}, nil
 		},
 	}
 	service := NewPageService(renderer, nil, nil)
@@ -597,21 +566,15 @@ func TestDeferredLoaderRunsConcurrentlyWithRender(t *testing.T) {
 	if output.Error != nil {
 		t.Fatalf("ServePage() error = %v", output.Error)
 	}
-	if output.Stream == nil {
-		t.Fatal("expected stream response")
+	if output.HTML == "" {
+		t.Fatal("expected HTML output")
 	}
 
-	rec := httptest.NewRecorder()
-	if err := output.Stream(rec); err != nil {
-		t.Fatalf("stream error = %v", err)
+	if !strings.Contains(output.HTML, `"user":"alice"`) {
+		t.Fatalf("expected deferred props in __BIFROST_PROPS__, got %q", output.HTML)
 	}
-	body := rec.Body.String()
-
-	if !strings.Contains(body, `"user":"alice"`) {
-		t.Fatalf("expected deferred props in __BIFROST_PROPS__, got %q", body)
-	}
-	if !strings.Contains(body, `"locale":"en"`) {
-		t.Fatalf("expected sync props in __BIFROST_PROPS__, got %q", body)
+	if !strings.Contains(output.HTML, `"locale":"en"`) {
+		t.Fatalf("expected sync props in __BIFROST_PROPS__, got %q", output.HTML)
 	}
 
 	mu.Lock()
@@ -628,17 +591,13 @@ func TestDeferredLoaderErrorFallsBackToSyncProps(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "export default function Page(){ return <div>Hello</div> }")
 
 	renderer := &fakeRenderer{
-		buildSSRFn: func(entrypoints []string, outdir string) error {
+		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
 			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
 			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
 			return nil
 		},
-		streamFn: func(ctx context.Context, componentPath string, props map[string]any, w http.ResponseWriter, flush func(), onHead func(head string) error) error {
-			if err := onHead("<title>Home</title>"); err != nil {
-				return err
-			}
-			_, err := w.Write([]byte("<div>Hello</div>"))
-			return err
+		renderFn: func(componentPath string, props map[string]any) (core.RenderedPage, error) {
+			return core.RenderedPage{Head: "<title>Home</title>", Body: "<div>Hello</div>"}, nil
 		},
 	}
 	service := NewPageService(renderer, nil, nil)
@@ -669,17 +628,11 @@ func TestDeferredLoaderErrorFallsBackToSyncProps(t *testing.T) {
 		t.Fatalf("ServePage() error = %v", output.Error)
 	}
 
-	rec := httptest.NewRecorder()
-	if err := output.Stream(rec); err != nil {
-		t.Fatalf("stream error = %v", err)
+	if strings.Contains(output.HTML, `"user"`) {
+		t.Fatalf("did not expect deferred props when loader errors, got %q", output.HTML)
 	}
-	body := rec.Body.String()
-
-	if strings.Contains(body, `"user"`) {
-		t.Fatalf("did not expect deferred props when loader errors, got %q", body)
-	}
-	if !strings.Contains(body, `"locale":"en"`) {
-		t.Fatalf("expected sync props in __BIFROST_PROPS__, got %q", body)
+	if !strings.Contains(output.HTML, `"locale":"en"`) {
+		t.Fatalf("expected sync props in __BIFROST_PROPS__, got %q", output.HTML)
 	}
 }
 
@@ -688,17 +641,13 @@ func TestDeferredLoaderWithoutSyncLoader(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "export default function Page(){ return <div>Hello</div> }")
 
 	renderer := &fakeRenderer{
-		buildSSRFn: func(entrypoints []string, outdir string) error {
+		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
 			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
 			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
 			return nil
 		},
-		streamFn: func(ctx context.Context, componentPath string, props map[string]any, w http.ResponseWriter, flush func(), onHead func(head string) error) error {
-			if err := onHead("<title>Home</title>"); err != nil {
-				return err
-			}
-			_, err := w.Write([]byte("<div>Hello</div>"))
-			return err
+		renderFn: func(componentPath string, props map[string]any) (core.RenderedPage, error) {
+			return core.RenderedPage{Head: "<title>Home</title>", Body: "<div>Hello</div>"}, nil
 		},
 	}
 	service := NewPageService(renderer, nil, nil)
@@ -726,13 +675,138 @@ func TestDeferredLoaderWithoutSyncLoader(t *testing.T) {
 		t.Fatalf("ServePage() error = %v", output.Error)
 	}
 
-	rec := httptest.NewRecorder()
-	if err := output.Stream(rec); err != nil {
-		t.Fatalf("stream error = %v", err)
+	if !strings.Contains(output.HTML, `"user":"bob"`) {
+		t.Fatalf("expected deferred props in __BIFROST_PROPS__, got %q", output.HTML)
 	}
-	body := rec.Body.String()
+}
 
-	if !strings.Contains(body, `"user":"bob"`) {
-		t.Fatalf("expected deferred props in __BIFROST_PROPS__, got %q", body)
+func TestBuildProjectGroupsByFramework(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main
+func main() {
+	_ = Page("/", "./pages/home.tsx")
+	_ = Page("/svelte", "./pages/hello.svelte")
+}`)
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "export default function Page(){ return <div>Hello</div> }")
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "hello.svelte"), "<script>let { name } = $props();</script><h1>Hello {name}</h1>")
+
+	frameworks := make(map[string]int)
+	renderer := &fakeRenderer{
+		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+			frameworks[framework]++
+			result := make(map[string]core.ClientBuildResult, len(entryNames))
+			for _, name := range entryNames {
+				result[name] = core.ClientBuildResult{Script: "/dist/" + name + ".js"}
+			}
+			return result, nil
+		},
+		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
+			frameworks[framework+"-ssr"]++
+			for _, entryPath := range entrypoints {
+				name := strings.TrimSuffix(filepath.Base(entryPath), filepath.Ext(entryPath))
+				writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
+			}
+			return nil
+		},
+	}
+	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
+	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
+
+	result := service.BuildProject(context.Background(), BuildInput{
+		MainFile:    filepath.Join(tmpDir, "main.go"),
+		OriginalCwd: tmpDir,
+	})
+	if result.Error != nil {
+		t.Fatalf("BuildProject() error = %v", result.Error)
+	}
+	if !result.Success {
+		t.Fatal("expected build success")
+	}
+
+	if frameworks["react"] != 1 {
+		t.Fatalf("expected one react client build group, got %v", frameworks)
+	}
+	if frameworks["svelte"] != 1 {
+		t.Fatalf("expected one svelte client build group, got %v", frameworks)
+	}
+	if frameworks["react-ssr"] != 1 {
+		t.Fatalf("expected one react ssr build group, got %v", frameworks)
+	}
+	if frameworks["svelte-ssr"] != 1 {
+		t.Fatalf("expected one svelte ssr build group, got %v", frameworks)
+	}
+}
+
+func TestDevSSRUsesFrameworkAdapterFromComponentPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "hello.svelte"), "<script>let { name } = $props();</script><h1>Hello {name}</h1>")
+
+	var capturedEntrypoints []string
+	var capturedFrameworks []string
+	renderer := &fakeRenderer{
+		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+			capturedEntrypoints = append(capturedEntrypoints, entrypoints...)
+			capturedFrameworks = append(capturedFrameworks, framework)
+			return map[string]core.ClientBuildResult{
+				entryNames[0]: {Script: "/dist/" + entryNames[0] + ".js"},
+			}, nil
+		},
+		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
+			capturedEntrypoints = append(capturedEntrypoints, entrypoints...)
+			capturedFrameworks = append(capturedFrameworks, framework+"-ssr")
+			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
+			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
+			return nil
+		},
+		renderFn: func(componentPath string, props map[string]any) (core.RenderedPage, error) {
+			return core.RenderedPage{Body: "<h1>Hello Svelte</h1>"}, nil
+		},
+	}
+
+	// PageService is constructed with the default React adapter, matching what
+	// bifrost.New() creates for a mixed-framework app.
+	service := NewPageService(renderer, nil, nil)
+
+	restore := chdirForTest(t, tmpDir)
+	defer restore()
+
+	input := ServePageInput{
+		Config: core.PageConfig{
+			ComponentPath: "./pages/hello.svelte",
+			Mode:          core.ModeSSR,
+		},
+		DefaultHTMLLang: "en",
+		IsDev:           true,
+		EntryName:       core.EntryNameForPath("./pages/hello.svelte"),
+		RequestPath:     "/svelte",
+		Request:         httptest.NewRequest(http.MethodGet, "/svelte", nil),
+	}
+
+	output := service.ServePage(context.Background(), input)
+	if output.Error != nil {
+		t.Fatalf("ServePage() error = %v", output.Error)
+	}
+
+	var ssrEntry string
+	for _, ep := range capturedEntrypoints {
+		if strings.HasSuffix(ep, "-ssr.ts") || strings.HasSuffix(ep, "-ssr.tsx") {
+			ssrEntry = ep
+			break
+		}
+	}
+	if ssrEntry == "" {
+		t.Fatalf("expected an SSR entrypoint to be generated, got %v", capturedEntrypoints)
+	}
+
+	content, err := os.ReadFile(ssrEntry)
+	if err != nil {
+		t.Fatalf("read ssr entry: %v", err)
+	}
+
+	if !strings.HasSuffix(ssrEntry, ".ts") {
+		t.Fatalf("expected Svelte SSR entry to use .ts extension, got %q", ssrEntry)
+	}
+	if !strings.Contains(string(content), "svelte/server") {
+		t.Fatalf("expected Svelte SSR entry to import from svelte/server, got:\n%s", string(content))
 	}
 }

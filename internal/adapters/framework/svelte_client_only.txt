@@ -1,0 +1,6 @@
+import { mount } from "svelte";
+import Page from "COMPONENT_PATH";
+const target = document.getElementById("app");
+if (target) {
+	mount(BIFROST_CLIENT_ROOT, { target, props: {} });
+}

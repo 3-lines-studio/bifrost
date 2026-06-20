@@ -94,7 +94,7 @@ func CompileDevPageOnDemand(renderer Renderer, cwd string, entryName string, con
 		return fmt.Errorf("failed to write client entry file: %w", err)
 	}
 
-	if _, err := renderer.Build([]string{entryFile}, outdir, []string{entryName}); err != nil {
+	if _, err := renderer.Build([]string{entryFile}, outdir, []string{entryName}, adapter.Name()); err != nil {
 		return fmt.Errorf("failed to build client entry: %w", err)
 	}
 
@@ -112,7 +112,7 @@ func CompileDevPageOnDemand(renderer Renderer, cwd string, entryName string, con
 	if err := WriteSSREntryFile(adapter, ssrEntryFile, ssrImportPath); err != nil {
 		return fmt.Errorf("failed to write SSR entry file: %w", err)
 	}
-	if err := renderer.BuildSSR([]string{ssrEntryFile}, ssrDir); err != nil {
+	if err := renderer.BuildSSR([]string{ssrEntryFile}, ssrDir, adapter.Name()); err != nil {
 		return fmt.Errorf("failed to build SSR entry: %w", err)
 	}
 	if _, err := normalizeSSRBundle(ssrDir, entryName); err != nil {

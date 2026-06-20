@@ -1,7 +1,6 @@
 package process
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -9,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -33,6 +31,9 @@ var (
 
 	//go:embed react_compiler_plugin.ts
 	reactCompilerPluginSource string
+
+	//go:embed svelte_plugin.ts
+	sveltePluginSource string
 )
 
 func RuntimeSource(mode core.Mode) string {
@@ -41,8 +42,10 @@ func RuntimeSource(mode core.Mode) string {
 		tailwindPlugin = "undefined"
 	}
 	reactCompilerPlugin := strings.TrimSpace(reactCompilerPluginSource)
+	sveltePlugin := strings.TrimSpace(sveltePluginSource)
 	src := strings.ReplaceAll(ReactRuntimeSource, "BIFROST_TAILWIND_PLUGIN", tailwindPlugin)
 	src = strings.ReplaceAll(src, "BIFROST_REACT_COMPILER_PLUGIN", reactCompilerPlugin)
+	src = strings.ReplaceAll(src, "BIFROST_SVELTE_PLUGIN", sveltePlugin)
 	return src
 }
 
@@ -62,9 +65,8 @@ type rendererProcessConfig struct {
 }
 
 type renderRequestPayload struct {
-	Path       string         `json:"path"`
-	Props      map[string]any `json:"props"`
-	StreamBody bool           `json:"streamBody,omitempty"`
+	Path  string         `json:"path"`
+	Props map[string]any `json:"props"`
 }
 
 func uniqueSocketPath() string {
@@ -227,16 +229,15 @@ func derefString(p *string) string {
 }
 
 // MarshalRenderRequestJSON builds the JSON body for POST /render (exported for tests).
-func MarshalRenderRequestJSON(path string, props map[string]any, streamBody bool) ([]byte, error) {
+func MarshalRenderRequestJSON(path string, props map[string]any) ([]byte, error) {
 	return json.Marshal(renderRequestPayload{
-		Path:       path,
-		Props:      props,
-		StreamBody: streamBody,
+		Path:  path,
+		Props: props,
 	})
 }
 
-func (r *Renderer) postRender(ctx context.Context, path string, props map[string]any, streamBody bool) (*http.Response, error) {
-	jsonBody, err := MarshalRenderRequestJSON(path, props, streamBody)
+func (r *Renderer) postRender(ctx context.Context, path string, props map[string]any) (*http.Response, error) {
+	jsonBody, err := MarshalRenderRequestJSON(path, props)
 	if err != nil {
 		return nil, err
 	}
@@ -256,8 +257,8 @@ func newJSONRequest(ctx context.Context, endpoint string, body []byte) (*http.Re
 	return req, nil
 }
 
-// renderChunkedFromDecoder consumes Bun /render output: one legacy JSON object or two NDJSON lines (head then html).
-func renderChunkedFromDecoder(dec *json.Decoder, onHead func(head string) error, onBody func(body string) error) error {
+// renderFromDecoder consumes Bun /render output: one legacy JSON object or two NDJSON lines (head then html).
+func renderFromDecoder(dec *json.Decoder) (head, html string, err error) {
 	type firstMsg struct {
 		Error *renderErrJSON `json:"error"`
 		Head  *string        `json:"head"`
@@ -266,163 +267,52 @@ func renderChunkedFromDecoder(dec *json.Decoder, onHead func(head string) error,
 
 	var first firstMsg
 	if err := dec.Decode(&first); err != nil {
-		return fmt.Errorf("render response: %w", err)
+		return "", "", fmt.Errorf("render response: %w", err)
 	}
 	if first.Error != nil {
-		return formatRenderError(first.Error)
+		return "", "", formatRenderError(first.Error)
 	}
 
 	if first.HTML != nil {
-		head := derefString(first.Head)
-		if err := onHead(head); err != nil {
-			return err
-		}
-		return onBody(*first.HTML)
+		return derefString(first.Head), *first.HTML, nil
 	}
 
-	head := derefString(first.Head)
-	if err := onHead(head); err != nil {
-		return err
-	}
+	head = derefString(first.Head)
 
 	var second struct {
 		Error *renderErrJSON `json:"error"`
 		HTML  *string        `json:"html"`
 	}
 	if err := dec.Decode(&second); err != nil {
-		return fmt.Errorf("render stream body: %w", err)
+		return "", "", fmt.Errorf("render body: %w", err)
 	}
 	if second.Error != nil {
-		return formatRenderError(second.Error)
+		return "", "", formatRenderError(second.Error)
 	}
 	if second.HTML == nil {
-		return fmt.Errorf("missing html in streamed render response")
+		return "", "", fmt.Errorf("missing html in render response")
 	}
-	return onBody(*second.HTML)
-}
-
-// RenderChunked calls onHead after the first NDJSON object (head), then onBody after the body.
-// Legacy single JSON {"html","head"} invokes onHead then onBody in one round trip.
-func (r *Renderer) RenderChunked(ctx context.Context, path string, props map[string]any, onHead func(head string) error, onBody func(body string) error) error {
-	resp, err := r.postRender(ctx, path, props, false)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	return renderChunkedFromDecoder(json.NewDecoder(resp.Body), onHead, onBody)
-}
-
-type renderFirstLine struct {
-	Error *renderErrJSON `json:"error"`
-	Head  *string        `json:"head"`
-	HTML  *string        `json:"html"`
-}
-
-func parseRenderFirstLine(line []byte) (head string, html *string, err error) {
-	line = bytes.TrimSuffix(line, []byte("\n"))
-	if len(line) == 0 {
-		return "", nil, fmt.Errorf("empty render response first line")
-	}
-	var msg renderFirstLine
-	if err := json.Unmarshal(line, &msg); err != nil {
-		return "", nil, fmt.Errorf("render response first line: %w", err)
-	}
-	if msg.Error != nil {
-		return "", nil, formatRenderError(msg.Error)
-	}
-	return derefString(msg.Head), msg.HTML, nil
-}
-
-func copyResponseBodyWithFlush(dst io.Writer, src io.Reader, flush func(), flushEveryChunk bool) (int64, error) {
-	buf := make([]byte, 32*1024)
-	var written int64
-	flushed := false
-	for {
-		n, rerr := src.Read(buf)
-		if n > 0 {
-			nw, werr := dst.Write(buf[:n])
-			written += int64(nw)
-			if flush != nil && (flushEveryChunk || !flushed) {
-				flush()
-				flushed = true
-			}
-			if werr != nil {
-				return written, werr
-			}
-			if nw != n {
-				return written, io.ErrShortWrite
-			}
-		}
-		if rerr != nil {
-			if rerr == io.EOF {
-				break
-			}
-			return written, rerr
-		}
-	}
-	return written, nil
-}
-
-// RenderBodyStream requests streamBody rendering: first line is JSON {"head"} or {"head","html"} fallback;
-// remaining bytes are raw HTML from renderToReadableStream. Writes body HTML to w (not the document suffix).
-func (r *Renderer) RenderBodyStream(ctx context.Context, path string, props map[string]any, w io.Writer, flush func(), onHead func(head string) error) error {
-	resp, err := r.postRender(ctx, path, props, true)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	br := bufio.NewReader(resp.Body)
-	line, err := br.ReadBytes('\n')
-	if err != nil {
-		return fmt.Errorf("render stream: read first line: %w", err)
-	}
-	head, htmlInLine, err := parseRenderFirstLine(line)
-	if err != nil {
-		return err
-	}
-	if htmlInLine != nil {
-		if err := onHead(head); err != nil {
-			return err
-		}
-		if _, err := io.WriteString(w, *htmlInLine); err != nil {
-			return err
-		}
-		if flush != nil {
-			flush()
-		}
-		return nil
-	}
-	if err := onHead(head); err != nil {
-		return err
-	}
-	_, err = copyResponseBodyWithFlush(w, br, flush, true)
-	return err
+	return head, *second.HTML, nil
 }
 
 func (r *Renderer) Render(path string, props map[string]any) (core.RenderedPage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
 	defer cancel()
 
-	var page core.RenderedPage
-	err := r.RenderChunked(ctx, path, props,
-		func(head string) error {
-			page.Head = head
-			return nil
-		},
-		func(body string) error {
-			page.Body = body
-			return nil
-		},
-	)
+	resp, err := r.postRender(ctx, path, props)
 	if err != nil {
 		return core.RenderedPage{}, err
 	}
-	return page, nil
+	defer func() { _ = resp.Body.Close() }()
+
+	head, body, err := renderFromDecoder(json.NewDecoder(resp.Body))
+	if err != nil {
+		return core.RenderedPage{}, err
+	}
+	return core.RenderedPage{Head: head, Body: body}, nil
 }
 
-func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
 	if len(entrypoints) == 0 {
 		return nil, fmt.Errorf("missing entrypoints")
 	}
@@ -442,6 +332,7 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 		"entrypoints": entrypoints,
 		"outdir":      outdir,
 		"entryNames":  entryNames,
+		"framework":   framework,
 	}
 
 	var result struct {
@@ -507,7 +398,7 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 	return out, nil
 }
 
-func (r *Renderer) BuildSSR(entrypoints []string, outdir string) error {
+func (r *Renderer) BuildSSR(entrypoints []string, outdir string, framework string) error {
 	if len(entrypoints) == 0 {
 		return fmt.Errorf("missing entrypoints")
 	}
@@ -523,6 +414,7 @@ func (r *Renderer) BuildSSR(entrypoints []string, outdir string) error {
 		"entrypoints": entrypoints,
 		"outdir":      outdir,
 		"target":      "bun",
+		"framework":   framework,
 	}
 
 	var result struct {

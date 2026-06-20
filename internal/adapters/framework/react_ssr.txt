@@ -1,24 +1,14 @@
 import React from "react";
-import { renderToString, renderToReadableStream } from "react-dom/server";
+import { renderToString } from "react-dom/server";
 import { Page, Head } from "COMPONENT_PATH";
 
-export async function render(props, options) {
-	const streamBody = options?.streamBody === true;
+export async function render(props) {
 	let head = "";
 	if (Head) {
 		const headEl = React.createElement(Head, props);
 		head = renderToString(headEl);
 	}
 	const pageEl = React.createElement(Page, props);
-	if (streamBody) {
-		try {
-			const stream = await renderToReadableStream(BIFROST_SSR_PAGE_WRAP);
-			return { head, stream };
-		} catch {
-			const html = renderToString(BIFROST_SSR_PAGE_WRAP);
-			return { head, html };
-		}
-	}
-	const html = renderToString(BIFROST_SSR_PAGE_WRAP);
+	const html = renderToString(pageEl);
 	return { html, head };
 }

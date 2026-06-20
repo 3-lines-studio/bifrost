@@ -6,14 +6,10 @@ import (
 	"testing"
 )
 
-func TestRenderChunkedFromDecoder_NDJSON(t *testing.T) {
+func TestRenderFromDecoder_NDJSON(t *testing.T) {
 	in := strings.NewReader("{\"head\":\"<title>x</title>\"}\n{\"html\":\"<p>y</p>\"}\n")
 	dec := json.NewDecoder(in)
-	var head, body string
-	err := renderChunkedFromDecoder(dec,
-		func(h string) error { head = h; return nil },
-		func(b string) error { body = b; return nil },
-	)
+	head, body, err := renderFromDecoder(dec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,14 +18,10 @@ func TestRenderChunkedFromDecoder_NDJSON(t *testing.T) {
 	}
 }
 
-func TestRenderChunkedFromDecoder_LegacySingleJSON(t *testing.T) {
+func TestRenderFromDecoder_LegacySingleJSON(t *testing.T) {
 	in := strings.NewReader("{\"head\":\"h\",\"html\":\"b\"}\n")
 	dec := json.NewDecoder(in)
-	var head, body string
-	err := renderChunkedFromDecoder(dec,
-		func(h string) error { head = h; return nil },
-		func(b string) error { body = b; return nil },
-	)
+	head, body, err := renderFromDecoder(dec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,10 +30,10 @@ func TestRenderChunkedFromDecoder_LegacySingleJSON(t *testing.T) {
 	}
 }
 
-func TestRenderChunkedFromDecoder_ErrorEnvelope(t *testing.T) {
+func TestRenderFromDecoder_ErrorEnvelope(t *testing.T) {
 	in := strings.NewReader("{\"error\":{\"message\":\"boom\"}}\n")
 	dec := json.NewDecoder(in)
-	err := renderChunkedFromDecoder(dec, func(string) error { return nil }, func(string) error { return nil })
+	_, _, err := renderFromDecoder(dec)
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("expected boom error, got %v", err)
 	}

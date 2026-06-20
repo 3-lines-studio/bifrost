@@ -60,7 +60,6 @@ func main() {
 			return map[string]any{"name": "World"}, nil
 		})),
 		bifrost.Page("/simple", "./pages/home.tsx"),
-		bifrost.Page("/stream-demo", "./pages/stream-demo.tsx"),
 		bifrost.Page("/user/{id}", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
 			return map[string]any{"name": r.PathValue("id")}, nil
 		})),
@@ -106,6 +105,14 @@ func main() {
 			}
 			return map[string]any{"name": message}, nil
 		})),
+
+		// Svelte Pages
+		bifrost.Page("/svelte", "./pages/svelte/hello.svelte", bifrost.WithLoader(func(r *http.Request) (map[string]any, error) {
+			return map[string]any{"name": "Svelte"}, nil
+		})),
+		bifrost.Page("/svelte-client", "./pages/svelte/counter.svelte", bifrost.WithClient()),
+		bifrost.Page("/svelte-static", "./pages/svelte/static.svelte", bifrost.WithStatic()),
+		bifrost.Page("/svelte-error", "./pages/svelte/broken.svelte"),
 
 		// Client-Only Pages
 		bifrost.Page("/client", "./pages/about.tsx", bifrost.WithClient()),
@@ -171,6 +178,7 @@ func main() {
 	fmt.Println("  SSR: /, /simple, /user/{id}, /search, /shared-a, /shared-b, /empty")
 	fmt.Println("       /nested, /api-demo, /message/{id}, /dashboard")
 	fmt.Println("  Client: /client, /client/deep, /about, /login")
+	fmt.Println("  Svelte: /svelte, /svelte-client")
 	fmt.Println("  Static: /product, /blog/{slug}")
 	fmt.Println("  Errors: /error, /error-loader, /error-redirect-302, /error-redirect-307, /error-render, /error-import")
 	fmt.Println("")

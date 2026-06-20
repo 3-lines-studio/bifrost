@@ -85,12 +85,12 @@ func TestCompileDevPageOnDemandNormalizesNestedSSRBundle(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "export default function Page(){ return <div>Hello</div> }")
 
 	renderer := &fakeRenderer{
-		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
 			return map[string]core.ClientBuildResult{
 				entryNames[0]: {Script: "/dist/" + entryNames[0] + ".js"},
 			}, nil
 		},
-		buildSSRFn: func(entrypoints []string, outdir string) error {
+		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
 			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
 			writeTestFile(t, filepath.Join(outdir, ".bifrost", "entries", name+".js"), "// ssr")
 			return nil

@@ -1,15 +1,20 @@
 package core
 
+import "path/filepath"
+
 type Framework int
 
 const (
 	FrameworkReact Framework = iota
+	FrameworkSvelte
 )
 
 func (f Framework) String() string {
 	switch f {
 	case FrameworkReact:
 		return "react"
+	case FrameworkSvelte:
+		return "svelte"
 	default:
 		return "unknown"
 	}
@@ -17,11 +22,24 @@ func (f Framework) String() string {
 
 func FrameworkFromString(s string) Framework {
 	switch s {
-	case "react":
-		fallthrough
+	case "svelte":
+		return FrameworkSvelte
 	default:
 		return FrameworkReact
 	}
+}
+
+func FrameworkFromExtension(ext string) Framework {
+	switch ext {
+	case ".svelte":
+		return FrameworkSvelte
+	default:
+		return FrameworkReact
+	}
+}
+
+func FrameworkFromComponentPath(path string) Framework {
+	return FrameworkFromExtension(filepath.Ext(path))
 }
 
 type FrameworkAdapter interface {

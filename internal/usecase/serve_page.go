@@ -31,8 +31,6 @@ type ServePageOutput struct {
 	Props      map[string]any
 	NeedsSetup bool
 	Error      error
-	// Stream is set for SSR when the HTML response should be written with chunked flushing (see PageHandler).
-	Stream func(http.ResponseWriter) error
 }
 
 type PageService struct {
@@ -165,5 +163,6 @@ func (s *PageService) buildAndRender(ctx context.Context, input ServePageInput) 
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
-	return CompileDevPageOnDemand(s.renderer, cwd, input.EntryName, input.Config, s.adapter)
+	adapter := framework.ResolveAdapter(core.FrameworkFromComponentPath(input.Config.ComponentPath))
+	return CompileDevPageOnDemand(s.renderer, cwd, input.EntryName, input.Config, adapter)
 }
