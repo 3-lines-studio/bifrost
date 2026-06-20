@@ -9,7 +9,7 @@ order: 5
 The build command prepares all frontend assets for production:
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/build@latest ./main.go
+go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go
 ```
 
 The build pipeline:
@@ -70,7 +70,14 @@ log.Fatal(http.ListenAndServe(":8080", app.Handler()))
 If the `.bifrost` directory is missing or corrupted:
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/doctor@latest .
+go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest doctor .
 ```
 
 This repairs the build directory without scaffolding missing app files.
+
+## Route Table
+
+On startup, Bifrost prints a route table to stdout listing all registered routes with their component paths and render modes. The table appears only when stdout is a terminal. Override with:
+
+- `BIFROST_ROUTE_TABLE=1` — always print
+- `BIFROST_NO_ROUTE_TABLE=1` — never print

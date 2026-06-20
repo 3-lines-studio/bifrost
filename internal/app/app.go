@@ -158,6 +158,10 @@ func (a *App) Wrap(api Router) http.Handler {
 		api.Handle(route.Pattern, handler)
 	}
 
+	if shouldPrintRouteTable() {
+		printRouteTable(a.routes)
+	}
+
 	return createAssetHandler(api, a)
 }
 

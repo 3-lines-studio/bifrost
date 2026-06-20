@@ -114,7 +114,7 @@ func loadManifestFromEmbed(assetsFS embed.FS) (*core.Manifest, error) {
 
 func (r *Host) setupEmbeddedRuntime() error {
 	if !process.HasEmbeddedRuntime(r.assetsFS) {
-		return fmt.Errorf("embedded runtime not found: run 'bifrost-build' to generate production assets")
+		return fmt.Errorf("embedded runtime not found: run 'bifrost build' to generate production assets")
 	}
 
 	ssrTempDir, ssrCleanup, err := process.ExtractSSRBundles(r.assetsFS, r.manifest)

@@ -19,7 +19,7 @@ Static-only apps (no SSR) do not include the Bun runtime at all.
 The fastest way to get started is with the init command:
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/init@latest myapp
+go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init myapp
 ```
 
 This scaffolds a complete project. Then `cd myapp`, run `go mod tidy` and `bun install`, and start the dev server (for example `make dev` if the template includes it) — typically at `http://localhost:8080`.
@@ -63,7 +63,7 @@ In dev mode, source files are rendered directly and the browser refreshes on eve
 
 ```bash
 # Build frontend assets and SSR bundles
-go run github.com/3-lines-studio/bifrost/cmd/build@latest ./main.go
+go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go
 
 # Build the Go binary with embedded assets
 go build -o myapp main.go

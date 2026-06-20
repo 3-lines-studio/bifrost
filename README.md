@@ -20,10 +20,10 @@ go get github.com/3-lines-studio/bifrost
 ## New project
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/init@latest myapp
+go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init myapp
 ```
 
-Templates: `minimal` (default), `spa`, `desktop` — e.g. `go run github.com/3-lines-studio/bifrost/cmd/init@latest --template spa myapp`.
+Templates: `minimal` (default), `spa`, `desktop` — e.g. `go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init --template spa myapp`.
 
 ## Production build
 
@@ -31,19 +31,19 @@ Templates: `minimal` (default), `spa`, `desktop` — e.g. `go run github.com/3-l
 2. Generate assets (from your module root, pointing at the same `main` you will build):
 
    ```bash
-   go run github.com/3-lines-studio/bifrost/cmd/build@latest ./main.go
+   go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go
    ```
 
 3. `go build` your app and run it **without** `BIFROST_DEV=1`.
 
-`go install github.com/3-lines-studio/bifrost/cmd/build@latest` installs a binary named `build` (the directory name); rename or alias if you want `bifrost-build` on your PATH.
+`go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest` installs a binary named `bifrost`; run `bifrost init`, `bifrost build`, or `bifrost doctor`.
 
 ## `.bifrost` directory
 
 If `.bifrost` is missing for `go:embed`, repair the placeholder tree:
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/doctor@latest .
+go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest doctor .
 ```
 
 ## Documentation

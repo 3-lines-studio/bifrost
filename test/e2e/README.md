@@ -50,12 +50,12 @@ Tests error handling and redirects:
 make check
 ```
 
-This runs doctor, builds `cmd/build` as `/tmp/bifrost-build`, builds the example through that CLI, then lint, unit tests (with race), and E2E tests under `test/e2e`.
+This runs doctor, builds `cmd/bifrost` as `/tmp/bifrost`, builds the example through that CLI, then lint, unit tests (with race), and E2E tests under `test/e2e`.
 
 ### Run tests directly (requires built assets)
 ```bash
 # First, build the example assets
-cd example && go run ../cmd/build ./cmd/full/main.go
+cd example && go run ../cmd/bifrost build ./cmd/full/main.go
 
 # Then run tests
 go test ./test/e2e/... -v

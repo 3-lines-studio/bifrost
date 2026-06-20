@@ -35,9 +35,7 @@ Bifrost enables Go HTTP servers to render React components on the server, provid
 
 ### CLI commands
 
-- [Init command](cmd/init/main.go): project scaffolding with templates
-- [Doctor command](cmd/doctor/main.go): repair `.bifrost` directory
-- [Build command](cmd/build/main.go): run the production asset build
+- [Bifrost CLI](cmd/bifrost/main.go): unified CLI with `init`, `build`, and `doctor` subcommands
 - [Init logic](internal/usecase/init_project.go): template processing and project creation
 - [Templates](internal/templates/embed.go): embedded template filesystem
 

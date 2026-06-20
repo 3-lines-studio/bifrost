@@ -1,13 +1,17 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"embed"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -359,6 +363,80 @@ func TestDevModeWithStaticData(t *testing.T) {
 
 	if config.StaticDataLoader == nil {
 		t.Error("StaticDataLoader not set")
+	}
+}
+
+func TestWrapPrintsRouteTableWhenForced(t *testing.T) {
+	skipIfNoBun(t)
+	t.Setenv("BIFROST_DEV", "1")
+	t.Setenv("BIFROST_ROUTE_TABLE", "1")
+
+	a := New(testFS,
+		core.Page("/", "./home.tsx"),
+		core.Page("/about", "./about.tsx", core.WithClient()),
+	)
+	defer func() { _ = a.Stop() }()
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stdout = w
+
+	a.Handler()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close stdout pipe: %v", err)
+	}
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("failed to read captured stdout: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "Bifrost routes:") {
+		t.Errorf("expected route table header in stdout, got:\n%s", out)
+	}
+	if !strings.Contains(out, "./home.tsx") {
+		t.Errorf("expected home route component, got:\n%s", out)
+	}
+	if !strings.Contains(out, "./about.tsx") {
+		t.Errorf("expected about route component, got:\n%s", out)
+	}
+}
+
+func TestWrapSuppressesRouteTableWhenDisabled(t *testing.T) {
+	skipIfNoBun(t)
+	t.Setenv("BIFROST_DEV", "1")
+	t.Setenv("BIFROST_NO_ROUTE_TABLE", "1")
+
+	a := New(testFS, core.Page("/", "./home.tsx"))
+	defer func() { _ = a.Stop() }()
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stdout = w
+
+	a.Handler()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close stdout pipe: %v", err)
+	}
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("failed to read captured stdout: %v", err)
+	}
+
+	if strings.Contains(buf.String(), "Bifrost routes:") {
+		t.Error("expected route table to be suppressed when BIFROST_NO_ROUTE_TABLE=1")
 	}
 }
 

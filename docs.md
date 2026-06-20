@@ -115,7 +115,7 @@ Features:
 
 ```bash
 # Build assets (from module root; path is your main package entrypoint)
-go run github.com/3-lines-studio/bifrost/cmd/build@latest ./main.go
+go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go
 
 # Build Go binary
 go build -o myapp main.go
@@ -124,7 +124,7 @@ go build -o myapp main.go
 ./myapp
 ```
 
-`go install github.com/3-lines-studio/bifrost/cmd/build@latest` installs a binary named `build` (the directory name); rename it or add a shell alias if you want a `bifrost-build` command on your PATH.
+`go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest` installs a binary named `bifrost`; run `bifrost init`, `bifrost build`, or `bifrost doctor`.
 
 Requirements:
 - `embed.FS` is **mandatory** - panics at startup if missing
@@ -184,6 +184,9 @@ Creates a route configuration for a React component.
 ```go
 // Props loader - function to load data from request
 func WithLoader(loader PropsLoader) PageOption
+
+// Deferred props loader - async data loaded in parallel with render (SSR only)
+func WithDeferredLoader(loader DeferredPropsLoader) PageOption
 
 // Client-only mode - static page with empty shell + client render
 func WithClient() PageOption
@@ -252,6 +255,25 @@ Returns an http.Handler that serves only Bifrost pages and assets (no custom API
 ```go
 http.ListenAndServe(":8080", app.Handler())
 ```
+
+## Route Table
+
+On startup, Bifrost prints a route table listing all registered routes, their component paths, and render modes:
+
+```
+Bifrost routes:
+  PATTERN             COMPONENT             MODE
+  /{$}                ./pages/home.tsx      ssr
+  /about              ./pages/about.tsx     client
+  /product            ./pages/product.tsx   static
+```
+
+The table prints only when stdout is a terminal. Control it with environment variables:
+
+| Variable | Effect |
+|----------|--------|
+| `BIFROST_ROUTE_TABLE=1` | Always print, even when stdout is not a terminal |
+| `BIFROST_NO_ROUTE_TABLE=1` | Never print, even when stdout is a terminal |
 
 ## Page Types
 
@@ -332,7 +354,7 @@ Characteristics:
 **Build Process:**
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/build@latest ./main.go
+go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go
 ```
 
 Generates:
@@ -371,6 +393,45 @@ export default function Home({ message, count }) {
     );
 }
 ```
+
+### Deferred Props (SSR Only)
+
+**Type signature:**
+
+```go
+type DeferredPropsLoader func(*http.Request) (map[string]any, error)
+```
+
+When both `WithLoader` and `WithDeferredLoader` are set on an SSR page:
+
+1. The sync loader runs first. `renderSSR` blocks until it returns, then begins the Bun render with sync props.
+2. Simultaneously, the deferred loader is launched in a goroutine.
+3. After the render completes, Bifrost waits for the deferred result (or request context cancellation) and merges it via `core.MergeProps`.
+
+**Merge behavior:** `MergeProps` does a JSON marshal/unmarshal merge — deferred props overwrite sync props at top-level key intersection. If either side is nil, the other is returned directly.
+
+**Error handling:** Deferred loader errors are logged via `slog.Error` but do **not** produce an HTTP 500. The page renders with sync props only.
+
+**Context cancellation:** If the request context is cancelled before the deferred loader finishes, the deferred result is dropped. The page still renders with sync props.
+
+**SSR only:** `WithDeferredLoader` has no effect on `WithClient()` or `WithStatic()` pages.
+
+**Timing:** `renderSSR` logs `props_ms`, `render_ms`, and `deferred_ms` separately via `slog.Info`.
+
+**Example:**
+
+```go
+bifrost.Page("/dashboard", "./pages/dashboard.tsx",
+    bifrost.WithLoader(func(req *http.Request) (map[string]any, error) {
+        return map[string]any{"user": currentUser(req)}, nil
+    }),
+    bifrost.WithDeferredLoader(func(req *http.Request) (map[string]any, error) {
+        return map[string]any{"stats": fetchStats(req)}, nil
+    }),
+)
+```
+
+> **Note:** Merged props (sync + deferred) are what get serialized into HTML for client hydration. The render itself uses only sync props; deferred props enrich the hydration data.
 
 ## Error Handling
 
@@ -428,7 +489,7 @@ This ensures fast failure at startup rather than runtime errors.
 Create a new project with one command:
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/init@latest myapp
+go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init myapp
 ```
 
 This scaffolds a complete working project with all required files.
@@ -438,8 +499,8 @@ Options:
 
 Examples:
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/init@latest myapp
-go run github.com/3-lines-studio/bifrost/cmd/init@latest --template spa myspa
+go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init myapp
+go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init --template spa myspa
 ```
 
 ### Repair .bifrost Directory
@@ -447,13 +508,28 @@ go run github.com/3-lines-studio/bifrost/cmd/init@latest --template spa myspa
 If the `.bifrost` directory is missing:
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/doctor@latest .
+go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest doctor .
 ```
 
 ### Build for Production
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/build@latest ./main.go
+go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go
+```
+
+**Flags:**
+
+- `--go-build[=path]` — After building assets, run `go build -o <path> <main.go>`. Default output path is `./tmp/app`. The main file argument must come **before** the flag.
+
+```bash
+# Build assets only
+bifrost build ./main.go
+
+# Build assets, then compile Go binary to ./tmp/app
+bifrost build ./main.go --go-build
+
+# Build assets, then compile Go binary to a custom path
+bifrost build ./main.go --go-build=./myapp
 ```
 
 **Build Pipeline:**
@@ -499,7 +575,7 @@ myapp/
 1. **Always defer Stop()**: `defer app.Stop()` after creating the app
 2. **Use typed options**: `WithLoader()`, `WithClient()`, `WithStatic()`
 3. **Test mode behavior**: Set `BIFROST_DEV=1` explicitly in tests that render TSX
-4. **Strict production**: Always embed `.bifrost` and run the build CLI (`go run github.com/3-lines-studio/bifrost/cmd/build@latest ./main.go`, or an installed `build` binary from `cmd/build`)
+4. **Strict production**: Always embed `.bifrost` and run the build CLI (`go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go`, or an installed `bifrost` binary from `cmd/bifrost`)
 5. **Handle errors in props loaders**: Return proper errors or redirects
 6. **Keep props minimal**: Pass only necessary data to React
 7. **Keep TypeScript minimal**: Treat TS as a thin Bun adapter; keep policy, validation, and artifact logic in Go

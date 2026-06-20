@@ -11,32 +11,32 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/usecase"
 )
 
-func main() {
+func runInit(args []string) {
 	template := "minimal"
 	var projectDir string
 
-	if len(os.Args) < 2 {
-		printUsage()
+	if len(args) < 1 {
+		printInitUsage()
 		os.Exit(1)
 	}
 
-	if os.Args[1] == "--help" || os.Args[1] == "-h" {
-		printUsage()
+	if args[0] == "--help" || args[0] == "-h" {
+		printInitUsage()
 		os.Exit(0)
 	}
 
-	argIdx := 1
-	for argIdx < len(os.Args) {
-		arg := os.Args[argIdx]
+	argIdx := 0
+	for argIdx < len(args) {
+		arg := args[argIdx]
 
 		if arg == "--template" {
-			if argIdx+1 >= len(os.Args) {
+			if argIdx+1 >= len(args) {
 				output := cli.NewOutput()
 				output.PrintHeader("Bifrost Init")
 				output.PrintError("--template requires a value")
 				os.Exit(1)
 			}
-			template = os.Args[argIdx+1]
+			template = args[argIdx+1]
 			argIdx += 2
 			continue
 		}
@@ -48,7 +48,7 @@ func main() {
 	}
 
 	if projectDir == "" {
-		printUsage()
+		printInitUsage()
 		os.Exit(1)
 	}
 
@@ -93,19 +93,19 @@ func isFlag(arg string) bool {
 	return len(arg) > 0 && arg[0] == '-'
 }
 
-func printUsage() {
+func printInitUsage() {
 	output := cli.NewOutput()
 	output.PrintHeader("Bifrost Init")
 	fmt.Println()
-	fmt.Println("Usage: bifrost-init [options] <project-dir>")
+	fmt.Println("Usage: bifrost init [options] <project-dir>")
 	fmt.Println()
 	fmt.Println("Options:")
 	fmt.Println("  --template <name>  Template to use (minimal, spa, desktop). Default: minimal")
 	fmt.Println()
 	fmt.Println("Examples:")
-	fmt.Println("  bifrost-init myapp")
-	fmt.Println("  bifrost-init --template spa myapp")
-	fmt.Println("  bifrost-init --template desktop myapp")
+	fmt.Println("  bifrost init myapp")
+	fmt.Println("  bifrost init --template spa myapp")
+	fmt.Println("  bifrost init --template desktop myapp")
 	fmt.Println()
-	fmt.Println("To repair an existing project, use: bifrost-doctor <dir>")
+	fmt.Println("To repair an existing project, use: bifrost doctor <dir>")
 }

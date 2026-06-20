@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -8,10 +9,24 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/adapters/fs"
 )
 
-func main() {
+func printDoctorUsage() {
+	output := cli.NewOutput()
+	output.PrintHeader("Bifrost Doctor")
+	fmt.Println()
+	fmt.Println("Usage: bifrost doctor [project-dir]")
+	fmt.Println()
+	fmt.Println("Repairs the .bifrost directory in the given project directory (default: .)")
+}
+
+func runDoctor(args []string) {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		printDoctorUsage()
+		os.Exit(0)
+	}
+
 	projectDir := "."
-	if len(os.Args) > 1 {
-		projectDir = os.Args[1]
+	if len(args) > 0 {
+		projectDir = args[0]
 	}
 
 	absProjectDir, err := filepath.Abs(projectDir)

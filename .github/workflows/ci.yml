@@ -37,14 +37,14 @@ jobs:
 
       # Phase 3: Run doctor to validate environment
       - name: Doctor
-        run: go run ./cmd/doctor ./example
+        run: go run ./cmd/bifrost doctor ./example
 
       # Phase 4: Build example assets (required for production tests)
       - name: Build bifrost tool
-        run: go build -o /tmp/bifrost-build ./cmd/build/main.go
+        run: go build -o /tmp/bifrost ./cmd/bifrost
 
       - name: Build example assets
-        run: cd example && /tmp/bifrost-build ./cmd/full/main.go || true
+        run: cd example && /tmp/bifrost build ./cmd/full/main.go || true
 
       # Phase 4: Run all tests with race detector
       - name: Test All

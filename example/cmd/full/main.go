@@ -174,14 +174,6 @@ func main() {
 	app := bifrost.New(example.BifrostFS, routes...)
 	defer app.Stop()
 
-	fmt.Println("Server ready. Available routes:")
-	fmt.Println("  SSR: /, /simple, /user/{id}, /search, /shared-a, /shared-b, /empty")
-	fmt.Println("       /nested, /api-demo, /message/{id}, /dashboard")
-	fmt.Println("  Client: /client, /client/deep, /about, /login")
-	fmt.Println("  Svelte: /svelte, /svelte-client")
-	fmt.Println("  Static: /product, /blog/{slug}")
-	fmt.Println("  Errors: /error, /error-loader, /error-redirect-302, /error-redirect-307, /error-render, /error-import")
-	fmt.Println("")
 	fmt.Println("Try: go run ./cmd/wrap for router integration demo")
 
 	log.Fatal(http.ListenAndServe(":8080", app.Handler()))
