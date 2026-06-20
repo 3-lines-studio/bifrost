@@ -128,6 +128,9 @@ func TestSvelteAdapterClientEntryTemplates(t *testing.T) {
 	if !strings.Contains(clientOnly, "mount") {
 		t.Fatal("expected mount in client-only template")
 	}
+	if !strings.Contains(clientOnly, "target.innerHTML = \"\"") {
+		t.Fatal("expected client-only template to clear existing SSR preview content before mounting")
+	}
 }
 
 func TestSvelteAdapterBuildPlugins(t *testing.T) {
