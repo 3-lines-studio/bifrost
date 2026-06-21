@@ -117,7 +117,6 @@ type pageTiming struct {
 	propsDur    time.Duration
 	renderStart time.Time
 	renderDur   time.Duration
-	deferredDur time.Duration
 	entryName   string
 	path        string
 }
@@ -140,23 +139,6 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 				Error:  err,
 			}
 		}
-	}
-
-	type deferredResult struct {
-		props any
-		err   error
-		dur   time.Duration
-	}
-	var deferredCh chan deferredResult
-	if input.Config.DeferredPropsLoader != nil {
-		deferredCh = make(chan deferredResult, 1)
-		loader := input.Config.DeferredPropsLoader
-		req := input.Request
-		go func() {
-			deferredStart := time.Now()
-			p, err := loader(req)
-			deferredCh <- deferredResult{props: p, err: err, dur: time.Since(deferredStart)}
-		}()
 	}
 
 	lang, htmlClass, syncPropsForReact := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, syncProps)
@@ -185,22 +167,7 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		}
 	}
 
-	mergedProps := syncPropsForReact
-	if deferredCh != nil {
-		select {
-		case d := <-deferredCh:
-			timing.deferredDur = d.dur
-			if d.err != nil {
-				slog.Error("deferred loader failed", "error", d.err)
-			} else {
-				mergedProps = core.MergeProps(syncPropsForReact, d.props)
-			}
-		case <-ctx.Done():
-			slog.Error("deferred loader timed out", "error", ctx.Err())
-		}
-	}
-
-	html, err := shell.Render(page.Body, mergedProps, page.Head, lang, htmlClass)
+	html, err := shell.Render(page.Body, syncPropsForReact, page.Head, lang, htmlClass)
 	if err != nil {
 		return ServePageOutput{
 			Action: core.ActionRenderSSR,
@@ -213,7 +180,6 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		"path", timing.path,
 		"props_ms", timing.propsDur.Milliseconds(),
 		"render_ms", timing.renderDur.Milliseconds(),
-		"deferred_ms", timing.deferredDur.Milliseconds(),
 	)
 
 	return ServePageOutput{

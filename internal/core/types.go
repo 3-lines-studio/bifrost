@@ -2,14 +2,10 @@ package core
 
 import (
 	"context"
-	"encoding/json"
-	"maps"
 	"net/http"
 )
 
 type PropsLoader func(*http.Request) (any, error)
-
-type DeferredPropsLoader func(*http.Request) (any, error)
 
 type RedirectError interface {
 	RedirectURL() string
@@ -72,7 +68,6 @@ type PageConfig struct {
 	ComponentPath       string
 	Mode                PageMode
 	PropsLoader         PropsLoader
-	DeferredPropsLoader DeferredPropsLoader
 	StaticDataLoader    StaticDataLoader
 	HTMLLang            string
 	HTMLClass           string
@@ -83,12 +78,6 @@ type PageOption func(*PageConfig)
 func WithLoader(loader PropsLoader) PageOption {
 	return func(c *PageConfig) {
 		c.PropsLoader = loader
-	}
-}
-
-func WithDeferredLoader(loader DeferredPropsLoader) PageOption {
-	return func(c *PageConfig) {
-		c.DeferredPropsLoader = loader
 	}
 }
 
@@ -129,51 +118,6 @@ func isNilOrEmptyProps(p any) bool {
 	}
 	m, ok := p.(map[string]any)
 	return ok && len(m) == 0
-}
-
-func mergeMaps(sync, deferred map[string]any) map[string]any {
-	merged := make(map[string]any, len(sync)+len(deferred))
-	maps.Copy(merged, sync)
-	maps.Copy(merged, deferred)
-	return merged
-}
-
-func propsToMap(v any) (map[string]any, bool) {
-	if m, ok := v.(map[string]any); ok {
-		return m, true
-	}
-	data, err := json.Marshal(v)
-	if err != nil {
-		return nil, false
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, false
-	}
-	return m, true
-}
-
-func MergeProps(sync any, deferred any) any {
-	if isNilOrEmptyProps(sync) {
-		return deferred
-	}
-	if isNilOrEmptyProps(deferred) {
-		return sync
-	}
-	if sm, ok := sync.(map[string]any); ok {
-		if dm, ok := deferred.(map[string]any); ok {
-			return mergeMaps(sm, dm)
-		}
-	}
-	syncMap, syncOK := propsToMap(sync)
-	deferredMap, deferredOK := propsToMap(deferred)
-	if !syncOK {
-		return deferred
-	}
-	if !deferredOK {
-		return sync
-	}
-	return mergeMaps(syncMap, deferredMap)
 }
 
 type RenderedPage struct {

@@ -277,9 +277,6 @@ Creates a route configuration for a React or Svelte component.
 // Props loader - function to load data from request
 func WithLoader(loader PropsLoader) PageOption
 
-// Deferred props loader - async data loaded in parallel with render (SSR only)
-func WithDeferredLoader(loader DeferredPropsLoader) PageOption
-
 // Client-only mode - static page with empty shell + client render
 func WithClient() PageOption
 
@@ -539,46 +536,7 @@ bifrost.Page("/", "./pages/home.tsx",
 )
 ```
 
-Structs are supported everywhere maps are: props loaders, deferred loaders, and static data loaders. Reserved keys `__bifrost_html_lang` and `__bifrost_html_class` work via struct JSON tags. When reserved keys are present in a struct, they are extracted and stripped before the struct reaches the component.
-
-### Deferred Props (SSR Only)
-
-**Type signature:**
-
-```go
-type DeferredPropsLoader func(*http.Request) (any, error)
-```
-
-When both `WithLoader` and `WithDeferredLoader` are set on an SSR page:
-
-1. The sync loader runs first. `renderSSR` blocks until it returns, then begins the Bun render with sync props.
-2. Simultaneously, the deferred loader is launched in a goroutine.
-3. After the render completes, Bifrost waits for the deferred result (or request context cancellation) and merges it via `core.MergeProps`.
-
-**Merge behavior:** `MergeProps` does a JSON marshal/unmarshal merge — deferred props overwrite sync props at top-level key intersection. If either side is nil, the other is returned directly.
-
-**Error handling:** Deferred loader errors are logged via `slog.Error` but do **not** produce an HTTP 500. The page renders with sync props only.
-
-**Context cancellation:** If the request context is cancelled before the deferred loader finishes, the deferred result is dropped. The page still renders with sync props.
-
-**SSR only:** `WithDeferredLoader` has no effect on `WithClient()` or `WithStatic()` pages.
-
-**Timing:** `renderSSR` logs `props_ms`, `render_ms`, and `deferred_ms` separately via `slog.Info`.
-
-**Example:**
-
-```go
-bifrost.Page("/dashboard", "./pages/dashboard.tsx",
-    bifrost.WithLoader(func(req *http.Request) (any, error) {
-        return map[string]any{"user": currentUser(req)}, nil
-    }),
-    bifrost.WithDeferredLoader(func(req *http.Request) (any, error) {
-        return map[string]any{"stats": fetchStats(req)}, nil
-    }),
-)
-```
-
-> **Note:** Merged props (sync + deferred) are what get serialized into HTML for client hydration. The render itself uses only sync props; deferred props enrich the hydration data.
+Structs are supported everywhere maps are: props loaders and static data loaders. Reserved keys `__bifrost_html_lang` and `__bifrost_html_class` work via struct JSON tags. When reserved keys are present in a struct, they are extracted and stripped before the struct reaches the component.
 
 ## Error Handling
 

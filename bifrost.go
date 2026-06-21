@@ -50,10 +50,6 @@ func WithLoader(loader core.PropsLoader) PageOption {
 	return core.WithLoader(loader)
 }
 
-func WithDeferredLoader(loader core.DeferredPropsLoader) PageOption {
-	return core.WithDeferredLoader(loader)
-}
-
 func WithClient() PageOption {
 	return core.WithClient()
 }

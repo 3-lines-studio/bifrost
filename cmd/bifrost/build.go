@@ -127,6 +127,13 @@ func runBuild(args []string) {
 	projectDir := filepath.Dir(mainFileAbs)
 	goModRoot := findGoModRoot(projectDir)
 
+	if err := os.Chdir(goModRoot); err != nil {
+		output := cli.NewOutput()
+		output.PrintHeader("Bifrost Build")
+		output.PrintError("Failed to change to project directory: %v", err)
+		os.Exit(1)
+	}
+
 	fsAdapter := fs.NewOSFileSystem()
 	output := cli.NewOutput()
 	adapter := getAdapter(fw)
