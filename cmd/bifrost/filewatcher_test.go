@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,7 +37,7 @@ func TestFileWatcher_StartClosesChannels(t *testing.T) {
 	}
 }
 
-func TestFileWatcher_ScanDetectsGoChange(t *testing.T) {
+func TestFileWatcher_DetectsGoChange(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "main.go")
 	if err := os.WriteFile(path, []byte("package main\n"), 0644); err != nil {
@@ -44,30 +45,30 @@ func TestFileWatcher_ScanDetectsGoChange(t *testing.T) {
 	}
 
 	w := newFileWatcher(dir)
-	var goPending, fePending bool
+	ctx := t.Context()
 
-	w.scan(true, &goPending, &fePending, nil, nil)
-	if goPending || fePending {
-		t.Fatal("first scan should not report pending changes")
-	}
+	goChanges, feChanges := w.Start(ctx)
 
-	// Ensure mtime changes.
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
+
 	if err := os.WriteFile(path, []byte("package main\nfunc main() {}\n"), 0644); err != nil {
 		t.Fatalf("failed to update file: %v", err)
 	}
 
-	goPending, fePending = false, false
-	w.scan(false, &goPending, &fePending, nil, nil)
-	if !goPending {
-		t.Fatal("expected .go file change to be detected")
+	select {
+	case <-goChanges:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected goChanges signal")
 	}
-	if fePending {
-		t.Fatal("did not expect frontend change for .go file")
+
+	select {
+	case <-feChanges:
+		t.Fatal("did not expect feChanges signal")
+	case <-time.After(300 * time.Millisecond):
 	}
 }
 
-func TestFileWatcher_ScanDetectsFrontendChange(t *testing.T) {
+func TestFileWatcher_DetectsFrontendChange(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "home.tsx")
 	if err := os.WriteFile(path, []byte("export default function Home() {}\n"), 0644); err != nil {
@@ -75,25 +76,30 @@ func TestFileWatcher_ScanDetectsFrontendChange(t *testing.T) {
 	}
 
 	w := newFileWatcher(dir)
-	var goPending, fePending bool
-	w.scan(true, &goPending, &fePending, nil, nil)
+	ctx := t.Context()
 
-	time.Sleep(20 * time.Millisecond)
-	if err := os.WriteFile(path, []byte("export default function Home() { return <div /> }\n"), 0644); err != nil {
+	goChanges, feChanges := w.Start(ctx)
+
+	time.Sleep(100 * time.Millisecond)
+
+	if err := os.WriteFile(path, []byte("export default function Home() { return null }\n"), 0644); err != nil {
 		t.Fatalf("failed to update file: %v", err)
 	}
 
-	goPending, fePending = false, false
-	w.scan(false, &goPending, &fePending, nil, nil)
-	if goPending {
-		t.Fatal("did not expect go change for .tsx file")
+	select {
+	case <-feChanges:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected feChanges signal")
 	}
-	if !fePending {
-		t.Fatal("expected .tsx file change to be detected")
+
+	select {
+	case <-goChanges:
+		t.Fatal("did not expect goChanges signal")
+	case <-time.After(300 * time.Millisecond):
 	}
 }
 
-func TestFileWatcher_ScanExcludesNodeModules(t *testing.T) {
+func TestFileWatcher_ExcludesNodeModules(t *testing.T) {
 	dir := t.TempDir()
 	nodeModules := filepath.Join(dir, "node_modules")
 	if err := os.MkdirAll(nodeModules, 0755); err != nil {
@@ -105,43 +111,114 @@ func TestFileWatcher_ScanExcludesNodeModules(t *testing.T) {
 	}
 
 	w := newFileWatcher(dir)
-	var goPending, fePending bool
-	w.scan(true, &goPending, &fePending, nil, nil)
+	ctx := t.Context()
 
-	// Modify after first scan.
-	time.Sleep(20 * time.Millisecond)
+	goChanges, _ := w.Start(ctx)
+
+	time.Sleep(100 * time.Millisecond)
+
 	if err := os.WriteFile(path, []byte("package bar\n"), 0644); err != nil {
 		t.Fatalf("failed to update file: %v", err)
 	}
 
-	goPending, fePending = false, false
-	w.scan(false, &goPending, &fePending, nil, nil)
-	if goPending || fePending {
-		t.Fatal("node_modules should be excluded from watching")
+	select {
+	case <-goChanges:
+		t.Fatal("node_modules should be excluded")
+	case <-time.After(500 * time.Millisecond):
 	}
 }
 
-func TestFileWatcher_ScanRemovesDeletedFiles(t *testing.T) {
+func TestFileWatcher_DebounceCoalescesRapidChanges(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "main.go")
-	if err := os.WriteFile(path, []byte("package main\n"), 0644); err != nil {
+	path := filepath.Join(dir, "app.tsx")
+	if err := os.WriteFile(path, []byte("export default function App() {}\n"), 0644); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
 
 	w := newFileWatcher(dir)
-	var goPending, fePending bool
-	w.scan(true, &goPending, &fePending, nil, nil)
-	if _, ok := w.mtimes[path]; !ok {
-		t.Fatal("expected file to be tracked after first scan")
+	ctx := t.Context()
+
+	_, feChanges := w.Start(ctx)
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Fire many writes in quick succession.
+	for i := range 10 {
+		if err := os.WriteFile(path, fmt.Appendf(nil, "const x = %d\n", i), 0644); err != nil {
+			t.Fatalf("failed to update file: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
-	if err := os.Remove(path); err != nil {
-		t.Fatalf("failed to remove file: %v", err)
+	// We should get at least one signal, but rapid events within a debounce
+	// window should not produce one signal per write.
+	signals := 0
+	done := time.After(800 * time.Millisecond)
+loop:
+	for {
+		select {
+		case <-feChanges:
+			signals++
+			if signals > 3 {
+				t.Fatalf("expected debounced signals, got %d", signals)
+			}
+		case <-done:
+			break loop
+		}
+	}
+	if signals == 0 {
+		t.Fatal("expected at least one frontend change signal")
+	}
+}
+
+func TestFileWatcher_RenameEventDetected(t *testing.T) {
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "old.go")
+	newPath := filepath.Join(dir, "new.go")
+	if err := os.WriteFile(oldPath, []byte("package main\n"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
 	}
 
-	goPending, fePending = false, false
-	w.scan(false, &goPending, &fePending, nil, nil)
-	if _, ok := w.mtimes[path]; ok {
-		t.Fatal("expected deleted file to be removed from mtimes")
+	w := newFileWatcher(dir)
+	ctx := t.Context()
+
+	goChanges, _ := w.Start(ctx)
+
+	time.Sleep(100 * time.Millisecond)
+
+	if err := os.Rename(oldPath, newPath); err != nil {
+		t.Fatalf("failed to rename file: %v", err)
+	}
+
+	select {
+	case <-goChanges:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected goChanges signal after rename")
+	}
+}
+
+func TestFileWatcher_NewDirectoryWatched(t *testing.T) {
+	dir := t.TempDir()
+	w := newFileWatcher(dir)
+	ctx := t.Context()
+
+	goChanges, _ := w.Start(ctx)
+
+	time.Sleep(100 * time.Millisecond)
+
+	subDir := filepath.Join(dir, "pages")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatalf("failed to create subdirectory: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	path := filepath.Join(subDir, "home.go")
+	if err := os.WriteFile(path, []byte("package pages\n"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	select {
+	case <-goChanges:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected goChanges for new directory")
 	}
 }

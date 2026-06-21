@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 
@@ -362,9 +363,7 @@ func (s *BuildService) buildClientAssets(run *buildRun) {
 			if err != nil {
 				result = s.buildClientAssetsIndividually(run, grp.pages, grp.adapter, &errors)
 			}
-			for k, v := range result {
-				builtMap[k] = v
-			}
+			maps.Copy(builtMap, result)
 		}
 	}
 

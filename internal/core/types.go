@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 )
 
@@ -132,12 +133,8 @@ func isNilOrEmptyProps(p any) bool {
 
 func mergeMaps(sync, deferred map[string]any) map[string]any {
 	merged := make(map[string]any, len(sync)+len(deferred))
-	for k, v := range sync {
-		merged[k] = v
-	}
-	for k, v := range deferred {
-		merged[k] = v
-	}
+	maps.Copy(merged, sync)
+	maps.Copy(merged, deferred)
 	return merged
 }
 

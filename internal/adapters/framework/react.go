@@ -17,7 +17,6 @@ var (
 
 	//go:embed react_client_only.txt
 	reactClientOnlyTemplate string
-
 )
 
 type ReactAdapter struct{}

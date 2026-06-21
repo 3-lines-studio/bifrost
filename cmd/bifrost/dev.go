@@ -203,7 +203,7 @@ func runDev(args []string) {
 	fmt.Println()
 	output.PrintSuccess("Proxy:   http://localhost:%d", port)
 	output.PrintSuccess("App:     http://127.0.0.1:%d (internal)", appPort)
-	fmt.Println("  Watching .go files (rebuild + restart) and frontend files (live)")
+	fmt.Println("  Watching .go files (rebuild + restart) and frontend files (live reload)")
 	fmt.Println("  Press Ctrl-C to stop")
 	fmt.Println()
 
@@ -247,10 +247,14 @@ func runDev(args []string) {
 				output.PrintError("Failed to start app after rebuild")
 			} else {
 				output.PrintSuccess("Rebuild complete")
+				if err := waitForApp(ctx, appPort, 5*time.Second); err == nil {
+					proxy.BroadcastReload()
+				}
 			}
 
 		case <-feChanges:
 			output.PrintStep("", "Frontend change — reload browser")
+			proxy.BroadcastReload()
 
 		case err := <-proxyErrCh:
 			if err != nil {

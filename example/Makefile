@@ -1,12 +1,12 @@
 doctor:
-	go run ../cmd/bifrost doctor .
+	cd .. && go run ./cmd/bifrost doctor example
 
 dev:
-	go run ../cmd/bifrost dev ./cmd/full/main.go
+	cd .. && go run ./cmd/bifrost dev ./example/cmd/full/main.go
 
 build:
 	rm -rf .bifrost/*
-	go run ../cmd/bifrost build ./cmd/full/main.go
+	cd .. && go run ./cmd/bifrost build ./example/cmd/full/main.go
 	go build -o bifrost ./cmd/full/main.go
 	rm -rf .bifrost/*
 

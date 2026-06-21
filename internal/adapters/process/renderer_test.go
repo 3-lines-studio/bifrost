@@ -16,7 +16,7 @@ func TestFormatRenderError_CompileError(t *testing.T) {
 	if se == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if _, ok := interface{}(se).(*core.StructuredError); !ok {
+	if _, ok := any(se).(*core.StructuredError); !ok {
 		t.Fatalf("expected *core.StructuredError, got %T", se)
 	}
 
@@ -39,7 +39,7 @@ func TestFormatRenderError_WithStack(t *testing.T) {
 	if se == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if _, ok := interface{}(se).(*core.StructuredError); !ok {
+	if _, ok := any(se).(*core.StructuredError); !ok {
 		t.Fatalf("expected *core.StructuredError, got %T", se)
 	}
 
@@ -65,7 +65,7 @@ func TestFormatRenderError_WithSubErrors(t *testing.T) {
 	if se == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if _, ok := interface{}(se).(*core.StructuredError); !ok {
+	if _, ok := any(se).(*core.StructuredError); !ok {
 		t.Fatalf("expected *core.StructuredError, got %T", se)
 	}
 

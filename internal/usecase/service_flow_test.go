@@ -271,7 +271,8 @@ func TestExportStaticPages_UsesRouteSpecificCriticalCSS(t *testing.T) {
 
 	renderer := &fakeRenderer{
 		renderFn: func(componentPath string, props any) (core.RenderedPage, error) {
-			m, _ := props.(map[string]any); switch m["kind"] {
+			m, _ := props.(map[string]any)
+			switch m["kind"] {
 			case "hero":
 				return core.RenderedPage{Body: `<div class="hero">Hero</div>`}, nil
 			case "cta":

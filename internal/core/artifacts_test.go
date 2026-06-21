@@ -7,10 +7,10 @@ func TestResolvePageArtifacts_EquivalentToGetAssets(t *testing.T) {
 	man := &Manifest{
 		Entries: map[string]ManifestEntry{
 			"pages-home-entry": {
-				Script:   "/dist/pages-home-entry-abc123.js",
-				CSS:      "/dist/pages-home-entry-abc123.css",
-				Chunks:   []string{"/dist/chunk-xyz.js"},
-				SSR:      "/ssr/pages-home-entry-ssr.js",
+				Script:      "/dist/pages-home-entry-abc123.js",
+				CSS:         "/dist/pages-home-entry-abc123.css",
+				Chunks:      []string{"/dist/chunk-xyz.js"},
+				SSR:         "/ssr/pages-home-entry-ssr.js",
 				CriticalCSS: "body{color:red}",
 			},
 		},
