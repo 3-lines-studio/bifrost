@@ -178,6 +178,10 @@ func TestResolveAdapterForPath(t *testing.T) {
 		{"/abs/path/page.jsx", "react"},
 		{"unknown", "react"},
 		{"file.svelte", "svelte"},
+		{"file.svelte.ts", "svelte"},
+		{"file.svelte.js", "svelte"},
+		{"file.svelte.ts?t=123", "svelte"},
+		{"./components/avatar/avatar-context.svelte.ts", "svelte"},
 		{"", "react"},
 	}
 	for _, tt := range tests {

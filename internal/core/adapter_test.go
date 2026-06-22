@@ -65,6 +65,13 @@ func TestFrameworkFromComponentPath(t *testing.T) {
 		{"/abs/path/page.jsx", FrameworkReact},
 		{"unknown", FrameworkReact},
 		{"file.svelte", FrameworkSvelte},
+		{"file.svelte.ts", FrameworkSvelte},
+		{"file.svelte.js", FrameworkSvelte},
+		{"file.svelte.ts?t=123", FrameworkSvelte},
+		{"file.svelte.js?t=123", FrameworkSvelte},
+		{"file.svelte?t=123", FrameworkSvelte},
+		{"./components/avatar/avatar-context.svelte.ts", FrameworkSvelte},
+		{"/abs/path/foo.svelte.js", FrameworkSvelte},
 		{"", FrameworkReact},
 	}
 	for _, tt := range tests {

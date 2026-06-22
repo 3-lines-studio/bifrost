@@ -9,9 +9,27 @@ function createSveltePlugin(generate) {
   return {
     name: "svelte-plugin",
     setup(builder) {
-      builder.onLoad({ filter: /\.svelte$/ }, async (args) => {
-        const { compile } = await import("svelte/compiler");
+      const tsTranspiler = new Bun.Transpiler({ loader: "ts" });
+
+      builder.onLoad({ filter: /\.svelte(\.[jt]s)?$/ }, async (args) => {
+        const { compile, compileModule } = await import("svelte/compiler");
         const input = await Bun.file(args.path).text();
+        const isModule = /\.svelte\.[jt]s$/.test(args.path);
+
+        if (isModule) {
+          const moduleInput = args.path.endsWith(".svelte.ts")
+            ? tsTranspiler.transformSync(input)
+            : input;
+          let modResult;
+          try {
+            modResult = compileModule(moduleInput, { generate, filename: args.path });
+          } catch (e) {
+            const msg = e.code ? `${e.message} (${e.code})` : e.message;
+            const frame = e.frame ? `\n\n${e.frame}` : "";
+            throw new Error(msg + frame);
+          }
+          return { contents: modResult.js.code, loader: "js" };
+        }
 
         let result;
         try {

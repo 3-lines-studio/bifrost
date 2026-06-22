@@ -1,6 +1,9 @@
 package core
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"strings"
+)
 
 type Framework int
 
@@ -39,6 +42,12 @@ func FrameworkFromExtension(ext string) Framework {
 }
 
 func FrameworkFromComponentPath(path string) Framework {
+	if idx := strings.Index(path, "?"); idx >= 0 {
+		path = path[:idx]
+	}
+	if strings.HasSuffix(path, ".svelte.ts") || strings.HasSuffix(path, ".svelte.js") || strings.HasSuffix(path, ".svelte") {
+		return FrameworkSvelte
+	}
 	return FrameworkFromExtension(filepath.Ext(path))
 }
 

@@ -179,3 +179,24 @@ func TestSvelteNestedComponents_Prod(t *testing.T) {
 
 	matchSnapshot(t, "svelte_nested_prod", html)
 }
+
+func TestSvelteTSModule_Dev(t *testing.T) {
+	skipIfNoBun(t)
+
+	routes := []bifrost.Route{
+		bifrost.Page("/svelte-ts-module", "./pages/svelte/ts-module.svelte"),
+	}
+
+	server := newTestServer(t, routes, true)
+	server.start(t)
+
+	resp, html := server.get(t, "/svelte-ts-module")
+	assertHTTPStatus(t, resp, 200)
+
+	if !strings.Contains(html, "active") {
+		t.Error("expected HTML to contain local rune status 'active'")
+	}
+	if !strings.Contains(html, "idle") {
+		t.Error("expected HTML to contain context status 'idle'")
+	}
+}
