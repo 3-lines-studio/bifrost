@@ -36,13 +36,28 @@ var (
 	sveltePluginSource string
 )
 
-func RuntimeSource(mode core.Mode) string {
+func RuntimeSource(mode core.Mode, frameworks ...core.Framework) string {
 	tailwindPlugin := `(await import("bun-plugin-tailwind")).default`
 	if mode == core.ModeProd {
 		tailwindPlugin = "undefined"
 	}
-	reactCompilerPlugin := strings.TrimSpace(reactCompilerPluginSource)
-	sveltePlugin := strings.TrimSpace(sveltePluginSource)
+	hasReact := false
+	hasSvelte := false
+	for _, fw := range frameworks {
+		if fw == core.FrameworkSvelte {
+			hasSvelte = true
+		} else {
+			hasReact = true
+		}
+	}
+	reactCompilerPlugin := "undefined"
+	sveltePlugin := "undefined"
+	if hasReact {
+		reactCompilerPlugin = strings.TrimSpace(reactCompilerPluginSource)
+	}
+	if hasSvelte {
+		sveltePlugin = strings.TrimSpace(sveltePluginSource)
+	}
 	src := strings.ReplaceAll(ReactRuntimeSource, "BIFROST_TAILWIND_PLUGIN", tailwindPlugin)
 	src = strings.ReplaceAll(src, "BIFROST_REACT_COMPILER_PLUGIN", reactCompilerPlugin)
 	src = strings.ReplaceAll(src, "BIFROST_SVELTE_PLUGIN", sveltePlugin)
@@ -84,7 +99,7 @@ func removeStaleSocket(path string) {
 
 func NewRenderer(mode core.Mode, source string, extraEnv ...string) (*Renderer, error) {
 	if source == "" {
-		source = RuntimeSource(mode)
+		source = RuntimeSource(mode, core.FrameworkReact)
 	}
 
 	cwd, err := os.Getwd()

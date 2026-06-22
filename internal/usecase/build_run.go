@@ -83,15 +83,15 @@ func (s *BuildService) newBuildRun(input BuildInput) (*buildRun, error) {
 	}
 
 	paths := buildPaths{
-		bifrostDir:    filepath.Join(input.OriginalCwd, ".bifrost"),
-		outdir:        filepath.Join(input.OriginalCwd, ".bifrost", "dist"),
-		ssrDir:        filepath.Join(input.OriginalCwd, ".bifrost", "ssr"),
-		entriesDir:    filepath.Join(input.OriginalCwd, ".bifrost", "entries"),
-		pagesDir:      filepath.Join(input.OriginalCwd, ".bifrost", "pages"),
-		runtimeDir:    filepath.Join(input.OriginalCwd, ".bifrost", "runtime"),
-		publicDir:     filepath.Join(input.OriginalCwd, "public"),
-		publicDestDir: filepath.Join(input.OriginalCwd, ".bifrost", "public"),
-		manifestPath:  filepath.Join(input.OriginalCwd, ".bifrost", "manifest.json"),
+		bifrostDir:    filepath.Join(input.AppRoot, ".bifrost"),
+		outdir:        filepath.Join(input.AppRoot, ".bifrost", "dist"),
+		ssrDir:        filepath.Join(input.AppRoot, ".bifrost", "ssr"),
+		entriesDir:    filepath.Join(input.AppRoot, ".bifrost", "entries"),
+		pagesDir:      filepath.Join(input.AppRoot, ".bifrost", "pages"),
+		runtimeDir:    filepath.Join(input.AppRoot, ".bifrost", "runtime"),
+		publicDir:     filepath.Join(input.AppRoot, "public"),
+		publicDestDir: filepath.Join(input.AppRoot, ".bifrost", "public"),
+		manifestPath:  filepath.Join(input.AppRoot, ".bifrost", "manifest.json"),
 	}
 
 	run := &buildRun{
@@ -110,7 +110,7 @@ func (s *BuildService) newBuildRun(input BuildInput) (*buildRun, error) {
 		page := buildPage{
 			config:           config,
 			entryName:        core.EntryNameForPath(config.ComponentPath),
-			absComponentPath: filepath.Join(input.OriginalCwd, config.ComponentPath),
+			absComponentPath: filepath.Join(input.AppRoot, config.ComponentPath),
 			modeLabel:        config.Mode.BuildLabel(),
 			framework:        fw,
 			adapter:          framework.ResolveAdapter(fw),
@@ -474,8 +474,17 @@ func (s *BuildService) compileRuntime(run *buildRun) error {
 		return nil
 	}
 
+	seen := make(map[core.Framework]struct{})
+	var frameworks []core.Framework
+	for _, page := range run.pages {
+		if _, ok := seen[page.framework]; !ok {
+			seen[page.framework] = struct{}{}
+			frameworks = append(frameworks, page.framework)
+		}
+	}
+
 	step := run.report.StartStep("Compiling Bun runtime")
-	if err := s.compileRuntimeFn(run.paths.bifrostDir); err != nil {
+	if err := s.compileRuntimeFn(run.paths.bifrostDir, frameworks); err != nil {
 		run.report.AddError("Runtime", "Failed to compile embedded runtime", []string{err.Error()})
 		run.report.EndStep(step, false, "")
 		return fmt.Errorf("runtime compilation failed: %w", err)
@@ -491,7 +500,7 @@ func (s *BuildService) exportStaticPrerender(_ context.Context, run *buildRun) e
 		return nil
 	}
 
-	if err := s.runExportMode(run.input.OriginalCwd, run.paths.bifrostDir, run.manifest, run.input.MainFile); err != nil {
+	if err := s.runExportMode(run.input.ModuleRoot, run.input.AppRoot, run.paths.bifrostDir, run.manifest, run.input.MainFile); err != nil {
 		run.report.AddError("StaticPrerender", "Export mode failed", []string{err.Error()})
 		run.report.EndStep(step, false, "")
 		return fmt.Errorf("export mode failed: %w", err)

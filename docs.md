@@ -10,6 +10,7 @@ Bifrost bridges Go backends with React and Svelte frontends using Bun for SSR. I
 
 ```bash
 go get github.com/3-lines-studio/bifrost
+go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest
 ```
 
 Requires [Bun](https://bun.sh) to be installed.
@@ -144,8 +145,8 @@ bifrost dev ./main.go
 ### Production Mode
 
 ```bash
-# Build assets (from module root; path is your main package entrypoint)
-go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go
+# Build assets — output goes to dir(main.go)/.bifrost (the "app root")
+bifrost build ./main.go
 
 # Build Go binary
 go build -o myapp main.go
@@ -449,7 +450,7 @@ Characteristics:
 **Build Process:**
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go
+bifrost build ./main.go
 ```
 
 Generates:
@@ -621,7 +622,7 @@ In development mode (`BIFROST_DEV=1`), Bifrost renders rich, structured error pa
 Create a new project with one command:
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init myapp
+bifrost init myapp
 ```
 
 This scaffolds a complete working project with all required files.
@@ -631,9 +632,9 @@ Options:
 
 Examples:
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init myapp
-go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init --template spa myspa
-go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init --template svelte mysvelteapp
+bifrost init myapp
+bifrost init --template spa myspa
+bifrost init --template svelte mysvelteapp
 ```
 
 ### Repair .bifrost Directory
@@ -641,13 +642,13 @@ go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init --template svel
 If the `.bifrost` directory is missing:
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest doctor .
+bifrost doctor .
 ```
 
 ### Build for Production
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go
+bifrost build ./main.go
 ```
 
 **Flags:**
@@ -667,7 +668,7 @@ bifrost build ./main.go --go-build=./myapp
 
 **Build Pipeline:**
 
-1. AST scan discovers all `Page()` calls
+1. Import-graph scan (`go list -deps`) discovers all `bifrost.Page()` calls in any file/package reachable from the main package
 2. Detects `WithClient()` for mode classification
 3. Generates client entry files for each page
 4. Builds client bundles (JS/CSS) to `.bifrost/dist/`
@@ -690,12 +691,13 @@ For SSR pages, production builds include server bundles:
 ```
 myapp/
 ├── main.go           # Go server
-├── pages/            # Page components
+├── embed.go          # //go:embed all:.bifrost (same package as main.go)
+├── pages/            # Page components (relative to main.go's directory)
 │   ├── home.tsx
 │   └── about.tsx
 ├── components/       # Shared components
 ├── public/           # Static assets
-├── .bifrost/         # Build output (gitignore)
+├── .bifrost/         # Build output (gitignored; .gitkeep for embed)
 │   ├── dist/         # Client bundles
 │   ├── ssr/          # SSR bundles (production only)
 │   ├── pages/        # Static HTML files
@@ -703,12 +705,46 @@ myapp/
 └── go.mod
 ```
 
+`.bifrost/`, `public/`, and component paths (`./pages/...`) resolve relative to `dir(main.go)` — the directory containing your main package. For single-binary projects where `main.go` is at the module root, this is the module root. `embed.go` must be in the same directory as `main.go` because `//go:embed` cannot reach parent directories.
+
+### Multi-binary Projects
+
+For monorepos with multiple binaries (`cmd/web/`, `cmd/admin/`), each binary owns its own `.bifrost/`, `public/`, and `embed.go`:
+
+```
+myrepo/
+├── go.mod
+├── cmd/
+│   ├── web/
+│   │   ├── main.go
+│   │   ├── embed.go      # //go:embed all:.bifrost all:public
+│   │   ├── pages/
+│   │   ├── public/
+│   │   └── .bifrost/     # web's build output
+│   └── admin/
+│       ├── main.go
+│       ├── embed.go
+│       ├── pages/
+│       ├── public/
+│       └── .bifrost/     # admin's build output
+└── internal/
+    └── shared/           # shared Go code (scanned by both binaries)
+        └── routes.go
+```
+
+```bash
+bifrost build ./cmd/web/main.go     # → cmd/web/.bifrost/
+bifrost build ./cmd/admin/main.go   # → cmd/admin/.bifrost/
+```
+
+Each build writes only to its own `dir(main.go)/.bifrost/`. No collision — even within a single Go module. `bifrost.Page()` calls in imported packages (e.g. `internal/shared/routes.go`) are discovered automatically via import-graph traversal.
+
 ## Best Practices
 
 1. **Always defer Stop()**: `defer app.Stop()` after creating the app
 2. **Use typed options**: `WithLoader()`, `WithClient()`, `WithStatic()`
 3. **Test mode behavior**: Set `BIFROST_DEV=1` explicitly in tests that render components
-4. **Strict production**: Always embed `.bifrost` and run the build CLI (`go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go`, or an installed `bifrost` binary from `cmd/bifrost`)
+4. **Strict production**: Always embed `.bifrost` and run `bifrost build ./main.go`
 5. **Handle errors in props loaders**: Return proper errors or redirects
 6. **Keep props minimal**: Pass only necessary data to components
 7. **Keep TypeScript minimal**: Treat TS as a thin Bun adapter; keep policy, validation, and artifact logic in Go

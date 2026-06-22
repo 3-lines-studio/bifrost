@@ -65,12 +65,12 @@ type StaticPathData struct {
 type StaticDataLoader func(context.Context) ([]StaticPathData, error)
 
 type PageConfig struct {
-	ComponentPath       string
-	Mode                PageMode
-	PropsLoader         PropsLoader
-	StaticDataLoader    StaticDataLoader
-	HTMLLang            string
-	HTMLClass           string
+	ComponentPath    string
+	Mode             PageMode
+	PropsLoader      PropsLoader
+	StaticDataLoader StaticDataLoader
+	HTMLLang         string
+	HTMLClass        string
 }
 
 type PageOption func(*PageConfig)

@@ -8,6 +8,7 @@ order: 1
 
 ```bash
 go get github.com/3-lines-studio/bifrost
+go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest
 ```
 
 [Bun](https://bun.sh) is required for development and building. Production binaries with SSR pages include the Bun runtime automatically — no system-level Bun installation needed on the target machine.
@@ -19,7 +20,7 @@ Static-only apps (no SSR) do not include the Bun runtime at all.
 The fastest way to get started is with the init command:
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init myapp
+bifrost init myapp
 ```
 
 This scaffolds a complete project. Then `cd myapp`, run `go mod tidy` and `bun install`, and start the dev server: `bifrost dev main.go` — at `http://localhost:3000`.
@@ -63,7 +64,7 @@ In dev mode, source files are rendered directly and the browser refreshes on eve
 
 ```bash
 # Build frontend assets and SSR bundles
-go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go
+bifrost build ./main.go
 
 # Build the Go binary with embedded assets
 go build -o myapp main.go

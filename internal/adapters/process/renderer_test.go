@@ -126,3 +126,55 @@ func TestFormatRenderError_WithPosition(t *testing.T) {
 		t.Errorf("expected LineText '{#if}', got %q", sub.LineText)
 	}
 }
+
+func TestRuntimeSourceIncludesOnlyReactPluginsForReact(t *testing.T) {
+	src := RuntimeSource(core.ModeDev, core.FrameworkReact)
+	if !strings.Contains(src, "react-compiler") {
+		t.Fatal("expected react-compiler plugin in react runtime source")
+	}
+	if !strings.Contains(src, "@babel/core") {
+		t.Fatal("expected @babel/core import in react runtime source")
+	}
+	if strings.Contains(src, "svelte/compiler") {
+		t.Fatal("did not expect svelte/compiler import in react-only runtime source")
+	}
+	if strings.Contains(src, "svelte-plugin") {
+		t.Fatal("did not expect svelte plugin in react-only runtime source")
+	}
+}
+
+func TestRuntimeSourceIncludesOnlySveltePluginsForSvelte(t *testing.T) {
+	src := RuntimeSource(core.ModeDev, core.FrameworkSvelte)
+	if !strings.Contains(src, "svelte/compiler") {
+		t.Fatal("expected svelte/compiler import in svelte runtime source")
+	}
+	if !strings.Contains(src, "svelte-plugin") {
+		t.Fatal("expected svelte plugin in svelte runtime source")
+	}
+	if strings.Contains(src, "@babel/core") {
+		t.Fatal("did not expect @babel/core import in svelte-only runtime source")
+	}
+	if strings.Contains(src, "babel-plugin-react-compiler") {
+		t.Fatal("did not expect babel-plugin-react-compiler import in svelte-only runtime source")
+	}
+}
+
+func TestRuntimeSourceIncludesBothPluginsForMixedFrameworks(t *testing.T) {
+	src := RuntimeSource(core.ModeDev, core.FrameworkReact, core.FrameworkSvelte)
+	if !strings.Contains(src, "react-compiler") {
+		t.Fatal("expected react-compiler plugin in mixed runtime source")
+	}
+	if !strings.Contains(src, "svelte-plugin") {
+		t.Fatal("expected svelte plugin in mixed runtime source")
+	}
+}
+
+func TestRuntimeSourceOmitsBothFrameworkPluginsWhenEmpty(t *testing.T) {
+	src := RuntimeSource(core.ModeDev)
+	if strings.Contains(src, "@babel/core") {
+		t.Fatal("did not expect @babel/core import when no frameworks specified")
+	}
+	if strings.Contains(src, "svelte/compiler") {
+		t.Fatal("did not expect svelte/compiler import when no frameworks specified")
+	}
+}

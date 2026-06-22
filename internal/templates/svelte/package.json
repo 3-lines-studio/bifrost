@@ -4,6 +4,7 @@
   "type": "module",
   "dependencies": {
     "svelte": "^5.0.0",
-    "bun-plugin-tailwind": "^0.1.2"
+    "bun-plugin-tailwind": "^0.1.2",
+    "tailwindcss": "^4.2.1"
   }
 }

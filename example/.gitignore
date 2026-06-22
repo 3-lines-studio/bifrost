@@ -1,9 +1,4 @@
 node_modules/
-dist/
-.bifrost/
-tmp/
+cmd/full/.bifrost/
+cmd/full/tmp/
 bifrost
-!bifrost/
-example
-!example/
-full

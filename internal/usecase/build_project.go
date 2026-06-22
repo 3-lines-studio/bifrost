@@ -8,8 +8,9 @@ import (
 )
 
 type BuildInput struct {
-	MainFile    string
-	OriginalCwd string
+	MainFile   string
+	ModuleRoot string
+	AppRoot    string
 }
 
 type BuildOutput struct {
@@ -28,7 +29,7 @@ type BuildService struct {
 	fs               FileSystem
 	cli              CLIOutput
 	adapter          core.FrameworkAdapter
-	compileRuntimeFn func(bifrostDir string) error
+	compileRuntimeFn func(bifrostDir string, frameworks []core.Framework) error
 }
 
 func NewBuildService(renderer Renderer, fs FileSystem, cli CLIOutput, adapter core.FrameworkAdapter) *BuildService {

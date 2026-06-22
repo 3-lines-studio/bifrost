@@ -148,11 +148,14 @@ func TestPageServiceStaticPrerenderReturnsNotFoundForMissingPath(t *testing.T) {
 }
 
 func TestBuildProjectFallsBackToPerPageClientBuilds(t *testing.T) {
+	t.Setenv("GOTOOLCHAIN", "local")
 	tmpDir := t.TempDir()
+	writeGoModWithBifrost(t, tmpDir)
 	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main
+import "github.com/3-lines-studio/bifrost"
 func main() {
-	_ = Page("/", "./pages/home.tsx", WithClient())
-	_ = Page("/about", "./pages/about.tsx", WithClient())
+	_ = bifrost.Page("/", "./pages/home.tsx", bifrost.WithClient())
+	_ = bifrost.Page("/about", "./pages/about.tsx", bifrost.WithClient())
 }`)
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "<title>Home</title>")
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "about.tsx"), "<title>About</title>")
@@ -173,8 +176,9 @@ func main() {
 	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
 
 	result := service.BuildProject(context.Background(), BuildInput{
-		MainFile:    filepath.Join(tmpDir, "main.go"),
-		OriginalCwd: tmpDir,
+		MainFile:   filepath.Join(tmpDir, "main.go"),
+		ModuleRoot: tmpDir,
+		AppRoot:    tmpDir,
 	})
 	if result.Error != nil {
 		t.Fatalf("BuildProject() error = %v", result.Error)
@@ -204,10 +208,13 @@ func main() {
 }
 
 func TestBuildProjectCleansGeneratedDirsButPreservesBifrostRoot(t *testing.T) {
+	t.Setenv("GOTOOLCHAIN", "local")
 	tmpDir := t.TempDir()
+	writeGoModWithBifrost(t, tmpDir)
 	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main
+import "github.com/3-lines-studio/bifrost"
 func main() {
-	_ = Page("/", "./pages/home.tsx", WithClient())
+	_ = bifrost.Page("/", "./pages/home.tsx", bifrost.WithClient())
 }`)
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "<title>Home</title>")
 	writeTestFile(t, filepath.Join(tmpDir, ".bifrost", ".gitkeep"), "keep")
@@ -229,8 +236,9 @@ func main() {
 	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
 
 	result := service.BuildProject(context.Background(), BuildInput{
-		MainFile:    filepath.Join(tmpDir, "main.go"),
-		OriginalCwd: tmpDir,
+		MainFile:   filepath.Join(tmpDir, "main.go"),
+		ModuleRoot: tmpDir,
+		AppRoot:    tmpDir,
 	})
 	if result.Error != nil {
 		t.Fatalf("BuildProject() error = %v", result.Error)
@@ -342,11 +350,14 @@ func TestExportStaticPages_UsesRouteSpecificCriticalCSS(t *testing.T) {
 }
 
 func TestBuildProjectBatchesSSRBundles(t *testing.T) {
+	t.Setenv("GOTOOLCHAIN", "local")
 	tmpDir := t.TempDir()
+	writeGoModWithBifrost(t, tmpDir)
 	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main
+import "github.com/3-lines-studio/bifrost"
 func main() {
-	_ = Page("/", "./pages/home.tsx")
-	_ = Page("/about", "./pages/about.tsx")
+	_ = bifrost.Page("/", "./pages/home.tsx")
+	_ = bifrost.Page("/about", "./pages/about.tsx")
 }`)
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "<title>Home</title>")
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "about.tsx"), "<title>About</title>")
@@ -368,11 +379,12 @@ func main() {
 		},
 	}
 	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
-	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
+	service.compileRuntimeFn = func(bifrostDir string, frameworks []core.Framework) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
-		MainFile:    filepath.Join(tmpDir, "main.go"),
-		OriginalCwd: tmpDir,
+		MainFile:   filepath.Join(tmpDir, "main.go"),
+		ModuleRoot: tmpDir,
+		AppRoot:    tmpDir,
 	})
 	if result.Error != nil {
 		t.Fatalf("BuildProject() error = %v", result.Error)
@@ -396,11 +408,14 @@ func main() {
 }
 
 func TestBuildProjectFallsBackToPerPageSSRBundles(t *testing.T) {
+	t.Setenv("GOTOOLCHAIN", "local")
 	tmpDir := t.TempDir()
+	writeGoModWithBifrost(t, tmpDir)
 	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main
+import "github.com/3-lines-studio/bifrost"
 func main() {
-	_ = Page("/", "./pages/home.tsx")
-	_ = Page("/about", "./pages/about.tsx")
+	_ = bifrost.Page("/", "./pages/home.tsx")
+	_ = bifrost.Page("/about", "./pages/about.tsx")
 }`)
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "<title>Home</title>")
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "about.tsx"), "<title>About</title>")
@@ -423,11 +438,12 @@ func main() {
 		},
 	}
 	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
-	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
+	service.compileRuntimeFn = func(bifrostDir string, frameworks []core.Framework) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
-		MainFile:    filepath.Join(tmpDir, "main.go"),
-		OriginalCwd: tmpDir,
+		MainFile:   filepath.Join(tmpDir, "main.go"),
+		ModuleRoot: tmpDir,
+		AppRoot:    tmpDir,
 	})
 	if result.Error != nil {
 		t.Fatalf("BuildProject() error = %v", result.Error)
@@ -444,10 +460,13 @@ func main() {
 }
 
 func TestBuildProjectFailsWhenMultipleNestedSSRBundlesExist(t *testing.T) {
+	t.Setenv("GOTOOLCHAIN", "local")
 	tmpDir := t.TempDir()
+	writeGoModWithBifrost(t, tmpDir)
 	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main
+import "github.com/3-lines-studio/bifrost"
 func main() {
-	_ = Page("/", "./pages/home.tsx")
+	_ = bifrost.Page("/", "./pages/home.tsx")
 }`)
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "<title>Home</title>")
 
@@ -465,11 +484,12 @@ func main() {
 		},
 	}
 	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
-	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
+	service.compileRuntimeFn = func(bifrostDir string, frameworks []core.Framework) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
-		MainFile:    filepath.Join(tmpDir, "main.go"),
-		OriginalCwd: tmpDir,
+		MainFile:   filepath.Join(tmpDir, "main.go"),
+		ModuleRoot: tmpDir,
+		AppRoot:    tmpDir,
 	})
 	if result.Error != nil {
 		t.Fatalf("BuildProject() error = %v", result.Error)
@@ -485,6 +505,21 @@ func main() {
 	if strings.Contains(string(data), `"ssr":`) {
 		t.Fatalf("did not expect SSR manifest entry when SSR bundle is missing: %s", string(data))
 	}
+}
+
+func writeGoModWithBifrost(t *testing.T, dir string) {
+	t.Helper()
+	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\n\ngo 1.25\n\nrequire github.com/3-lines-studio/bifrost v0.0.0\n\nreplace github.com/3-lines-studio/bifrost => ./bifrost_stub\n")
+	writeTestFile(t, filepath.Join(dir, "bifrost_stub", "go.mod"), "module github.com/3-lines-studio/bifrost\n\ngo 1.25\n")
+	writeTestFile(t, filepath.Join(dir, "bifrost_stub", "bifrost.go"), `package bifrost
+
+type Route struct{}
+
+func Page(path, component string, opts ...any) Route { return Route{} }
+
+func WithClient() any    { return nil }
+func WithStatic() any    { return nil }
+`)
 }
 
 func chdirForTest(t *testing.T, dir string) func() {
@@ -514,11 +549,14 @@ func writeTestFile(t *testing.T, path string, content string) {
 }
 
 func TestBuildProjectGroupsByFramework(t *testing.T) {
+	t.Setenv("GOTOOLCHAIN", "local")
 	tmpDir := t.TempDir()
+	writeGoModWithBifrost(t, tmpDir)
 	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main
+import "github.com/3-lines-studio/bifrost"
 func main() {
-	_ = Page("/", "./pages/home.tsx")
-	_ = Page("/svelte", "./pages/hello.svelte")
+	_ = bifrost.Page("/", "./pages/home.tsx")
+	_ = bifrost.Page("/svelte", "./pages/hello.svelte")
 }`)
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "export default function Page(){ return <div>Hello</div> }")
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "hello.svelte"), "<script>let { name } = $props();</script><h1>Hello {name}</h1>")
@@ -543,11 +581,12 @@ func main() {
 		},
 	}
 	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
-	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
+	service.compileRuntimeFn = func(bifrostDir string, frameworks []core.Framework) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
-		MainFile:    filepath.Join(tmpDir, "main.go"),
-		OriginalCwd: tmpDir,
+		MainFile:   filepath.Join(tmpDir, "main.go"),
+		ModuleRoot: tmpDir,
+		AppRoot:    tmpDir,
 	})
 	if result.Error != nil {
 		t.Fatalf("BuildProject() error = %v", result.Error)
@@ -641,5 +680,186 @@ func TestDevSSRUsesFrameworkAdapterFromComponentPath(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "svelte/server") {
 		t.Fatalf("expected Svelte SSR entry to import from svelte/server, got:\n%s", string(content))
+	}
+}
+
+func TestBuildProjectDiscoversPagesInImportedPackage(t *testing.T) {
+	t.Setenv("GOTOOLCHAIN", "local")
+	tmpDir := t.TempDir()
+	writeGoModWithBifrost(t, tmpDir)
+	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main
+import "test/internal/routes"
+func main() { routes.Register() }`)
+	writeTestFile(t, filepath.Join(tmpDir, "internal", "routes", "routes.go"), `package routes
+import "github.com/3-lines-studio/bifrost"
+func Register() {
+	_ = bifrost.Page("/", "./pages/home.tsx", bifrost.WithClient())
+}`)
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "<title>Home</title>")
+
+	renderer := &fakeRenderer{
+		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+			result := make(map[string]core.ClientBuildResult, len(entryNames))
+			for _, name := range entryNames {
+				result[name] = core.ClientBuildResult{Script: "/dist/" + name + ".js"}
+			}
+			return result, nil
+		},
+	}
+	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
+	service.compileRuntimeFn = func(bifrostDir string, frameworks []core.Framework) error { return nil }
+
+	result := service.BuildProject(context.Background(), BuildInput{
+		MainFile:   filepath.Join(tmpDir, "main.go"),
+		ModuleRoot: tmpDir,
+		AppRoot:    tmpDir,
+	})
+	if result.Error != nil {
+		t.Fatalf("BuildProject() error = %v", result.Error)
+	}
+	if !result.Success {
+		t.Fatal("expected build success")
+	}
+
+	manifestPath := filepath.Join(tmpDir, ".bifrost", "manifest.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if !strings.Contains(string(data), `"html": "/pages/pages-home-entry.html"`) {
+		t.Fatalf("expected imported page in manifest, got %s", string(data))
+	}
+}
+
+func TestBuildProjectIsolatesBifrostToAppRoot(t *testing.T) {
+	t.Setenv("GOTOOLCHAIN", "local")
+	tmpDir := t.TempDir()
+	writeGoModWithBifrost(t, tmpDir)
+	writeTestFile(t, filepath.Join(tmpDir, "cmd", "app", "main.go"), `package main
+import "github.com/3-lines-studio/bifrost"
+func main() {
+	_ = bifrost.Page("/", "./pages/home.tsx", bifrost.WithClient())
+}`)
+	writeTestFile(t, filepath.Join(tmpDir, "cmd", "app", "pages", "home.tsx"), "<title>Home</title>")
+
+	renderer := &fakeRenderer{
+		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+			result := make(map[string]core.ClientBuildResult, len(entryNames))
+			for _, name := range entryNames {
+				result[name] = core.ClientBuildResult{Script: "/dist/" + name + ".js"}
+			}
+			return result, nil
+		},
+	}
+	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
+	service.compileRuntimeFn = func(bifrostDir string, frameworks []core.Framework) error { return nil }
+
+	result := service.BuildProject(context.Background(), BuildInput{
+		MainFile:   filepath.Join(tmpDir, "cmd", "app", "main.go"),
+		ModuleRoot: tmpDir,
+		AppRoot:    filepath.Join(tmpDir, "cmd", "app"),
+	})
+	if result.Error != nil {
+		t.Fatalf("BuildProject() error = %v", result.Error)
+	}
+	if !result.Success {
+		t.Fatal("expected build success")
+	}
+
+	appBifrost := filepath.Join(tmpDir, "cmd", "app", ".bifrost", "manifest.json")
+	if _, err := os.Stat(appBifrost); err != nil {
+		t.Fatalf("expected .bifrost under app root: %v", err)
+	}
+	moduleBifrost := filepath.Join(tmpDir, ".bifrost", "manifest.json")
+	if _, err := os.Stat(moduleBifrost); !os.IsNotExist(err) {
+		t.Fatalf("expected no .bifrost at module root, got %v", err)
+	}
+}
+
+func TestBuildProjectFailsWhenGoListFails(t *testing.T) {
+	t.Setenv("GOTOOLCHAIN", "local")
+	tmpDir := t.TempDir()
+	// Intentionally omit go.mod so go list fails.
+	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main
+import "github.com/3-lines-studio/bifrost"
+func main() {
+	_ = bifrost.Page("/", "./pages/home.tsx", bifrost.WithClient())
+}`)
+
+	service := NewBuildService(&fakeRenderer{}, nil, &mockCLIOutput{}, nil)
+	result := service.BuildProject(context.Background(), BuildInput{
+		MainFile:   filepath.Join(tmpDir, "main.go"),
+		ModuleRoot: tmpDir,
+		AppRoot:    tmpDir,
+	})
+	if result.Error == nil {
+		t.Fatal("expected error when go list fails")
+	}
+	if !strings.Contains(result.Error.Error(), "go list") {
+		t.Fatalf("expected go list error, got %v", result.Error)
+	}
+}
+
+func TestBuildProjectPassesDiscoveredFrameworksToCompileRuntime(t *testing.T) {
+	t.Setenv("GOTOOLCHAIN", "local")
+	tmpDir := t.TempDir()
+	writeGoModWithBifrost(t, tmpDir)
+	writeTestFile(t, filepath.Join(tmpDir, "main.go"), `package main
+import "github.com/3-lines-studio/bifrost"
+func main() {
+	_ = bifrost.Page("/", "./pages/home.tsx")
+	_ = bifrost.Page("/svelte", "./pages/hello.svelte")
+}`)
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "export default function Page(){ return <div>Hello</div> }")
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "hello.svelte"), "<script>let { name } = $props();</script><h1>Hello {name}</h1>")
+
+	renderer := &fakeRenderer{
+		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+			result := make(map[string]core.ClientBuildResult, len(entryNames))
+			for _, name := range entryNames {
+				result[name] = core.ClientBuildResult{Script: "/dist/" + name + ".js"}
+			}
+			return result, nil
+		},
+		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
+			for _, entryPath := range entrypoints {
+				name := strings.TrimSuffix(filepath.Base(entryPath), filepath.Ext(entryPath))
+				writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
+			}
+			return nil
+		},
+	}
+
+	var capturedFrameworks []core.Framework
+	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
+	service.compileRuntimeFn = func(bifrostDir string, frameworks []core.Framework) error {
+		capturedFrameworks = append(capturedFrameworks, frameworks...)
+		return nil
+	}
+
+	result := service.BuildProject(context.Background(), BuildInput{
+		MainFile:   filepath.Join(tmpDir, "main.go"),
+		ModuleRoot: tmpDir,
+		AppRoot:    tmpDir,
+	})
+	if result.Error != nil {
+		t.Fatalf("BuildProject() error = %v", result.Error)
+	}
+	if !result.Success {
+		t.Fatal("expected build success")
+	}
+
+	if len(capturedFrameworks) != 2 {
+		t.Fatalf("expected 2 frameworks passed to compile runtime, got %v", capturedFrameworks)
+	}
+	seen := make(map[core.Framework]struct{})
+	for _, fw := range capturedFrameworks {
+		seen[fw] = struct{}{}
+	}
+	if _, ok := seen[core.FrameworkReact]; !ok {
+		t.Fatalf("expected react framework in compile runtime call, got %v", capturedFrameworks)
+	}
+	if _, ok := seen[core.FrameworkSvelte]; !ok {
+		t.Fatalf("expected svelte framework in compile runtime call, got %v", capturedFrameworks)
 	}
 }

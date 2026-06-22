@@ -54,11 +54,11 @@ func (a *SvelteAdapter) ClientEntryTemplate(mode core.PageMode) string {
 }
 
 func (a *SvelteAdapter) DevRendererSource() string {
-	return process.RuntimeSource(core.ModeDev)
+	return process.RuntimeSource(core.ModeDev, core.FrameworkSvelte)
 }
 
 func (a *SvelteAdapter) ProdRendererSource() string {
-	return process.RuntimeSource(core.ModeProd)
+	return process.RuntimeSource(core.ModeProd, core.FrameworkSvelte)
 }
 
 func (a *SvelteAdapter) BuildPlugins() []string {

@@ -170,5 +170,3 @@ func TestPageConfigOptions(t *testing.T) {
 		}
 	})
 }
-
-

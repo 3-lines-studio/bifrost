@@ -6,14 +6,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
+	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *core.Manifest, mainFile string) error {
+func (s *BuildService) runExportMode(moduleRoot, appRoot, bifrostDir string, manifest *core.Manifest, mainFile string) error {
 	binaryPath := filepath.Join(bifrostDir, "temp-app")
-	cmd := exec.Command("go", "build", "-o", binaryPath, mainFile)
-	cmd.Dir = originalCwd
+	if runtime.GOOS == "windows" {
+		binaryPath += ".exe"
+	}
+	cmd := exec.Command("go", "build", "-o", binaryPath, filepath.Dir(mainFile))
+	cmd.Dir = moduleRoot
 	cmd.Env = append(os.Environ(),
 		"BIFROST_EXPORT=1",
 		"BIFROST_EXPORT_DIR="+bifrostDir,
@@ -31,7 +36,7 @@ func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *c
 	defer func() { _ = os.Remove(binaryPath) }()
 
 	exportCmd := exec.Command(binaryPath)
-	exportCmd.Dir = originalCwd
+	exportCmd.Dir = appRoot
 	exportCmd.Env = append(os.Environ(),
 		"BIFROST_EXPORT=1",
 		"BIFROST_EXPORT_DIR="+bifrostDir,
@@ -68,14 +73,14 @@ func (s *BuildService) runExportMode(originalCwd, bifrostDir string, manifest *c
 	return nil
 }
 
-func (s *BuildService) compileEmbeddedRuntime(bifrostDir string) error {
+func (s *BuildService) compileEmbeddedRuntime(bifrostDir string, frameworks []core.Framework) error {
 	runtimeDir := filepath.Join(bifrostDir, "runtime")
 	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
 		return fmt.Errorf("failed to create runtime dir: %w", err)
 	}
 
 	tempSourcePath := filepath.Join(runtimeDir, "renderer.ts")
-	sourceContent := s.adapter.ProdRendererSource()
+	sourceContent := framework.RuntimeSource(core.ModeProd, frameworks...)
 
 	if err := os.WriteFile(tempSourcePath, []byte(sourceContent), 0644); err != nil {
 		return fmt.Errorf("failed to write temp source: %w", err)

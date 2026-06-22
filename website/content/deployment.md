@@ -9,7 +9,7 @@ order: 5
 The build command prepares all frontend assets for production:
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go
+bifrost build ./main.go
 ```
 
 The build pipeline:
@@ -70,7 +70,7 @@ log.Fatal(http.ListenAndServe(":8080", app.Handler()))
 If the `.bifrost` directory is missing or corrupted:
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest doctor .
+bifrost doctor .
 ```
 
 This repairs the build directory without scaffolding missing app files.

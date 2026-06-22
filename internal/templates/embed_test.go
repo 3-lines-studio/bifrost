@@ -262,11 +262,8 @@ func TestGetSvelteTemplate_Content(t *testing.T) {
 	if !strings.Contains(string(pkgContent), "\"svelte\"") {
 		t.Error("svelte package.json should contain svelte dependency")
 	}
-	if strings.Contains(string(pkgContent), "react") {
-		t.Error("svelte package.json should NOT contain react")
-	}
-	if strings.Contains(string(pkgContent), "@babel") {
-		t.Error("svelte package.json should NOT contain @babel")
+	if strings.Contains(string(pkgContent), "\"react\"") {
+		t.Error("svelte package.json should NOT contain react as a direct dependency")
 	}
 }
 

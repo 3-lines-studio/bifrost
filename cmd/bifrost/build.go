@@ -126,8 +126,9 @@ func runBuild(args []string) {
 
 	projectDir := filepath.Dir(mainFileAbs)
 	goModRoot := findGoModRoot(projectDir)
+	appRoot := projectDir
 
-	if err := os.Chdir(goModRoot); err != nil {
+	if err := os.Chdir(appRoot); err != nil {
 		output := cli.NewOutput()
 		output.PrintHeader("Bifrost Build")
 		output.PrintError("Failed to change to project directory: %v", err)
@@ -138,7 +139,7 @@ func runBuild(args []string) {
 	output := cli.NewOutput()
 	adapter := getAdapter(fw)
 
-	runtime, err := process.NewRenderer(core.ModeDev, adapter.DevRendererSource(), "BIFROST_PROD=1")
+	runtime, err := process.NewRenderer(core.ModeDev, framework.RuntimeSource(core.ModeDev, core.FrameworkReact, core.FrameworkSvelte), "BIFROST_PROD=1")
 	if err != nil {
 		output.PrintHeader("Bifrost Build")
 		output.PrintError("Failed to initialize build engine: %v", err)
@@ -146,11 +147,18 @@ func runBuild(args []string) {
 	}
 	defer func() { _ = runtime.Stop() }()
 
+	if err := os.Chdir(goModRoot); err != nil {
+		output.PrintHeader("Bifrost Build")
+		output.PrintError("Failed to change to module root: %v", err)
+		os.Exit(1)
+	}
+
 	buildService := usecase.NewBuildService(runtime, fsAdapter, output, adapter)
 
 	input := usecase.BuildInput{
-		MainFile:    mainFileAbs,
-		OriginalCwd: goModRoot,
+		MainFile:   mainFileAbs,
+		ModuleRoot: goModRoot,
+		AppRoot:    filepath.Dir(mainFileAbs),
 	}
 
 	result := buildService.BuildProject(context.Background(), input)
@@ -169,7 +177,7 @@ func runBuild(args []string) {
 			output.PrintError("Failed to create output directory: %v", err)
 			os.Exit(1)
 		}
-		goBuild := exec.Command("go", "build", "-o", goBuildOutputAbs, mainFileAbs)
+		goBuild := exec.Command("go", "build", "-o", goBuildOutputAbs, filepath.Dir(mainFileAbs))
 		goBuild.Dir = goModRoot
 		goBuild.Stdout = os.Stdout
 		goBuild.Stderr = os.Stderr

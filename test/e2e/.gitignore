@@ -1,0 +1,3 @@
+# Build artifacts copied from example/cmd/full for embed.FS
+.bifrost/
+public/

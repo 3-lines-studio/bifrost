@@ -73,9 +73,9 @@ type managedChild struct {
 	stopOnce sync.Once
 }
 
-func startManagedChild(goModRoot, binPath string) *managedChild {
+func startManagedChild(cwd, binPath string) *managedChild {
 	cmd := exec.Command(binPath)
-	cmd.Dir = goModRoot
+	cmd.Dir = cwd
 	cmd.Env = append(os.Environ(), "BIFROST_DEV=1")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -142,11 +142,12 @@ func runDev(args []string) {
 	}
 
 	goModRoot := findGoModRoot(filepath.Dir(mainFileAbs))
+	appRoot := filepath.Dir(mainFileAbs)
 
 	output := cli.NewOutput()
 	output.PrintHeader("Bifrost Dev")
 
-	bifrostDir := filepath.Join(goModRoot, ".bifrost")
+	bifrostDir := filepath.Join(appRoot, ".bifrost")
 	fsAdapter := fs.NewOSFileSystem()
 	if err := fsAdapter.MkdirAll(bifrostDir, 0755); err != nil {
 		output.PrintError("Failed to create .bifrost directory: %v", err)
@@ -157,7 +158,7 @@ func runDev(args []string) {
 		_ = fsAdapter.WriteFile(gitkeep, []byte("# This file ensures .bifrost directory exists for go:embed\n"), 0644)
 	}
 
-	tmpDir := filepath.Join(goModRoot, "tmp")
+	tmpDir := filepath.Join(appRoot, "tmp")
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		output.PrintError("Failed to create tmp directory: %v", err)
 		os.Exit(1)
@@ -172,7 +173,7 @@ func runDev(args []string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mc := startManagedChild(goModRoot, binPath)
+	mc := startManagedChild(appRoot, binPath)
 	if mc == nil {
 		output.PrintError("Failed to start app process")
 		os.Exit(1)
@@ -242,7 +243,7 @@ func runDev(args []string) {
 			if mc != nil {
 				mc.stop()
 			}
-			mc = startManagedChild(goModRoot, binPath)
+			mc = startManagedChild(appRoot, binPath)
 			if mc == nil {
 				output.PrintError("Failed to start app after rebuild")
 			} else {
@@ -266,7 +267,7 @@ func runDev(args []string) {
 
 func goBuild(goModRoot, mainFile, binPath string) error {
 	tmpBin := binPath + ".new"
-	cmd := exec.Command("go", "build", "-o", tmpBin, mainFile)
+	cmd := exec.Command("go", "build", "-o", tmpBin, filepath.Dir(mainFile))
 	cmd.Dir = goModRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

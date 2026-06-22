@@ -15,15 +15,16 @@ Server-side rendering for React and Svelte pages from Go: register routes, embed
 
 ```bash
 go get github.com/3-lines-studio/bifrost
+go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest
 ```
 
 ## New project
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init myapp
+bifrost init myapp
 ```
 
-Templates: `minimal` (default), `spa`, `svelte` — e.g. `go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest init --template spa myapp`.
+Templates: `minimal` (default), `spa`, `svelte` — e.g. `bifrost init --template spa myapp`.
 
 ## Development
 
@@ -36,10 +37,10 @@ Hot reload on `.go` file changes with reverse proxy on `:3000` → `:8080`. Fron
 ## Production build
 
 1. In your `main` package, embed the build tree: `//go:embed all:.bifrost`
-2. Generate assets (from your module root, pointing at the same `main` you will build):
+2. Generate assets (output goes to `dir(main.go)/.bifrost` — the app root, same directory as your main package):
 
    ```bash
-   go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go
+   bifrost build ./main.go
    ```
 
 3. `go build` your app and run it **without** `BIFROST_DEV=1`.
@@ -51,7 +52,7 @@ Hot reload on `.go` file changes with reverse proxy on `:3000` → `:8080`. Fron
 If `.bifrost` is missing for `go:embed`, repair the placeholder tree:
 
 ```bash
-go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest doctor .
+bifrost doctor .
 ```
 
 ## Documentation

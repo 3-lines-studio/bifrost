@@ -1,4 +1,5 @@
 <script lang="ts">
+  import "../style.css";
   let { message }: { message: string } = $props();
 </script>
 
@@ -7,7 +8,7 @@
   <meta name="description" content="Bifrost app" />
 </svelte:head>
 
-<div style="padding: 2rem; font-family: system-ui, sans-serif;">
-  <h1>{message}</h1>
-  <p>Your Bifrost app is running!</p>
+<div class="flex min-h-screen flex-col items-center justify-center gap-2">
+  <h1 class="text-3xl font-bold">{message}</h1>
+  <p class="text-gray-600">Your Bifrost app is running!</p>
 </div>

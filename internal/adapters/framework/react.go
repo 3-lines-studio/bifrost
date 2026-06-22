@@ -8,6 +8,10 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
+func RuntimeSource(mode core.Mode, frameworks ...core.Framework) string {
+	return process.RuntimeSource(mode, frameworks...)
+}
+
 var (
 	//go:embed react_ssr.txt
 	reactSSRTemplate string
@@ -76,11 +80,11 @@ func (a *ReactAdapter) ClientEntryTemplate(mode core.PageMode) string {
 }
 
 func (a *ReactAdapter) DevRendererSource() string {
-	return process.RuntimeSource(core.ModeDev)
+	return process.RuntimeSource(core.ModeDev, core.FrameworkReact)
 }
 
 func (a *ReactAdapter) ProdRendererSource() string {
-	return process.RuntimeSource(core.ModeProd)
+	return process.RuntimeSource(core.ModeProd, core.FrameworkReact)
 }
 
 func (a *ReactAdapter) BuildPlugins() []string {

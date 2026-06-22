@@ -11,8 +11,9 @@ RUN bun install --frozen-lockfile
 
 COPY go.mod go.sum ./
 RUN go mod download
+RUN go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest
 COPY . .
-RUN go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest build ./main.go
+RUN bifrost build ./main.go
 RUN CGO_ENABLED=0 GOOS=linux go build -o app main.go
 
 FROM debian:trixie-slim

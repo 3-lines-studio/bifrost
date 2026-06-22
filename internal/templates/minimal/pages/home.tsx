@@ -1,3 +1,5 @@
+import "../style.css";
+
 export function Head({ message }: { message: string }) {
   return (
     <>
@@ -9,9 +11,9 @@ export function Head({ message }: { message: string }) {
 
 export function Page({ message }: { message: string }) {
   return (
-    <div style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
-      <h1>{message}</h1>
-      <p>Your Bifrost app is running!</p>
+    <div className="flex min-h-screen flex-col items-center justify-center gap-2">
+      <h1 className="text-3xl font-bold">{message}</h1>
+      <p className="text-gray-600">Your Bifrost app is running!</p>
     </div>
   );
 }

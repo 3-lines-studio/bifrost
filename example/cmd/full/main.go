@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/3-lines-studio/bifrost"
-	"github.com/3-lines-studio/bifrost/example"
 )
 
 // AuthRequiredError implements bifrost.RedirectError for authentication redirects
@@ -171,10 +170,10 @@ func main() {
 	}
 
 	// Mode 1: Simple Handler (default)
-	app := bifrost.New(example.BifrostFS, routes...)
+	app := bifrost.New(BifrostFS, routes...)
 	defer app.Stop()
 
-	fmt.Println("Try: go run ./cmd/wrap for router integration demo")
+	fmt.Println("Try: go run ./wrap.go for router integration demo")
 
 	log.Fatal(http.ListenAndServe(":8080", app.Handler()))
 }

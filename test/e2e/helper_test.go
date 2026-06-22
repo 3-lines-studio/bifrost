@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/3-lines-studio/bifrost"
-	"github.com/3-lines-studio/bifrost/example"
 	"github.com/gkampitakis/go-snaps/snaps"
 )
 
@@ -27,7 +26,7 @@ func init() {
 	_, filename, _, _ := runtime.Caller(0)
 	testDir := filepath.Dir(filename)
 	repoRoot := filepath.Join(testDir, "..", "..")
-	exampleDir, _ = filepath.Abs(filepath.Join(repoRoot, "example"))
+	exampleDir, _ = filepath.Abs(filepath.Join(repoRoot, "example", "cmd", "full"))
 }
 
 func bunAvailable() bool {
@@ -56,12 +55,14 @@ func newTestServer(t *testing.T, routes []bifrost.Route, devMode bool) *testServ
 
 	if devMode {
 		t.Setenv("BIFROST_DEV", "1")
-		os.Chdir(exampleDir)
+		if err := os.Chdir(exampleDir); err != nil {
+			t.Fatalf("failed to chdir: %v", err)
+		}
 	} else {
 		os.Unsetenv("BIFROST_DEV")
 	}
 
-	app := bifrost.New(example.BifrostFS, routes...)
+	app := bifrost.New(BifrostFS, routes...)
 
 	port := getFreePort(t)
 
@@ -93,12 +94,14 @@ func newTestServerWithWrap(t *testing.T, routes []bifrost.Route, devMode bool) *
 
 	if devMode {
 		t.Setenv("BIFROST_DEV", "1")
-		os.Chdir(exampleDir)
+		if err := os.Chdir(exampleDir); err != nil {
+			t.Fatalf("failed to chdir: %v", err)
+		}
 	} else {
 		os.Unsetenv("BIFROST_DEV")
 	}
 
-	app := bifrost.New(example.BifrostFS, routes...)
+	app := bifrost.New(BifrostFS, routes...)
 
 	port := getFreePort(t)
 
@@ -254,6 +257,9 @@ func normalizeHTML(html string) string {
 
 	// Async stack labels vary between Bun/runtime source shapes.
 	html = strings.ReplaceAll(html, "async handleRender", "handleRender")
+
+	// Stack trace byte sizes vary between runs
+	html = regexp.MustCompile(`\(\d+ bytes\)`).ReplaceAllString(html, "([N] bytes)")
 
 	return html
 }
