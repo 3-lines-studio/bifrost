@@ -126,14 +126,6 @@ func runBuild(args []string) {
 
 	projectDir := filepath.Dir(mainFileAbs)
 	goModRoot := findGoModRoot(projectDir)
-	appRoot := projectDir
-
-	if err := os.Chdir(appRoot); err != nil {
-		output := cli.NewOutput()
-		output.PrintHeader("Bifrost Build")
-		output.PrintError("Failed to change to project directory: %v", err)
-		os.Exit(1)
-	}
 
 	fsAdapter := fs.NewOSFileSystem()
 	output := cli.NewOutput()
@@ -146,12 +138,6 @@ func runBuild(args []string) {
 		os.Exit(1)
 	}
 	defer func() { _ = runtime.Stop() }()
-
-	if err := os.Chdir(goModRoot); err != nil {
-		output.PrintHeader("Bifrost Build")
-		output.PrintError("Failed to change to module root: %v", err)
-		os.Exit(1)
-	}
 
 	buildService := usecase.NewBuildService(runtime, fsAdapter, output, adapter)
 

@@ -110,7 +110,7 @@ func (s *BuildService) newBuildRun(input BuildInput) (*buildRun, error) {
 		page := buildPage{
 			config:           config,
 			entryName:        core.EntryNameForPath(config.ComponentPath),
-			absComponentPath: filepath.Join(input.AppRoot, config.ComponentPath),
+			absComponentPath: resolveComponentPath(input.AppRoot, input.ModuleRoot, config.ComponentPath),
 			modeLabel:        config.Mode.BuildLabel(),
 			framework:        fw,
 			adapter:          framework.ResolveAdapter(fw),
@@ -532,4 +532,12 @@ func (s *BuildService) cleanupEntryFiles(run *buildRun) {
 		}
 	}
 	run.report.EndStep(step, true, "")
+}
+
+func resolveComponentPath(appRoot, moduleRoot, componentPath string) string {
+	resolved := filepath.Join(appRoot, componentPath)
+	if _, err := os.Stat(resolved); err == nil {
+		return resolved
+	}
+	return filepath.Join(moduleRoot, componentPath)
 }
