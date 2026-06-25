@@ -6,6 +6,22 @@ function createSveltePlugin(generate) {
   );
   nodeFs.mkdirSync(cssCacheDir, { recursive: true });
 
+  function hasTsScript(source) {
+    return /<script\s[^>]*\blang="ts"[^>]*>/i.test(source);
+  }
+
+  function findTagClose(source, tagStart) {
+    let inDq = false;
+    let inSq = false;
+    for (let i = tagStart + 1; i < source.length; i++) {
+      const c = source[i];
+      if (c === '"' && !inSq) inDq = !inDq;
+      else if (c === "'" && !inDq) inSq = !inSq;
+      else if (c === ">" && !inDq && !inSq) return i;
+    }
+    return -1;
+  }
+
   return {
     name: "svelte-plugin",
     setup(builder) {
@@ -31,9 +47,34 @@ function createSveltePlugin(generate) {
           return { contents: modResult.js.code, loader: "js" };
         }
 
+        let source = input;
+        if (hasTsScript(input)) {
+          let out = "";
+          let idx = 0;
+          while (idx < source.length) {
+            const tagStart = source.indexOf("<script", idx);
+            if (tagStart === -1) { out += source.slice(idx); break; }
+            out += source.slice(idx, tagStart);
+            const tagEnd = findTagClose(source, tagStart);
+            if (tagEnd === -1) { out += source.slice(tagStart); break; }
+            const tag = source.slice(tagStart, tagEnd + 1);
+            const closeIdx = source.indexOf("</script>", tagEnd + 1);
+            if (closeIdx === -1) { out += source.slice(tagStart); break; }
+            const body = source.slice(tagEnd + 1, closeIdx);
+            if (/\blang="ts"/i.test(tag)) {
+              const transpiled = tsTranspiler.transformSync(body);
+              out += tag + transpiled + "</script>";
+            } else {
+              out += tag + body + "</script>";
+            }
+            idx = closeIdx + 9;
+          }
+          source = out;
+        }
+
         let result;
         try {
-          result = compile(input, { generate, filename: args.path });
+          result = compile(source, { generate, filename: args.path });
         } catch (e) {
           const msg = e.code ? `${e.message} (${e.code})` : e.message;
           const frame = e.frame ? `\n\n${e.frame}` : "";

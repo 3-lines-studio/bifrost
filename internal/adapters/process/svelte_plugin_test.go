@@ -56,6 +56,28 @@ func assertHasRuntimeExports(t *testing.T, code, label string) {
 	}
 }
 
+func svelteGenericsFixture(t *testing.T) (exampleDir, fixture string) {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to get caller path")
+	}
+	root := filepath.Join(filepath.Dir(file), "..", "..", "..")
+	exampleDir = filepath.Join(root, "example", "cmd", "full")
+	fixture = filepath.Join(exampleDir, "pages", "svelte", "generics-ts.svelte")
+	return exampleDir, fixture
+}
+
+func assertNoStrayQuestionMark(t *testing.T, code, label string) {
+	t.Helper()
+	// Svelte 5.56.3's internal TS stripping leaves `?` from optional params,
+	// e.g. `jump?: boolean` → `jump?` which is invalid JS. The pre-transpile
+	// step must strip the `?` entirely (Bun.Transpiler converts to `jump`).
+	if strings.Contains(code, "jump?") {
+		t.Errorf("%s contains stray '?' from optional parameter (TS stripping bug not fixed): %s", label, code)
+	}
+}
+
 func TestSveltePlugin_CompilesSvelteTSModule_SSR(t *testing.T) {
 	skipIfNoBunForPlugin(t)
 
@@ -133,4 +155,60 @@ func TestSveltePlugin_CompilesSvelteTSModule_Client(t *testing.T) {
 	code := string(content)
 	assertNoTypeScriptArtifacts(t, code, "client output")
 	assertHasRuntimeExports(t, code, "client output")
+}
+
+// TestSveltePlugin_GenericsWithGTInQuotes verifies that findTagClose correctly
+// handles `>` inside quoted attribute values (e.g. generics="T extends Record<string, unknown>").
+// This exercises the regex bug fix where the old [^>]* approach would stop at the
+// `>` inside the generics value, breaking tag boundary detection. It also verifies
+// that optional parameters (jump?: boolean) are correctly stripped by pre-transpilation.
+func TestSveltePlugin_GenericsWithGTInQuotes(t *testing.T) {
+	skipIfNoBunForPlugin(t)
+
+	exampleDir, fixture := svelteGenericsFixture(t)
+	cleanup := withExampleCWD(t, exampleDir)
+	defer cleanup()
+
+	outDir := t.TempDir()
+
+	r, err := NewRenderer(core.ModeProd, RuntimeSource(core.ModeProd, core.FrameworkSvelte))
+	if err != nil {
+		t.Fatalf("failed to start renderer: %v", err)
+	}
+	defer func() {
+		if err := r.Stop(); err != nil {
+			t.Errorf("renderer stop failed: %v", err)
+		}
+	}()
+
+	if err := r.BuildSSR([]string{fixture}, outDir, "svelte"); err != nil {
+		t.Fatalf("BuildSSR failed for .svelte with generics attr containing >: %v", err)
+	}
+
+	for _, name := range listDirEntries(t, outDir) {
+		if !strings.HasSuffix(name, ".js") {
+			continue
+		}
+		content, ferr := os.ReadFile(filepath.Join(outDir, name))
+		if ferr != nil {
+			t.Fatalf("failed to read output %s: %v", name, ferr)
+		}
+		code := string(content)
+		assertNoTypeScriptArtifacts(t, code, name)
+		assertNoStrayQuestionMark(t, code, name)
+		break
+	}
+}
+
+func listDirEntries(t *testing.T, dir string) []string {
+	t.Helper()
+	es, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("failed to read outdir: %v", err)
+	}
+	var names []string
+	for _, e := range es {
+		names = append(names, e.Name())
+	}
+	return names
 }

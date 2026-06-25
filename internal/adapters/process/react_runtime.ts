@@ -520,6 +520,7 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
       entrypoints,
       outdir,
       target: buildTarget,
+      ...(fw === "svelte" ? { conditions: ["svelte"] } : {}),
       minify: !isDev,
       splitting: !isSSR,
       naming,
