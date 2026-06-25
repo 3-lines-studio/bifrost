@@ -1,6 +1,0 @@
-import { render as svelteRender } from "svelte/server";
-import Page from "COMPONENT_PATH";
-export async function render(props) {
-	const result = svelteRender(Page, { props });
-	return { html: result.body, head: result.head };
-}

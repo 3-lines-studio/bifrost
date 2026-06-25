@@ -98,12 +98,11 @@ func printInitUsage() {
 	fmt.Println("Usage: bifrost init [options] <project-dir>")
 	fmt.Println()
 	fmt.Println("Options:")
-	fmt.Println("  --template <name>  Template to use (minimal, spa, svelte). Default: minimal")
+	fmt.Println("  --template <name>  Template to use (minimal, spa). Default: minimal")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  bifrost init myapp")
 	fmt.Println("  bifrost init --template spa myapp")
-	fmt.Println("  bifrost init --template svelte myapp")
 	fmt.Println()
 	fmt.Println("To repair an existing project, use: bifrost doctor <dir>")
 }

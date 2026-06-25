@@ -31,9 +31,6 @@ var (
 
 	//go:embed react_compiler_plugin.ts
 	reactCompilerPluginSource string
-
-	//go:embed svelte_plugin.ts
-	sveltePluginSource string
 )
 
 func RuntimeSource(mode core.Mode, frameworks ...core.Framework) string {
@@ -41,26 +38,9 @@ func RuntimeSource(mode core.Mode, frameworks ...core.Framework) string {
 	if mode == core.ModeProd {
 		tailwindPlugin = "undefined"
 	}
-	hasReact := false
-	hasSvelte := false
-	for _, fw := range frameworks {
-		if fw == core.FrameworkSvelte {
-			hasSvelte = true
-		} else {
-			hasReact = true
-		}
-	}
-	reactCompilerPlugin := "undefined"
-	sveltePlugin := "undefined"
-	if hasReact {
-		reactCompilerPlugin = strings.TrimSpace(reactCompilerPluginSource)
-	}
-	if hasSvelte {
-		sveltePlugin = strings.TrimSpace(sveltePluginSource)
-	}
+	reactCompilerPlugin := strings.TrimSpace(reactCompilerPluginSource)
 	src := strings.ReplaceAll(ReactRuntimeSource, "BIFROST_TAILWIND_PLUGIN", tailwindPlugin)
 	src = strings.ReplaceAll(src, "BIFROST_REACT_COMPILER_PLUGIN", reactCompilerPlugin)
-	src = strings.ReplaceAll(src, "BIFROST_SVELTE_PLUGIN", sveltePlugin)
 	return src
 }
 

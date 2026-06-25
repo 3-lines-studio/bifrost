@@ -104,12 +104,12 @@ func TestParseFlags_GoBuildBeforeMainFile(t *testing.T) {
 }
 
 func TestParseFlags_FrameworkAndGoBuild(t *testing.T) {
-	mf, fw, gb, _ := parseFlags([]string{"./main.go", "-f", "svelte", "--go-build"})
+	mf, fw, gb, _ := parseFlags([]string{"./main.go", "-f", "react", "--go-build"})
 	if mf != "./main.go" {
 		t.Errorf("expected mainFile './main.go', got '%s'", mf)
 	}
-	if fw.String() != "svelte" {
-		t.Errorf("expected framework svelte, got '%s'", fw.String())
+	if fw.String() != "react" {
+		t.Errorf("expected framework react, got '%s'", fw.String())
 	}
 	if gb != "./tmp/app" {
 		t.Errorf("expected goBuildOutput './tmp/app', got '%s'", gb)

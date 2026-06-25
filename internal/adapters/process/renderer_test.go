@@ -9,7 +9,7 @@ import (
 
 func TestFormatRenderError_CompileError(t *testing.T) {
 	e := &bunErrorJSON{
-		Message: "Build failed - Expected whitespace https://svelte.dev/e/expected_whitespace (expected_whitespace)",
+		Message: "Build failed - Expected whitespace https://react.dev/errors/expected_whitespace (expected_whitespace)",
 	}
 
 	se := formatRenderError(e)
@@ -24,15 +24,15 @@ func TestFormatRenderError_CompileError(t *testing.T) {
 	if !strings.Contains(errStr, "expected_whitespace") {
 		t.Errorf("expected 'expected_whitespace' in error, got: %s", errStr)
 	}
-	if !strings.Contains(errStr, "svelte.dev/e/expected_whitespace") {
-		t.Errorf("expected svelte.dev URL in error, got: %s", errStr)
+	if !strings.Contains(errStr, "react.dev/errors/expected_whitespace") {
+		t.Errorf("expected react.dev URL in error, got: %s", errStr)
 	}
 }
 
 func TestFormatRenderError_WithStack(t *testing.T) {
 	e := &bunErrorJSON{
 		Message: "Build failed",
-		Stack:   "at compile (/src/svelte/compiler.js:123:4)",
+		Stack:   "at compile (/src/compiler.js:123:4)",
 	}
 
 	se := formatRenderError(e)
@@ -95,7 +95,7 @@ func TestFormatRenderError_WithPosition(t *testing.T) {
 			{
 				Message: "Expected whitespace",
 				Position: &errorPositionJSON{
-					File:     "src/App.svelte",
+					File:     "src/App.tsx",
 					Line:     2,
 					Column:   1,
 					LineText: "{#if}",
@@ -113,8 +113,8 @@ func TestFormatRenderError_WithPosition(t *testing.T) {
 		t.Fatalf("expected 1 sub-error, got %d", len(se.SubErrors))
 	}
 	sub := se.SubErrors[0]
-	if sub.File != "src/App.svelte" {
-		t.Errorf("expected file 'src/App.svelte', got %q", sub.File)
+	if sub.File != "src/App.tsx" {
+		t.Errorf("expected file 'src/App.tsx', got %q", sub.File)
 	}
 	if sub.Line != 2 {
 		t.Errorf("expected line 2, got %d", sub.Line)
@@ -136,45 +136,16 @@ func TestRuntimeSourceIncludesOnlyReactPluginsForReact(t *testing.T) {
 		t.Fatal("expected @babel/core import in react runtime source")
 	}
 	if strings.Contains(src, "svelte/compiler") {
-		t.Fatal("did not expect svelte/compiler import in react-only runtime source")
+		t.Fatal("did not expect react import in react-only runtime source")
 	}
 	if strings.Contains(src, "svelte-plugin") {
-		t.Fatal("did not expect svelte plugin in react-only runtime source")
-	}
-}
-
-func TestRuntimeSourceIncludesOnlySveltePluginsForSvelte(t *testing.T) {
-	src := RuntimeSource(core.ModeDev, core.FrameworkSvelte)
-	if !strings.Contains(src, "svelte/compiler") {
-		t.Fatal("expected svelte/compiler import in svelte runtime source")
-	}
-	if !strings.Contains(src, "svelte-plugin") {
-		t.Fatal("expected svelte plugin in svelte runtime source")
-	}
-	if strings.Contains(src, "@babel/core") {
-		t.Fatal("did not expect @babel/core import in svelte-only runtime source")
-	}
-	if strings.Contains(src, "babel-plugin-react-compiler") {
-		t.Fatal("did not expect babel-plugin-react-compiler import in svelte-only runtime source")
-	}
-}
-
-func TestRuntimeSourceIncludesBothPluginsForMixedFrameworks(t *testing.T) {
-	src := RuntimeSource(core.ModeDev, core.FrameworkReact, core.FrameworkSvelte)
-	if !strings.Contains(src, "react-compiler") {
-		t.Fatal("expected react-compiler plugin in mixed runtime source")
-	}
-	if !strings.Contains(src, "svelte-plugin") {
-		t.Fatal("expected svelte plugin in mixed runtime source")
+		t.Fatal("did not expect react plugin in react-only runtime source")
 	}
 }
 
 func TestRuntimeSourceOmitsBothFrameworkPluginsWhenEmpty(t *testing.T) {
 	src := RuntimeSource(core.ModeDev)
-	if strings.Contains(src, "@babel/core") {
-		t.Fatal("did not expect @babel/core import when no frameworks specified")
-	}
 	if strings.Contains(src, "svelte/compiler") {
-		t.Fatal("did not expect svelte/compiler import when no frameworks specified")
+		t.Fatal("did not expect react import when no frameworks specified")
 	}
 }

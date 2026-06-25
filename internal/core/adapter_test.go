@@ -8,8 +8,7 @@ func TestFrameworkString(t *testing.T) {
 		want string
 	}{
 		{FrameworkReact, "react"},
-		{FrameworkSvelte, "svelte"},
-		{Framework(999), "unknown"},
+		{Framework(999), "react"},
 	}
 	for _, tt := range tests {
 		if got := tt.fw.String(); got != tt.want {
@@ -24,7 +23,6 @@ func TestFrameworkFromString(t *testing.T) {
 		want Framework
 	}{
 		{"react", FrameworkReact},
-		{"svelte", FrameworkSvelte},
 		{"", FrameworkReact},
 		{"vue", FrameworkReact},
 	}
@@ -44,7 +42,6 @@ func TestFrameworkFromExtension(t *testing.T) {
 		{".jsx", FrameworkReact},
 		{".ts", FrameworkReact},
 		{".js", FrameworkReact},
-		{".svelte", FrameworkSvelte},
 		{"", FrameworkReact},
 	}
 	for _, tt := range tests {
@@ -61,17 +58,8 @@ func TestFrameworkFromComponentPath(t *testing.T) {
 	}{
 		{"./pages/home.tsx", FrameworkReact},
 		{"./pages/home.tsx?t=123", FrameworkReact},
-		{"./components/header.svelte", FrameworkSvelte},
 		{"/abs/path/page.jsx", FrameworkReact},
 		{"unknown", FrameworkReact},
-		{"file.svelte", FrameworkSvelte},
-		{"file.svelte.ts", FrameworkSvelte},
-		{"file.svelte.js", FrameworkSvelte},
-		{"file.svelte.ts?t=123", FrameworkSvelte},
-		{"file.svelte.js?t=123", FrameworkSvelte},
-		{"file.svelte?t=123", FrameworkSvelte},
-		{"./components/avatar/avatar-context.svelte.ts", FrameworkSvelte},
-		{"/abs/path/foo.svelte.js", FrameworkSvelte},
 		{"", FrameworkReact},
 	}
 	for _, tt := range tests {

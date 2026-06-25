@@ -4,7 +4,7 @@
 
 # Bifrost
 
-Server-side rendering for React and Svelte pages from Go: register routes, embed build output, and serve HTML through `net/http`.
+Server-side rendering for React pages from Go: register routes, embed build output, and serve HTML through `net/http`.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest
 bifrost init myapp
 ```
 
-Templates: `minimal` (default), `spa`, `svelte` — e.g. `bifrost init --template spa myapp`.
+Templates: `minimal` (default), `spa` — e.g. `bifrost init --template spa myapp`.
 
 ## Development
 
@@ -32,7 +32,7 @@ Templates: `minimal` (default), `spa`, `svelte` — e.g. `bifrost init --templat
 bifrost dev ./main.go
 ```
 
-Hot reload on `.go` file changes with reverse proxy on `:3000` → `:8080`. Frontend changes (`.tsx`, `.ts`, `.svelte`, `.css`) are picked up live via Bun per-request re-import.
+Hot reload on `.go` file changes with reverse proxy on `:3000` → `:8080`. Frontend changes (`.tsx`, `.ts`, `.css`) are picked up live via Bun per-request re-import.
 
 ## Production build
 

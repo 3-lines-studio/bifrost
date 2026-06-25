@@ -81,7 +81,7 @@ func (r *Host) setupRuntimeForExport(exportDir string) error {
 	r.ssrTempDir = ssrTempDir
 	r.ssrCleanup = ssrCleanup
 
-	return r.startRendererFromSource(core.ModeProd, framework.RuntimeSource(core.ModeProd, core.FrameworkReact, core.FrameworkSvelte), ssrCleanup)
+	return r.startRendererFromSource(core.ModeProd, framework.RuntimeSource(core.ModeProd, core.FrameworkReact), ssrCleanup)
 }
 
 func (r *Host) initProdMode() (*Host, error) {
@@ -134,7 +134,7 @@ func (r *Host) setupEmbeddedRuntime() error {
 }
 
 func (r *Host) initDevMode() (*Host, error) {
-	if err := r.startRendererFromSource(core.ModeDev, framework.RuntimeSource(core.ModeDev, core.FrameworkReact, core.FrameworkSvelte), nil); err != nil {
+	if err := r.startRendererFromSource(core.ModeDev, framework.RuntimeSource(core.ModeDev, core.FrameworkReact), nil); err != nil {
 		return nil, err
 	}
 	return r, nil

@@ -105,14 +105,6 @@ func main() {
 			return map[string]any{"name": message}, nil
 		})),
 
-		// Svelte Pages
-		bifrost.Page("/svelte", "./pages/svelte/hello.svelte", bifrost.WithLoader(func(r *http.Request) (any, error) {
-			return map[string]any{"name": "Svelte"}, nil
-		})),
-		bifrost.Page("/svelte-client", "./pages/svelte/counter.svelte", bifrost.WithClient()),
-		bifrost.Page("/svelte-static", "./pages/svelte/static.svelte", bifrost.WithStatic()),
-		bifrost.Page("/svelte-error", "./pages/svelte/broken.svelte"),
-
 		// Client-Only Pages
 		bifrost.Page("/client", "./pages/about.tsx", bifrost.WithClient()),
 		bifrost.Page("/client/deep", "./pages/login.tsx", bifrost.WithClient()),

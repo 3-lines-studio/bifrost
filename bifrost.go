@@ -16,8 +16,7 @@ type PageOption = core.PageOption
 type Framework = core.Framework
 
 const (
-	React  = core.FrameworkReact
-	Svelte = core.FrameworkSvelte
+	React = core.FrameworkReact
 )
 
 type Route = core.Route

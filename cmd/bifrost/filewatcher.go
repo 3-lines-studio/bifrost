@@ -27,7 +27,7 @@ func newFileWatcher(root string) *fileWatcher {
 		root:        root,
 		excludeDirs: map[string]bool{"node_modules": true, ".bifrost": true, "tmp": true, ".git": true},
 		goExts:      map[string]bool{".go": true},
-		feExts:      map[string]bool{".tsx": true, ".ts": true, ".svelte": true, ".css": true},
+		feExts:      map[string]bool{".tsx": true, ".ts": true, ".css": true},
 	}
 }
 

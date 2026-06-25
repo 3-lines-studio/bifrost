@@ -124,7 +124,7 @@ export function Page({ name }: { name: string }) {
 
   return (
     <Layout>
-      <div className="max-w-6xl mx-auto px-4 py-8 md:py-12">
+      <div className="max-w-6xl mx-auto px-4 py-8 md:py-12 bg-blue-500/50">
         <div className="text-center mb-12">
           <div className="flex items-center justify-center gap-4 mb-4">
             <Hello name={name} />

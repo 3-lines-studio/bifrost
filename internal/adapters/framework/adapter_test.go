@@ -78,89 +78,9 @@ func TestReactAdapterRuntimeImports(t *testing.T) {
 	}
 }
 
-func TestSvelteAdapterName(t *testing.T) {
-	a := NewSvelteAdapter()
-	if a.Name() != "svelte" {
-		t.Fatalf("expected svelte, got %s", a.Name())
-	}
-}
-
-func TestSvelteAdapterFileExtension(t *testing.T) {
-	a := NewSvelteAdapter()
-	if a.FileExtension() != ".svelte" {
-		t.Fatalf("expected .svelte, got %s", a.FileExtension())
-	}
-}
-
-func TestSvelteAdapterEntryFileExtension(t *testing.T) {
-	a := NewSvelteAdapter()
-	if a.EntryFileExtension() != ".ts" {
-		t.Fatalf("expected .ts, got %s", a.EntryFileExtension())
-	}
-}
-
-func TestSvelteAdapterSSREntryTemplate(t *testing.T) {
-	a := NewSvelteAdapter()
-	tmpl := a.SSREntryTemplate()
-	if !strings.Contains(tmpl, "COMPONENT_PATH") {
-		t.Fatal("expected COMPONENT_PATH placeholder")
-	}
-	if !strings.Contains(tmpl, "svelte/server") {
-		t.Fatal("expected svelte/server import")
-	}
-	if !strings.Contains(tmpl, "export async function render") {
-		t.Fatal("expected render export")
-	}
-}
-
-func TestSvelteAdapterClientEntryTemplates(t *testing.T) {
-	a := NewSvelteAdapter()
-
-	hydration := a.ClientEntryTemplate(core.ModeSSR)
-	if !strings.Contains(hydration, "hydrate") {
-		t.Fatal("expected hydrate in hydration template")
-	}
-	if !strings.Contains(hydration, "__BIFROST_PROPS__") {
-		t.Fatal("expected props hydration in hydration template")
-	}
-
-	clientOnly := a.ClientEntryTemplate(core.ModeClientOnly)
-	if !strings.Contains(clientOnly, "mount") {
-		t.Fatal("expected mount in client-only template")
-	}
-	if !strings.Contains(clientOnly, "target.innerHTML = \"\"") {
-		t.Fatal("expected client-only template to clear existing SSR preview content before mounting")
-	}
-}
-
-func TestSvelteAdapterBuildPlugins(t *testing.T) {
-	a := NewSvelteAdapter()
-	plugins := a.BuildPlugins()
-	if len(plugins) != 1 || plugins[0] != "bun-plugin-tailwind" {
-		t.Fatalf("expected bun-plugin-tailwind, got %v", plugins)
-	}
-}
-
-func TestSvelteAdapterRuntimeImports(t *testing.T) {
-	a := NewSvelteAdapter()
-	imports := a.RuntimeImports()
-	found := make(map[string]bool)
-	for _, imp := range imports {
-		found[imp] = true
-	}
-	for _, want := range []string{"svelte/compiler", "svelte/server", "svelte"} {
-		if !found[want] {
-			t.Fatalf("expected %s in runtime imports", want)
-		}
-	}
-}
-
 func TestResolveAdapter(t *testing.T) {
 	if a := ResolveAdapter(core.FrameworkReact); a.Name() != "react" {
 		t.Fatal("expected react adapter")
-	}
-	if a := ResolveAdapter(core.FrameworkSvelte); a.Name() != "svelte" {
-		t.Fatal("expected svelte adapter")
 	}
 	if a := ResolveAdapter(core.Framework(999)); a.Name() != "react" {
 		t.Fatal("expected react adapter for unknown framework")
@@ -174,14 +94,8 @@ func TestResolveAdapterForPath(t *testing.T) {
 	}{
 		{"./pages/home.tsx", "react"},
 		{"./pages/home.tsx?t=123", "react"},
-		{"./components/header.svelte", "svelte"},
 		{"/abs/path/page.jsx", "react"},
 		{"unknown", "react"},
-		{"file.svelte", "svelte"},
-		{"file.svelte.ts", "svelte"},
-		{"file.svelte.js", "svelte"},
-		{"file.svelte.ts?t=123", "svelte"},
-		{"./components/avatar/avatar-context.svelte.ts", "svelte"},
 		{"", "react"},
 	}
 	for _, tt := range tests {
@@ -200,7 +114,7 @@ func TestDefaultAdapter(t *testing.T) {
 }
 
 func TestDevRendererSourceContainsPlugins(t *testing.T) {
-	for _, fw := range []core.Framework{core.FrameworkReact, core.FrameworkSvelte} {
+	for _, fw := range []core.Framework{core.FrameworkReact} {
 		a := ResolveAdapter(fw)
 		src := a.DevRendererSource()
 		if !strings.Contains(src, "Bun.serve") {
@@ -213,7 +127,7 @@ func TestDevRendererSourceContainsPlugins(t *testing.T) {
 }
 
 func TestProdRendererSourceNoTailwindPlugin(t *testing.T) {
-	for _, fw := range []core.Framework{core.FrameworkReact, core.FrameworkSvelte} {
+	for _, fw := range []core.Framework{core.FrameworkReact} {
 		a := ResolveAdapter(fw)
 		src := a.ProdRendererSource()
 		if strings.Contains(src, "bun-plugin-tailwind") {

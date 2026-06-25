@@ -189,7 +189,7 @@ func TestInitProject_WithModuleNameSubstitution(t *testing.T) {
 }
 
 func TestInitProject_AllTemplates(t *testing.T) {
-	templates := []string{"minimal", "spa", "svelte"}
+	templates := []string{"minimal", "spa"}
 
 	for _, tmpl := range templates {
 		t.Run(tmpl, func(t *testing.T) {

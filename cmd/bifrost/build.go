@@ -92,7 +92,7 @@ func printBuildUsage() {
 	fmt.Println("  bifrost build ./main.go --go-build=./myapp")
 	fmt.Println()
 	fmt.Println("Flags:")
-	fmt.Println("  -f, --framework <name>  Framework to use (react, svelte)")
+	fmt.Println("  -f, --framework <name>  Framework to use (react)")
 	fmt.Println("  --go-build[=path]       Run go build after asset build (default: ./tmp/app)")
 }
 
@@ -139,7 +139,7 @@ func runBuild(args []string) {
 	output := cli.NewOutput()
 	adapter := getAdapter(fw)
 
-	runtime, err := process.NewRenderer(core.ModeDev, framework.RuntimeSource(core.ModeDev, core.FrameworkReact, core.FrameworkSvelte), "BIFROST_PROD=1")
+	runtime, err := process.NewRenderer(core.ModeDev, framework.RuntimeSource(core.ModeDev, core.FrameworkReact), "BIFROST_PROD=1")
 	if err != nil {
 		output.PrintHeader("Bifrost Build")
 		output.PrintError("Failed to initialize build engine: %v", err)

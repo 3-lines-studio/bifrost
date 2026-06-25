@@ -1,10 +1,10 @@
 # Bifrost Documentation
 
-Server-side rendering for React and Svelte components in Go.
+Server-side rendering for React components in Go.
 
 ## Overview
 
-Bifrost bridges Go backends with React and Svelte frontends using Bun for SSR. It features a clean architecture with strict separation between development and production modes.
+Bifrost bridges Go backends with React frontends using Bun for SSR. It features a clean architecture with strict separation between development and production modes.
 
 ## Installation
 
@@ -30,7 +30,7 @@ Bifrost is organized into focused internal packages:
 - `internal/adapters/process` — Bun renderer process and bundle IPC
 - `internal/adapters/runtime` — Renderer host lifecycle and embedded runtime
 - `internal/adapters/fs` — Filesystem and embed abstractions
-- `internal/adapters/framework` — Framework entry templates (e.g. React and Svelte)
+- `internal/adapters/framework` — Framework entry templates (e.g. React)
 - `internal/adapters/cli` — Terminal output and build reports
 - Root `bifrost` package — Public `App` API (`New`, `Page`, `Wrap`, …)
 
@@ -39,7 +39,7 @@ Bifrost is organized into focused internal packages:
 TypeScript is intentionally minimal in Bifrost.
 
 - TypeScript is only for Bun-specific capabilities that Go does not provide directly:
-  - rendering React and Svelte components inside the Bun runtime
+  - rendering React components inside the Bun runtime
   - invoking `Bun.build`
   - serializing raw render/build results back to Go
 - Everything else belongs in Go:
@@ -90,42 +90,7 @@ func main() {
 }
 ```
 
-### Svelte
-
-```go
-package main
-
-import (
-    "embed"
-    "log"
-    "net/http"
-
-    "github.com/3-lines-studio/bifrost"
-)
-
-//go:embed all:.bifrost
-var bifrostFS embed.FS
-
-func main() {
-    app := bifrost.New(
-        bifrostFS,
-        bifrost.Page("/", "./pages/home.svelte",
-            bifrost.WithLoader(func(req *http.Request) (any, error) {
-                return map[string]any{
-                    "name": "World",
-                }, nil
-            }),
-        ),
-        bifrost.Page("/about", "./pages/about.svelte", bifrost.WithClient()),
-    )
-    defer app.Stop()
-
-    api := http.NewServeMux()
-    log.Fatal(http.ListenAndServe(":8080", app.Wrap(api)))
-}
-```
-
-## Mode Detection
+### Mode Detection
 
 Bifrost determines mode by checking the `BIFROST_DEV` environment variable:
 
@@ -179,7 +144,7 @@ Strict validation causes panic on:
 
 ## Framework Support
 
-Bifrost supports React and Svelte with the same Go API surface.
+Bifrost supports React.
 
 ### React
 
@@ -207,37 +172,7 @@ export function Page({ name }: { name: string }) {
 }
 ```
 
-### Svelte
-
-Svelte is auto-detected from `.svelte` file extensions. Use `bifrost.New()` — no special constructor needed:
-
-```go
-app := bifrost.New(bifrostFS,
-    bifrost.Page("/", "./pages/home.svelte",
-        bifrost.WithLoader(func(req *http.Request) (any, error) {
-            return map[string]any{"name": "World"}, nil
-        }),
-    ),
-)
-```
-
-Svelte 5 components use `$props()` and `<svelte:head>`:
-
-```svelte
-<script lang="ts">
-  let { name }: { name: string } = $props();
-</script>
-
-<svelte:head>
-  <title>{name}</title>
-</svelte:head>
-
-<h1>{name}</h1>
-```
-
-**Scoped styles** work automatically. Svelte adds `svelte-*` class hashes to elements and CSS selectors, and Bifrost's critical CSS extraction correctly identifies which scoped rules apply to each page.
-
-**Auto-detection:** Pages with `.svelte` path suffixes use the Svelte adapters; `.tsx` paths use React. Mixed-framework apps are supported within the same Go process.
+**Auto-detection:** Pages use React adapters. Only `.tsx` components are supported.
 
 ## API Reference
 
@@ -251,7 +186,7 @@ func NewWithFramework(assetsFS embed.FS, fw Framework, pages ...Route) *App
 func NewWithOptions(assetsFS embed.FS, opts []ConfigOption, pages ...Route) *App
 ```
 
-Creates a new Bifrost application. Must be stopped with `app.Stop()` when done. `New` defaults to React but auto-detects Svelte from `.svelte` component paths. Use `NewWithFramework` when selecting a non-default framework constant (e.g. `bifrost.React` or `bifrost.Svelte`). Use `NewWithOptions` for app-wide settings such as `WithDefaultHTMLLang` or `WithFramework` inside the options slice.
+Creates a new Bifrost application. Must be stopped with `app.Stop()` when done. `New` defaults to React. Use `NewWithFramework` when selecting a non-default framework constant (e.g. `bifrost.React`). Use `NewWithOptions` for app-wide settings such as `WithDefaultHTMLLang` or `WithFramework` inside the options slice.
 
 **Parameters:**
 
@@ -264,12 +199,12 @@ Creates a new Bifrost application. Must be stopped with `app.Stop()` when done. 
 func Page(pattern string, componentPath string, opts ...PageOption) Route
 ```
 
-Creates a route configuration for a React or Svelte component.
+Creates a route configuration for a React component.
 
 **Parameters:**
 
 - `pattern` - URL pattern (e.g., "/", "/about", "/blog/*")
-- `componentPath` - Path to the component file (e.g., "./pages/home.tsx" or "./pages/home.svelte")
+- `componentPath` - Path to the component file (e.g., "./pages/home.tsx")
 - `opts` - Page options (variadic, typed)
 
 **Page Options:**
@@ -356,7 +291,6 @@ Bifrost routes:
   /{$}                ./pages/home.tsx      ssr
   /about              ./pages/about.tsx     client
   /product            ./pages/product.tsx   static
-  /shop               ./pages/shop.svelte   ssr
 ```
 
 The table prints only when stdout is a terminal. Control it with environment variables:
@@ -370,7 +304,7 @@ The table prints only when stdout is a terminal. Control it with environment var
 
 ### SSR Pages (Server-Side Rendering)
 
-Render React or Svelte components on each request with dynamic data:
+Render React components on each request with dynamic data:
 
 ```go
 bifrost.Page("/user/{id}", "./pages/user.tsx", 
@@ -397,7 +331,6 @@ For SSR pages, Bifrost streams the HTML response in two phases: the document hea
 **Streaming behavior by framework:**
 
 - **React:** SSR pages use `renderToReadableStream` for the page body; Bun forwards byte chunks after the usual head flush. **Suspense** (or other deferred server work) makes progressive HTML visible; synchronous trees still work but gain little. If streaming fails, Bifrost falls back to `renderToString` for that request.
-- **Svelte:** SSR pages use `render` from `svelte/server`. The render is synchronous and produces the full HTML string.
 
 Errors that occur after bytes have been sent cannot be turned into an HTTP 500.
 
@@ -628,13 +561,12 @@ bifrost init myapp
 This scaffolds a complete working project with all required files.
 
 Options:
-- `--template <name>`: Choose from `minimal` (default), `spa`, `svelte`
+- `--template <name>`: Choose from `minimal` (default), `spa`
 
 Examples:
 ```bash
 bifrost init myapp
 bifrost init --template spa myspa
-bifrost init --template svelte mysvelteapp
 ```
 
 ### Repair .bifrost Directory

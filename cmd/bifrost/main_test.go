@@ -143,8 +143,8 @@ func TestCLI_BuildHelp(t *testing.T) {
 			if !strings.Contains(string(out), "bifrost build") {
 				t.Errorf("expected build usage, got:\n%s", out)
 			}
-			if !strings.Contains(string(out), "svelte") {
-				t.Errorf("expected framework list to include svelte, got:\n%s", out)
+			if !strings.Contains(string(out), "(react)") {
+				t.Errorf("expected framework list to include (react), got:\n%s", out)
 			}
 			if !strings.Contains(string(out), "--go-build") {
 				t.Errorf("expected --go-build flag in build usage, got:\n%s", out)
@@ -210,37 +210,5 @@ func TestCLI_InitScaffoldsMinimalProject(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("expected scaffolded file %s to exist: %v", path, err)
 		}
-	}
-}
-
-func TestCLI_InitScaffoldsSvelteProject(t *testing.T) {
-	dir := t.TempDir()
-	cmd := runCLI(t, "init", "--template", "svelte", dir)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("init failed: %v\n%s", err, out)
-	}
-
-	expected := []string{
-		filepath.Join(dir, "main.go"),
-		filepath.Join(dir, "pages", "home.svelte"),
-		filepath.Join(dir, "package.json"),
-		filepath.Join(dir, "tsconfig.json"),
-	}
-	for _, path := range expected {
-		if _, err := os.Stat(path); err != nil {
-			t.Errorf("expected scaffolded file %s to exist: %v", path, err)
-		}
-	}
-
-	pkg, err := os.ReadFile(filepath.Join(dir, "package.json"))
-	if err != nil {
-		t.Fatalf("failed to read package.json: %v", err)
-	}
-	if !strings.Contains(string(pkg), `"svelte"`) {
-		t.Errorf("expected svelte package.json to contain svelte dependency")
-	}
-	if strings.Contains(string(pkg), `"react"`) {
-		t.Errorf("expected svelte package.json to NOT contain react")
 	}
 }

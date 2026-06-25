@@ -45,13 +45,13 @@ func TestComputeNextSteps_BuildErrorWithFileLine(t *testing.T) {
 	se := &core.StructuredError{
 		ErrorType: "Build Error",
 		Message:   "Build failed",
-		File:      "src/App.svelte",
+		File:      "src/App.tsx",
 		Line:      2,
 		Column:    1,
 		SubErrors: []core.StructuredError{
 			{
 				Message: "Expected whitespace",
-				File:    "src/App.svelte",
+				File:    "src/App.tsx",
 				Line:    2,
 				Column:  1,
 			},
@@ -59,7 +59,7 @@ func TestComputeNextSteps_BuildErrorWithFileLine(t *testing.T) {
 	}
 
 	steps := computeNextSteps(se)
-	if len(steps) == 0 || !strings.Contains(steps[0], "src/App.svelte:2") {
+	if len(steps) == 0 || !strings.Contains(steps[0], "src/App.tsx:2") {
 		t.Errorf("expected first next step to point to the error location, got: %v", steps)
 	}
 }

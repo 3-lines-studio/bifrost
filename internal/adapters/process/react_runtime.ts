@@ -7,8 +7,6 @@ const isDev =
 
 const tailwindPlugin: Bun.BunPlugin | undefined = BIFROST_TAILWIND_PLUGIN;
 const reactCompilerPlugin: Bun.BunPlugin | undefined = BIFROST_REACT_COMPILER_PLUGIN;
-const sveltePluginFactory: ((generate: string) => Bun.BunPlugin) | undefined = BIFROST_SVELTE_PLUGIN;
-
 interface ErrorDetail {
   message: string;
   position?: {
@@ -493,18 +491,10 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
   const fw = framework ?? "react";
 
   try {
-    let plugins: any[];
-    if (fw === "svelte") {
-      plugins = [
-        ...(sveltePluginFactory ? [sveltePluginFactory(isSSR ? "server" : "client")] : []),
-        ...(!isSSR && tailwindPlugin ? [tailwindPlugin] : []),
-      ];
-    } else {
-      plugins = [
-        ...(reactCompilerPlugin ? [reactCompilerPlugin] : []),
-        ...(!isSSR && tailwindPlugin ? [tailwindPlugin] : []),
-      ];
-    }
+    const plugins: any[] = [
+      ...(reactCompilerPlugin ? [reactCompilerPlugin] : []),
+      ...(!isSSR && tailwindPlugin ? [tailwindPlugin] : []),
+    ];
 
     const naming = hashClientAssets
       ? {
@@ -520,7 +510,6 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
       entrypoints,
       outdir,
       target: buildTarget,
-      ...(fw === "svelte" ? { conditions: ["svelte"] } : {}),
       minify: !isDev,
       splitting: !isSSR,
       naming,

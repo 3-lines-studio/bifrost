@@ -14,9 +14,6 @@ var minimalFS embed.FS
 //go:embed all:spa
 var spaFS embed.FS
 
-//go:embed all:svelte
-var svelteFS embed.FS
-
 var ErrInvalidTemplate = errors.New("invalid template name")
 
 func GetTemplate(name string) (fs.FS, error) {
@@ -25,8 +22,6 @@ func GetTemplate(name string) (fs.FS, error) {
 		return fs.Sub(minimalFS, "minimal")
 	case "spa":
 		return fs.Sub(spaFS, "spa")
-	case "svelte":
-		return fs.Sub(svelteFS, "svelte")
 	default:
 		return nil, ErrInvalidTemplate
 	}

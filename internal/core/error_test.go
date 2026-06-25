@@ -11,14 +11,14 @@ func TestStructuredError_ErrorIncludesSubErrors(t *testing.T) {
 		ErrorType: "Build Error",
 		Message:   "Build failed",
 		SubErrors: []StructuredError{
-			{Message: "Expected whitespace", File: "src/App.svelte", Line: 2, Column: 1},
+			{Message: "Expected whitespace", File: "src/App.tsx", Line: 2, Column: 1},
 		},
 	}
 	errStr := e.Error()
 	if !strings.Contains(errStr, "Expected whitespace") {
 		t.Errorf("expected sub-error message in Error(), got: %s", errStr)
 	}
-	if !strings.Contains(errStr, "src/App.svelte:2:1") {
+	if !strings.Contains(errStr, "src/App.tsx:2:1") {
 		t.Errorf("expected sub-error location in Error(), got: %s", errStr)
 	}
 }

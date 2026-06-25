@@ -9,44 +9,23 @@ type Framework int
 
 const (
 	FrameworkReact Framework = iota
-	FrameworkSvelte
 )
 
 func (f Framework) String() string {
-	switch f {
-	case FrameworkReact:
-		return "react"
-	case FrameworkSvelte:
-		return "svelte"
-	default:
-		return "unknown"
-	}
+	return "react"
 }
 
 func FrameworkFromString(s string) Framework {
-	switch s {
-	case "svelte":
-		return FrameworkSvelte
-	default:
-		return FrameworkReact
-	}
+	return FrameworkReact
 }
 
 func FrameworkFromExtension(ext string) Framework {
-	switch ext {
-	case ".svelte":
-		return FrameworkSvelte
-	default:
-		return FrameworkReact
-	}
+	return FrameworkReact
 }
 
 func FrameworkFromComponentPath(path string) Framework {
 	if idx := strings.Index(path, "?"); idx >= 0 {
 		path = path[:idx]
-	}
-	if strings.HasSuffix(path, ".svelte.ts") || strings.HasSuffix(path, ".svelte.js") || strings.HasSuffix(path, ".svelte") {
-		return FrameworkSvelte
 	}
 	return FrameworkFromExtension(filepath.Ext(path))
 }
