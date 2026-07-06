@@ -14,6 +14,9 @@ import (
 //go:embed testdata/embedded_files/app.js
 var embeddedAssetFS embed.FS
 
+//go:embed .bifrost/public/app.js
+var embeddedPublicFS embed.FS
+
 func TestCleanPath(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -178,6 +181,39 @@ func TestPublicHandler_ServesValidDevFile(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestPublicHandler_ServesEmbeddedFile(t *testing.T) {
+	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	})
+
+	handler := NewPublicHandler(embeddedPublicFS, fallback, false)
+	req := httptest.NewRequest("GET", "/app.js", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if w.Body.String() != "console.log(\"embedded public response\");\n" {
+		t.Errorf("unexpected body: %s", w.Body.String())
+	}
+}
+
+func TestPublicHandler_EmbeddedFallbackOnMissing(t *testing.T) {
+	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	})
+
+	handler := NewPublicHandler(embeddedPublicFS, fallback, false)
+	req := httptest.NewRequest("GET", "/missing.txt", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTeapot {
+		t.Errorf("expected 418 fallback, got %d", w.Code)
 	}
 }
 

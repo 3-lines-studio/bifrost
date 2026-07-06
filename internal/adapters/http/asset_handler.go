@@ -96,7 +96,11 @@ func (h *PublicHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if err := serveProjectFile(w, req, h.assetsFS, "public", cleaned, !h.isDev, core.GetContentType(cleaned)); err != nil {
+	root := "public"
+	if !h.isDev {
+		root = ".bifrost/public"
+	}
+	if err := serveProjectFile(w, req, h.assetsFS, root, cleaned, !h.isDev, core.GetContentType(cleaned)); err != nil {
 		h.next.ServeHTTP(w, req)
 	}
 }

@@ -3,6 +3,7 @@ dist/
 .bifrost/
 !internal/templates/*/.bifrost/
 !internal/adapters/process/testembed/.bifrost/
+!internal/adapters/http/.bifrost/
 tmp/
 bifrost
 !bifrost/
