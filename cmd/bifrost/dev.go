@@ -173,7 +173,7 @@ func runDev(args []string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mc := startManagedChild(appRoot, binPath)
+	mc := startManagedChild(goModRoot, binPath)
 	if mc == nil {
 		output.PrintError("Failed to start app process")
 		os.Exit(1)
@@ -243,7 +243,7 @@ func runDev(args []string) {
 			if mc != nil {
 				mc.stop()
 			}
-			mc = startManagedChild(appRoot, binPath)
+			mc = startManagedChild(goModRoot, binPath)
 			if mc == nil {
 				output.PrintError("Failed to start app after rebuild")
 			} else {
