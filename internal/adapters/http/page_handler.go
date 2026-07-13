@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
@@ -155,6 +156,12 @@ func (h *PageHandler) serveError(w http.ResponseWriter, req *http.Request, err e
 		http.Redirect(w, req, redirectErr.RedirectURL(), status)
 		return
 	}
+
+	slog.Error("request failed",
+		"method", req.Method,
+		"path", req.URL.Path,
+		"error", err.Error(),
+	)
 
 	data := core.ErrorData{
 		Message: err.Error(),
