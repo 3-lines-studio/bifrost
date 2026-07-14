@@ -230,6 +230,7 @@ func (a *App) ExportStaticPages(outputDir string) error {
 func createAssetHandler(router Router, app *App) http.Handler {
 	isDev := app.isDev
 	assetHandler := adaptershttp.NewAssetHandler(app.assetsFS, isDev)
+	mdRouter := adaptershttp.ResolveMarkdown(router)
 
 	distHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := req.URL.Path
@@ -239,7 +240,7 @@ func createAssetHandler(router Router, app *App) http.Handler {
 			return
 		}
 
-		router.ServeHTTP(w, req)
+		mdRouter.ServeHTTP(w, req)
 	})
 
 	return adaptershttp.NewPublicHandler(app.assetsFS, distHandler, isDev)

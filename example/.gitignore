@@ -1,4 +1,4 @@
 node_modules/
-cmd/full/.bifrost/
-cmd/full/tmp/
+.bifrost/
+tmp/
 bifrost

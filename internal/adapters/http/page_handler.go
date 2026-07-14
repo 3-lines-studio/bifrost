@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
 	"github.com/3-lines-studio/bifrost/internal/usecase"
@@ -71,6 +73,27 @@ func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	h.dispatchPageOutput(w, req, output)
 }
 
+type markdownCtxKey struct{}
+
+func ResolveMarkdown(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		markdown := false
+		if strings.HasSuffix(strings.ToLower(req.URL.Path), ".md") {
+			req = req.Clone(req.Context())
+			req.URL.Path = req.URL.Path[:len(req.URL.Path)-3]
+			markdown = true
+		}
+		if strings.Contains(req.Header.Get("Accept"), "text/markdown") {
+			markdown = true
+		}
+		if markdown {
+			ctx := context.WithValue(req.Context(), markdownCtxKey{}, true)
+			req = req.WithContext(ctx)
+		}
+		next.ServeHTTP(w, req)
+	})
+}
+
 func (h *PageHandler) servePageInput(req *http.Request) usecase.ServePageInput {
 	return usecase.ServePageInput{
 		Config:          h.config,
@@ -81,6 +104,7 @@ func (h *PageHandler) servePageInput(req *http.Request) usecase.ServePageInput {
 		StaticPath:      h.staticPath,
 		RequestPath:     req.URL.Path,
 		Request:         req,
+		Markdown:        req.Context().Value(markdownCtxKey{}) == true,
 		Shell:           h.shell,
 	}
 }
@@ -100,7 +124,11 @@ func (h *PageHandler) dispatchPageOutput(w http.ResponseWriter, req *http.Reques
 		h.serveError(w, req, errNeedsSetup)
 
 	case core.ActionRenderSSR:
-		h.serveHTML(w, output.HTML)
+		if output.Markdown != "" {
+			h.serveMarkdown(w, output.Markdown)
+		} else {
+			h.serveHTML(w, output.HTML)
+		}
 
 	case core.ActionRenderClientOnlyShell,
 		core.ActionRenderStaticPrerender:
@@ -123,6 +151,12 @@ func (h *PageHandler) serveHTML(w http.ResponseWriter, htmlContent string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, htmlContent)
+}
+
+func (h *PageHandler) serveMarkdown(w http.ResponseWriter, mdContent string) {
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, mdContent)
 }
 
 func computeNextSteps(se *core.StructuredError) []string {

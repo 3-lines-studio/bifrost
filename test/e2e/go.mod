@@ -8,6 +8,8 @@ require (
 )
 
 require (
+	github.com/JohannesKaufmann/dom v0.3.1 // indirect
+	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2 // indirect
 	github.com/gkampitakis/ciinfo v0.3.2 // indirect
 	github.com/goccy/go-yaml v1.18.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
@@ -19,6 +21,7 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
+	golang.org/x/net v0.55.0 // indirect
 )
 
 replace github.com/3-lines-studio/bifrost => ../..

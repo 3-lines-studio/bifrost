@@ -20,12 +20,14 @@ type ServePageInput struct {
 	RequestPath     string
 	HasRenderer     bool
 	Request         *http.Request
+	Markdown        bool
 	Shell           *core.HTMLDocumentShell
 }
 
 type ServePageOutput struct {
 	Action     core.PageAction
 	HTML       string
+	Markdown   string
 	StaticPath string
 	RoutePath  string
 	Props      any
@@ -143,6 +145,13 @@ func (s *PageService) executeRequest(ctx context.Context, state pageRequestState
 }
 
 func (s *PageService) renderForMode(ctx context.Context, state pageRequestState) ServePageOutput {
+	if state.input.Markdown && state.input.Config.Mode != core.ModeSSR {
+		return ServePageOutput{
+			Action: core.ActionRenderSSR,
+			Error:  fmt.Errorf("markdown output is only supported in SSR mode"),
+		}
+	}
+
 	switch state.input.Config.Mode {
 	case core.ModeClientOnly:
 		html, err := s.renderClientOnlyShell(state)

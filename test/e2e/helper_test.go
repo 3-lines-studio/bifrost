@@ -26,7 +26,7 @@ func init() {
 	_, filename, _, _ := runtime.Caller(0)
 	testDir := filepath.Dir(filename)
 	repoRoot := filepath.Join(testDir, "..", "..")
-	exampleDir, _ = filepath.Abs(filepath.Join(repoRoot, "example", "cmd", "full"))
+	exampleDir, _ = filepath.Abs(filepath.Join(repoRoot, "example"))
 }
 
 func bunAvailable() bool {

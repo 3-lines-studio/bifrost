@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
+	"github.com/3-lines-studio/bifrost/internal/usecase"
 )
 
 func TestComputeNextSteps_BuildErrorWithSpecifier(t *testing.T) {
@@ -154,3 +156,128 @@ func (e *testRedirectErr) RedirectStatusCode() int { return e.code }
 
 var _ core.RedirectError = (*testRedirectErr)(nil)
 var _ error = (*testRedirectErr)(nil)
+
+func TestResolveMarkdown_SuffixDetection(t *testing.T) {
+	cases := []struct {
+		name            string
+		urlPath         string
+		wantMarkdown    bool
+		wantRequestPath string
+	}{
+		{name: "lowercase md", urlPath: "/about.md", wantMarkdown: true, wantRequestPath: "/about"},
+		{name: "uppercase MD", urlPath: "/ABOUT.MD", wantMarkdown: true, wantRequestPath: "/ABOUT"},
+		{name: "mixed case Md", urlPath: "/post.Md", wantMarkdown: true, wantRequestPath: "/post"},
+		{name: "mixed case mD", urlPath: "/post.mD", wantMarkdown: true, wantRequestPath: "/post"},
+		{name: "nested path md", urlPath: "/blog/hello-world.md", wantMarkdown: true, wantRequestPath: "/blog/hello-world"},
+		{name: "no suffix", urlPath: "/about", wantMarkdown: false, wantRequestPath: "/about"},
+		{name: "html suffix", urlPath: "/about.html", wantMarkdown: false, wantRequestPath: "/about.html"},
+		{name: "dotfile not md", urlPath: "/.bashrc", wantMarkdown: false, wantRequestPath: "/.bashrc"},
+		{name: "suffix in middle", urlPath: "/about.md/info", wantMarkdown: false, wantRequestPath: "/about.md/info"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotPath string
+			var gotMarkdown bool
+			handler := ResolveMarkdown(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotMarkdown, _ = r.Context().Value(markdownCtxKey{}).(bool)
+			}))
+			req := httptest.NewRequest(http.MethodGet, tc.urlPath, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if gotPath != tc.wantRequestPath {
+				t.Errorf("RequestPath = %q, want %q", gotPath, tc.wantRequestPath)
+			}
+			if gotMarkdown != tc.wantMarkdown {
+				t.Errorf("Markdown = %v, want %v", gotMarkdown, tc.wantMarkdown)
+			}
+		})
+	}
+}
+
+func TestResolveMarkdown_AcceptHeader(t *testing.T) {
+	cases := []struct {
+		name        string
+		urlPath     string
+		accept      string
+		wantMarkdown bool
+	}{
+		{name: "accept text/markdown", urlPath: "/about", accept: "text/markdown", wantMarkdown: true},
+		{name: "accept with q-value", urlPath: "/about", accept: "text/markdown;q=0.9", wantMarkdown: true},
+		{name: "accept mixed types", urlPath: "/about", accept: "text/markdown, text/html", wantMarkdown: true},
+		{name: "accept text/html only", urlPath: "/about", accept: "text/html", wantMarkdown: false},
+		{name: "no accept header", urlPath: "/about", accept: "", wantMarkdown: false},
+		{name: "accept header plus suffix", urlPath: "/about.md", accept: "text/html", wantMarkdown: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMarkdown bool
+			handler := ResolveMarkdown(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotMarkdown, _ = r.Context().Value(markdownCtxKey{}).(bool)
+			}))
+			req := httptest.NewRequest(http.MethodGet, tc.urlPath, nil)
+			if tc.accept != "" {
+				req.Header.Set("Accept", tc.accept)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if gotMarkdown != tc.wantMarkdown {
+				t.Errorf("Markdown = %v, want %v", gotMarkdown, tc.wantMarkdown)
+			}
+		})
+	}
+}
+
+func TestServePageInput_ReadsMarkdownFromContext(t *testing.T) {
+	h := &PageHandler{}
+	req := httptest.NewRequest(http.MethodGet, "/about", nil)
+	ctx := context.WithValue(req.Context(), markdownCtxKey{}, true)
+	req = req.WithContext(ctx)
+	input := h.servePageInput(req)
+	if !input.Markdown {
+		t.Errorf("expected Markdown = true from context")
+	}
+	if input.RequestPath != "/about" {
+		t.Errorf("RequestPath = %q, want %q", input.RequestPath, "/about")
+	}
+}
+
+func TestDispatchPageOutput_ServeMarkdownContentType(t *testing.T) {
+	h := &PageHandler{}
+	req := httptest.NewRequest(http.MethodGet, "/about.md", nil)
+	rec := httptest.NewRecorder()
+
+	h.dispatchPageOutput(rec, req, usecase.ServePageOutput{
+		Action:   core.ActionRenderSSR,
+		Markdown: "# About\n\nSome content.",
+	})
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	ct := rec.Header().Get("Content-Type")
+	if ct != "text/markdown; charset=utf-8" {
+		t.Errorf("expected content-type %q, got %q", "text/markdown; charset=utf-8", ct)
+	}
+	if rec.Body.String() != "# About\n\nSome content." {
+		t.Errorf("unexpected body: %q", rec.Body.String())
+	}
+}
+
+func TestDispatchPageOutput_MarkdownEmptyFallsBackToHTML(t *testing.T) {
+	h := &PageHandler{}
+	req := httptest.NewRequest(http.MethodGet, "/about.md", nil)
+	rec := httptest.NewRecorder()
+
+	h.dispatchPageOutput(rec, req, usecase.ServePageOutput{
+		Action: core.ActionRenderSSR,
+		HTML:   "<div>fallback</div>",
+	})
+
+	ct := rec.Header().Get("Content-Type")
+	if ct != "text/html; charset=utf-8" {
+		t.Errorf("expected html content-type fallback, got %q", ct)
+	}
+}

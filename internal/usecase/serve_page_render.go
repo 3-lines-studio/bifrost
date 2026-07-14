@@ -167,6 +167,27 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		}
 	}
 
+	if input.Markdown {
+		md, err := convertHTMLToMarkdown(page.Body)
+		if err != nil {
+			return ServePageOutput{
+				Action: core.ActionRenderSSR,
+				Error:  err,
+			}
+		}
+		slog.Info("bifrost page timing",
+			"entry", timing.entryName,
+			"path", timing.path,
+			"props_ms", timing.propsDur.Milliseconds(),
+			"render_ms", timing.renderDur.Milliseconds(),
+		)
+		return ServePageOutput{
+			Action:   core.ActionRenderSSR,
+			Markdown: md,
+			Props:    syncPropsForReact,
+		}
+	}
+
 	html, err := shell.Render(page.Body, syncPropsForReact, page.Head, lang, htmlClass)
 	if err != nil {
 		return ServePageOutput{

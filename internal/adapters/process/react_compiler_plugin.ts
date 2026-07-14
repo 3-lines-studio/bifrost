@@ -2,7 +2,8 @@
   name: "react-compiler",
   setup({ onLoad }) {
     onLoad({ filter: /\.[jt]sx$/ }, async (args) => {
-      const babel = (await import("@babel/core")).default;
+      const babelModule = await import("@babel/core");
+      const babel = babelModule.default ?? babelModule;
       const BabelPluginReactCompiler = (await import("babel-plugin-react-compiler")).default;
       const input = await Bun.file(args.path).text();
       const result = await babel.transformAsync(input, {

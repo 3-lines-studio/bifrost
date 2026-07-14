@@ -11,6 +11,7 @@ import (
 	"net/http"
 
 	"github.com/3-lines-studio/bifrost"
+	"github.com/3-lines-studio/bifrost/example"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -25,7 +26,7 @@ func main() {
 		bifrost.Page("/product", "./pages/product.tsx", bifrost.WithStatic()),
 	}
 
-	app := bifrost.New(BifrostFS, bifrostRoutes...)
+	app := bifrost.New(example.BifrostFS, bifrostRoutes...)
 	defer app.Stop()
 
 	// Create chi router
