@@ -3,10 +3,12 @@ package usecase
 import (
 	"github.com/3-lines-studio/bifrost/internal/adapters/fs"
 	"github.com/3-lines-studio/bifrost/internal/core"
+	"io"
 )
 
 type Renderer interface {
 	Render(componentPath string, props any) (core.RenderedPage, error)
+	RenderBodyTo(w io.Writer, componentPath string, props any, onHead func(head string) error) error
 	Build(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error)
 	BuildSSR(entrypoints []string, outdir string, framework string) error
 }

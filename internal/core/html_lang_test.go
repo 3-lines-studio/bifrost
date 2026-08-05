@@ -4,12 +4,12 @@ import (
 	"testing"
 )
 
-func TestResolveHTMLLang_Precedence(t *testing.T) {
+func TestResolveHTMLDocumentAttrs_PrecedenceLadder(t *testing.T) {
 	props := map[string]any{
 		PropHTMLLang: "de",
 		"title":      "x",
 	}
-	lang, out := ResolveHTMLLang("en", "fr", props)
+	lang, _, out := ResolveHTMLDocumentAttrs("en", "fr", "", props)
 	if lang != "de" {
 		t.Fatalf("loader wins: got %q", lang)
 	}
@@ -24,7 +24,7 @@ func TestResolveHTMLLang_Precedence(t *testing.T) {
 		t.Fatal("other props preserved")
 	}
 
-	lang2, out2 := ResolveHTMLLang("en", "fr", map[string]any{"k": 1})
+	lang2, _, out2 := ResolveHTMLDocumentAttrs("en", "fr", "", map[string]any{"k": 1})
 	if lang2 != "fr" {
 		t.Fatalf("page option: got %q", lang2)
 	}
@@ -36,24 +36,22 @@ func TestResolveHTMLLang_Precedence(t *testing.T) {
 		t.Fatalf("expected one prop, got %v", out2)
 	}
 
-	lang3, _ := ResolveHTMLLang("it", "", nil)
+	lang3, _, _ := ResolveHTMLDocumentAttrs("it", "", "", nil)
 	if lang3 != "it" {
 		t.Fatalf("app default: got %q", lang3)
 	}
 
-	lang4, _ := ResolveHTMLLang("", "", nil)
+	lang4, _, out4 := ResolveHTMLDocumentAttrs("", "", "", nil)
 	if lang4 != DefaultHTMLLang {
 		t.Fatalf("builtin default: got %q", lang4)
 	}
-}
-
-func TestResolveHTMLLang_NilProps(t *testing.T) {
-	lang, out := ResolveHTMLLang("", "es", nil)
-	if lang != "es" {
-		t.Fatalf("got %q", lang)
-	}
-	if out != nil {
+	if out4 != nil {
 		t.Fatal("expected nil propsForReact when props nil")
+	}
+
+	lang5, _, _ := ResolveHTMLDocumentAttrs("", "es", "", nil)
+	if lang5 != "es" {
+		t.Fatalf("page lang with no app default: got %q", lang5)
 	}
 }
 
@@ -266,5 +264,56 @@ func BenchmarkResolveHTMLDocumentAttrs_WithReservedKeys(b *testing.B) {
 	}
 	for i := 0; i < b.N; i++ {
 		_, _, _ = ResolveHTMLDocumentAttrs("en", "es", "dark", props)
+	}
+}
+
+func TestResolveHTMLDocumentAttrs_TypedMapReservedKeys(t *testing.T) {
+	props := map[string]string{
+		PropHTMLLang: "de",
+		"title":      "x",
+	}
+	lang, class, out := ResolveHTMLDocumentAttrs("en", "", "", props)
+	if lang != "de" {
+		t.Fatalf("expected de from typed map, got %q", lang)
+	}
+	if class != "" {
+		t.Fatalf("expected empty class, got %q", class)
+	}
+	outMap, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("expected cleaned map, got %T", out)
+	}
+	if _, ok := outMap[PropHTMLLang]; ok {
+		t.Fatal("reserved lang key should be stripped")
+	}
+	if outMap["title"] != "x" {
+		t.Fatalf("expected title preserved, got %v", outMap)
+	}
+}
+
+func TestResolveHTMLDocumentAttrs_StructOmitEmptyDropped(t *testing.T) {
+	type myProps struct {
+		Title            string `json:"title,omitempty"`
+		BifrostHTMLLang  string `json:"__bifrost_html_lang"`
+		BifrostHTMLClass string `json:"__bifrost_html_class,omitempty"`
+	}
+	lang, class, out := ResolveHTMLDocumentAttrs("en", "", "", myProps{
+		BifrostHTMLLang: "de",
+	})
+	if lang != "de" {
+		t.Fatalf("expected de, got %q", lang)
+	}
+	if class != "" {
+		t.Fatalf("expected empty class, got %q", class)
+	}
+	outMap, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("expected cleaned map, got %T", out)
+	}
+	if _, ok := outMap["title"]; ok {
+		t.Fatal("omitempty zero field should be dropped")
+	}
+	if _, ok := outMap[PropHTMLClass]; ok {
+		t.Fatal("reserved class key should be stripped")
 	}
 }

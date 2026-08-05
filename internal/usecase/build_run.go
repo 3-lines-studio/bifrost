@@ -89,7 +89,7 @@ func (s *BuildService) newBuildRun(input BuildInput) (*buildRun, error) {
 		entriesDir:    filepath.Join(input.AppRoot, ".bifrost", "entries"),
 		pagesDir:      filepath.Join(input.AppRoot, ".bifrost", "pages"),
 		runtimeDir:    filepath.Join(input.AppRoot, ".bifrost", "runtime"),
-		publicDir:     filepath.Join(input.AppRoot, "public"),
+		publicDir:     resolvePublicDir(input.AppRoot, input.ModuleRoot),
 		publicDestDir: filepath.Join(input.AppRoot, ".bifrost", "public"),
 		manifestPath:  filepath.Join(input.AppRoot, ".bifrost", "manifest.json"),
 	}
@@ -540,4 +540,12 @@ func resolveComponentPath(appRoot, moduleRoot, componentPath string) string {
 		return resolved
 	}
 	return filepath.Join(moduleRoot, componentPath)
+}
+
+func resolvePublicDir(appRoot, moduleRoot string) string {
+	appCandidate := filepath.Join(appRoot, "public")
+	if info, err := os.Stat(appCandidate); err == nil && info.IsDir() {
+		return appCandidate
+	}
+	return filepath.Join(moduleRoot, "public")
 }

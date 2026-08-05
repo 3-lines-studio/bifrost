@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 
@@ -33,6 +34,9 @@ type ServePageOutput struct {
 	Props      any
 	NeedsSetup bool
 	Error      error
+	// Stream renders the page body directly to w. When set, HTML is empty and
+	// the caller must invoke Stream instead of using HTML.
+	Stream func(w io.Writer) error
 }
 
 type PageService struct {

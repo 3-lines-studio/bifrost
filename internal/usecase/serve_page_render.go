@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -71,19 +72,11 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 			}
 		}
 
-		page, err := s.renderer.Render(state.renderPath, propsForReact)
-		if err != nil {
-			return ServePageOutput{
-				Action: core.ActionRenderStaticPrerender,
-				Error:  err,
-			}
-		}
-
-		html, err := s.renderPageHTMLWithArtifacts(state, propsForReact, page, lang, htmlClass)
+		stream, err := s.streamRender(state, propsForReact, lang, htmlClass)
 		return ServePageOutput{
 			Action: core.ActionRenderStaticPrerender,
-			HTML:   html,
 			Props:  propsForReact,
+			Stream: stream,
 			Error:  err,
 		}
 	}
@@ -97,18 +90,10 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 
 	lang, htmlClass, propsForReact := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
 
-	page, err := s.renderer.Render(state.renderPath, propsForReact)
-	if err != nil {
-		return ServePageOutput{
-			Action: core.ActionRenderStaticPrerender,
-			Error:  err,
-		}
-	}
-
-	html, err := s.renderPageHTMLWithArtifacts(state, propsForReact, page, lang, htmlClass)
+	stream, err := s.streamRender(state, propsForReact, lang, htmlClass)
 	return ServePageOutput{
 		Action: core.ActionRenderStaticPrerender,
-		HTML:   html,
+		Stream: stream,
 		Error:  err,
 	}
 }
@@ -149,25 +134,17 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 			Error:  fmt.Errorf("renderer not available for SSR"),
 		}
 	}
-	shell, err := s.resolveShell(state)
-	if err != nil {
-		return ServePageOutput{
-			Action: core.ActionRenderSSR,
-			Error:  err,
-		}
-	}
-
-	timing.renderStart = time.Now()
-	page, err := s.renderer.Render(state.renderPath, syncPropsForReact)
-	timing.renderDur = time.Since(timing.renderStart)
-	if err != nil {
-		return ServePageOutput{
-			Action: core.ActionRenderSSR,
-			Error:  err,
-		}
-	}
 
 	if input.Markdown {
+		timing.renderStart = time.Now()
+		page, err := s.renderer.Render(state.renderPath, syncPropsForReact)
+		timing.renderDur = time.Since(timing.renderStart)
+		if err != nil {
+			return ServePageOutput{
+				Action: core.ActionRenderSSR,
+				Error:  err,
+			}
+		}
 		md, err := convertHTMLToMarkdown(page.Body)
 		if err != nil {
 			return ServePageOutput{
@@ -188,7 +165,14 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		}
 	}
 
-	html, err := shell.Render(page.Body, syncPropsForReact, page.Head, lang, htmlClass)
+	shell, err := s.resolveShell(state)
+	if err != nil {
+		return ServePageOutput{
+			Action: core.ActionRenderSSR,
+			Error:  err,
+		}
+	}
+	propsJSON, err := core.MarshalBifrostPropsJSON(syncPropsForReact)
 	if err != nil {
 		return ServePageOutput{
 			Action: core.ActionRenderSSR,
@@ -196,18 +180,51 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		}
 	}
 
-	slog.Info("bifrost page timing",
-		"entry", timing.entryName,
-		"path", timing.path,
-		"props_ms", timing.propsDur.Milliseconds(),
-		"render_ms", timing.renderDur.Milliseconds(),
-	)
+	stream := func(w io.Writer) error {
+		timing.renderStart = time.Now()
+		err := s.renderer.RenderBodyTo(w, state.renderPath, syncPropsForReact, func(head string) error {
+			return shell.WritePreamble(w, head, lang, htmlClass)
+		})
+		timing.renderDur = time.Since(timing.renderStart)
+		if err != nil {
+			return err
+		}
+		slog.Info("bifrost page timing",
+			"entry", timing.entryName,
+			"path", timing.path,
+			"props_ms", timing.propsDur.Milliseconds(),
+			"render_ms", timing.renderDur.Milliseconds(),
+		)
+		return shell.WriteSuffix(w, propsJSON)
+	}
 
 	return ServePageOutput{
 		Action: core.ActionRenderSSR,
-		HTML:   html,
 		Props:  syncPropsForReact,
+		Stream: stream,
 	}
+}
+
+// streamRender builds a closure that streams a rendered page to w: preamble
+// with the rendered head, the body, then the props script and deferred scripts.
+func (s *PageService) streamRender(state pageRequestState, propsForReact any, lang string, htmlClass string) (func(io.Writer) error, error) {
+	shell, err := s.resolveShell(state)
+	if err != nil {
+		return nil, err
+	}
+	propsJSON, err := core.MarshalBifrostPropsJSON(propsForReact)
+	if err != nil {
+		return nil, err
+	}
+	return func(w io.Writer) error {
+		err := s.renderer.RenderBodyTo(w, state.renderPath, propsForReact, func(head string) error {
+			return shell.WritePreamble(w, head, lang, htmlClass)
+		})
+		if err != nil {
+			return err
+		}
+		return shell.WriteSuffix(w, propsJSON)
+	}, nil
 }
 
 func (s *PageService) resolveRenderPath(input ServePageInput) string {

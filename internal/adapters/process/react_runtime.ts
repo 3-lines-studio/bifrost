@@ -54,30 +54,60 @@ function serializeError(error: unknown): {
   return { message: String(error) };
 }
 
-function createError(
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+function be32(n: number): Uint8Array {
+  const b = new Uint8Array(4);
+  new DataView(b.buffer).setUint32(0, n, false);
+  return b;
+}
+
+function writeFrame(socket: any, kind: number, parts: Uint8Array[]): void {
+  let total = 0;
+  for (const part of parts) {
+    total += part.length;
+  }
+  const header = new Uint8Array(5);
+  const dv = new DataView(header.buffer);
+  dv.setUint8(0, kind);
+  dv.setUint32(1, total, false);
+  socket.write(header);
+  for (const part of parts) {
+    socket.write(part);
+  }
+}
+
+function writeJsonFrame(socket: any, kind: number, value: unknown): void {
+  writeFrame(socket, kind, [textEncoder.encode(JSON.stringify(value))]);
+}
+
+function writeRenderFrame(socket: any, head: string, html: string): void {
+  const h = textEncoder.encode(head);
+  const b = textEncoder.encode(html);
+  socket.write(new Uint8Array([0]));
+  socket.write(be32(h.length));
+  socket.write(h);
+  socket.write(be32(b.length));
+  socket.write(b);
+}
+
+function errorPayload(
   message: string,
   err?: { errors?: ErrorDetail[] } | Error,
-): Response {
-  const result: {
-    error: {
-      message: string;
-      stack?: string;
-      errors?: ErrorDetail[];
-    };
-  } = {
-    error: {
-      message,
-    },
+): { message: string; stack?: string; errors?: ErrorDetail[] } {
+  const result: { message: string; stack?: string; errors?: ErrorDetail[] } = {
+    message,
   };
 
   if (err) {
     if ("errors" in err && Array.isArray(err.errors)) {
-      result.error.errors = err.errors;
+      result.errors = err.errors;
     } else if (err instanceof Error) {
       const serialized = serializeError(err);
-      result.error.stack = serialized.stack;
+      result.stack = serialized.stack;
       if (serialized.position || serialized.specifier || serialized.referrer) {
-        result.error.errors = [{
+        result.errors = [{
           message: serialized.message,
           position: serialized.position,
           specifier: serialized.specifier,
@@ -87,42 +117,15 @@ function createError(
     }
   }
 
-  return new Response(JSON.stringify(result) + "\n");
+  return result;
 }
 
-function singleLineRenderResponse(head: string, html: string): Response {
-  return new Response(JSON.stringify({ head, html }) + "\n", {
-    headers: {
-      "Content-Type": "application/x-ndjson; charset=utf-8",
-    },
-  });
-}
-
-function ndjsonRenderResponse(head: string, html: string): Response {
-  const enc = new TextEncoder();
-  const line1 = JSON.stringify({ head }) + "\n";
-  const line2 = JSON.stringify({ html }) + "\n";
-  return new Response(
-    new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(enc.encode(line1));
-        controller.enqueue(enc.encode(line2));
-        controller.close();
-      },
-    }),
-    {
-      headers: {
-        "Content-Type": "application/x-ndjson; charset=utf-8",
-      },
-    },
-  );
-}
-
-function renderResponse(head: string, html: string): Response {
-  if (isDev) {
-    return ndjsonRenderResponse(head, html);
-  }
-  return singleLineRenderResponse(head, html);
+function writeErrorFrame(
+  socket: any,
+  message: string,
+  err?: { errors?: ErrorDetail[] } | Error,
+): void {
+  writeJsonFrame(socket, 1, errorPayload(message, err));
 }
 
 function entryStemMatchesJs(base: string, stem: string): boolean {
@@ -364,24 +367,14 @@ const componentCache = new Map<
   { Component: any; Head?: any }
 >();
 
-async function handleRender(req: Bun.BunRequest): Promise<Response> {
-  let body: {
-    path?: string;
-    props?: Record<string, unknown>;
-    framework?: string;
-  };
-  try {
-    body = await req.json();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Invalid JSON body";
-    return createError(`Failed to parse request: ${message}`);
-  }
-
-  const { path, props, framework } = body;
-  const fw = framework ?? "react";
+async function handleRender(socket: any, body: {
+  path?: string;
+  props?: Record<string, unknown>;
+}): Promise<void> {
+  const { path, props } = body;
 
   if (!path) {
-    return createError("Missing 'path' in request");
+    return writeErrorFrame(socket, "Missing 'path' in request");
   }
 
   const importPath = isDev
@@ -395,7 +388,7 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
 
     if (typeof mod.render === "function") {
       const result: RenderResult = await mod.render(props || {});
-      return renderResponse(result.head ?? "", result.html ?? "");
+      return writeRenderFrame(socket, result.head ?? "", result.html ?? "");
     }
 
     const cached = componentCache.get(path);
@@ -418,7 +411,8 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
     }
 
     if (!Component) {
-      return createError(
+      return writeErrorFrame(
+        socket,
         `No component export found in ${path}. Expected default export, Page export, or a function export.`,
       );
     }
@@ -446,39 +440,37 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
     } catch (renderErr) {
       const message =
         renderErr instanceof Error ? renderErr.message : String(renderErr);
-      return createError(`Render error: ${message}`, renderErr);
+      return writeErrorFrame(socket, `Render error: ${message}`, renderErr);
     }
 
-    return renderResponse(head, html);
+    return writeRenderFrame(socket, head, html);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return createError(`Failed to import component: ${message}`, err);
+    return writeErrorFrame(socket, `Failed to import component: ${message}`, err);
   }
 }
 
-async function handleBuild(req: Bun.BunRequest): Promise<Response> {
-  let body: {
-    entrypoints?: string[];
-    outdir?: string;
-    target?: string;
-    entryNames?: string[];
-    framework?: string;
-  };
-  try {
-    body = await req.json();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Invalid JSON body";
-    return createError(`Failed to parse request: ${message}`);
-  }
-
-  const { entrypoints, outdir, target, entryNames, framework } = body;
+async function handleBuild(socket: any, body: {
+  entrypoints?: string[];
+  outdir?: string;
+  target?: string;
+  entryNames?: string[];
+  framework?: string;
+}): Promise<void> {
+  const { entrypoints, outdir, target, entryNames } = body;
 
   if (!Array.isArray(entrypoints) || entrypoints.length === 0) {
-    return createError("Missing entrypoints");
+    return writeJsonFrame(socket, 2, {
+      ok: false,
+      error: errorPayload("Missing entrypoints"),
+    });
   }
 
   if (!outdir) {
-    return createError("Missing outdir");
+    return writeJsonFrame(socket, 2, {
+      ok: false,
+      error: errorPayload("Missing outdir"),
+    });
   }
 
   const buildTarget = target === "bun" ? "bun" : "browser";
@@ -487,8 +479,6 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
     (process.env.BIFROST_PROD === "1" ||
       process.env.BIFROST_PROD === "true") &&
     !isSSR;
-
-  const fw = framework ?? "react";
 
   try {
     const plugins: any[] = [
@@ -537,7 +527,10 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
           referrer: log.data?.referrer,
         }));
 
-      return createError("Build failed", { errors });
+      return writeJsonFrame(socket, 2, {
+        ok: false,
+        error: errorPayload("Build failed", { errors }),
+      });
     }
 
     if (!hashClientAssets && entryNames && entryNames.length === entrypoints.length) {
@@ -577,19 +570,78 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return createError(`Build output mapping failed: ${message}`, err as Error);
+      return writeJsonFrame(socket, 2, {
+        ok: false,
+        error: errorPayload(`Build output mapping failed: ${message}`, err as Error),
+      });
     }
 
-    return new Response(JSON.stringify({ ok: true, entries }) + "\n");
+    return writeJsonFrame(socket, 2, { ok: true, entries });
   } catch (err) {
-    return createError("Build failed", err as Error);
+    return writeJsonFrame(socket, 2, {
+      ok: false,
+      error: errorPayload("Build failed", err as Error),
+    });
   }
 }
 
-Bun.serve({
+interface SocketState {
+  buf: Uint8Array;
+}
+
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a);
+  out.set(b);
+  return out;
+}
+
+Bun.listen({
   unix: socket,
-  routes: {
-    "/render": { POST: handleRender },
-    "/build": { POST: handleBuild },
+  socket: {
+    open(sock: any) {
+      sock.data = { buf: new Uint8Array(0) } as SocketState;
+    },
+    data(sock: any, data: Uint8Array) {
+      const state: SocketState = sock.data;
+      let buf = state.buf.length > 0 ? concatBytes(state.buf, data) : data;
+      state.buf = new Uint8Array(0);
+      while (buf.length >= 5) {
+        const kind = buf[0];
+        const len = new DataView(buf.buffer, buf.byteOffset + 1, 4).getUint32(0, false);
+        if (buf.length < 5 + len) {
+          break;
+        }
+        const payload = buf.slice(5, 5 + len);
+        buf = buf.slice(5 + len);
+        void dispatchFrame(sock, kind, payload);
+      }
+      state.buf = buf;
+    },
+    close() {},
+    error(sock: any, error: unknown) {
+      console.error("bifrost runtime socket error:", error);
+    },
+    idleTimeout: 0,
   },
 });
+
+async function dispatchFrame(sock: any, kind: number, payload: Uint8Array): Promise<void> {
+  let body: any;
+  try {
+    body = JSON.parse(textDecoder.decode(payload));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return writeErrorFrame(sock, `Failed to parse request: ${message}`);
+  }
+  try {
+    if (kind === 2) {
+      await handleBuild(sock, body);
+    } else {
+      await handleRender(sock, body);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeErrorFrame(sock, message, err);
+  }
+}

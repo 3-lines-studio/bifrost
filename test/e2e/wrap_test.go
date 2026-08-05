@@ -62,3 +62,20 @@ func TestWrapWithServeMux_Prod(t *testing.T) {
 	resp3, _ := server.get(t, "/api/health")
 	assertHTTPStatus(t, resp3, 200)
 }
+
+func TestWrapServesPublicAsset_Prod(t *testing.T) {
+	skipIfNoBun(t)
+
+	routes := []bifrost.Route{
+		bifrost.Page("/{$}", "./pages/home.tsx"),
+	}
+
+	server := newTestServerWithWrap(t, routes, false)
+	server.start(t)
+
+	resp, body := server.get(t, "/favicon.ico")
+	assertHTTPStatus(t, resp, 200)
+	if len(body) == 0 {
+		t.Fatal("expected non-empty public asset body")
+	}
+}

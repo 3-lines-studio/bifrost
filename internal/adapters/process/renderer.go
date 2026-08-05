@@ -1,19 +1,21 @@
 package process
 
 import (
-	"bytes"
-	"context"
 	"crypto/rand"
 	_ "embed"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
@@ -23,6 +25,15 @@ const (
 	renderTimeout = 30 * time.Second
 	buildTimeout  = 120 * time.Second
 	socketTimeout = 10 * time.Second
+
+	connPoolSize = 16
+)
+
+// Frame kinds on the renderer unix socket.
+const (
+	frameKindRender = 0
+	frameKindError  = 1
+	frameKindBuild  = 2
 )
 
 var (
@@ -47,8 +58,23 @@ func RuntimeSource(mode core.Mode, frameworks ...core.Framework) string {
 type Renderer struct {
 	cmd     *exec.Cmd
 	socket  string
-	client  *http.Client
+	conns   chan *rendererConn
 	cleanup func()
+}
+
+type rendererConn struct {
+	net.Conn
+	frameReader
+	// broken marks a conn that must not be reused, e.g. after a stream path
+	// error left unread frame bytes on the wire.
+	broken bool
+}
+
+// frameReader decodes length-prefixed frames. The scratch buffer is reused
+// across frames so large response bodies stop allocating after the first read.
+type frameReader struct {
+	r       io.Reader
+	scratch []byte
 }
 
 type rendererProcessConfig struct {
@@ -102,24 +128,131 @@ func NewRendererFromExecutable(executablePath string, cleanup func()) (*Renderer
 	})
 }
 
-func newUnixTransport(socket string) *http.Transport {
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	return &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialer.DialContext(ctx, "unix", socket)
-		},
-		MaxIdleConns:        10,
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
-		DisableCompression:  true,
+func newRendererConn(socket string) (*rendererConn, error) {
+	conn, err := net.DialTimeout("unix", socket, 5*time.Second)
+	if err != nil {
+		return nil, err
 	}
+	return &rendererConn{Conn: conn, frameReader: frameReader{r: conn}}, nil
 }
 
-func newHTTPClient(socket string) *http.Client {
-	return &http.Client{
-		Transport: newUnixTransport(socket),
-		Timeout:   buildTimeout,
+func (fr *frameReader) readByte() (byte, error) {
+	var b [1]byte
+	if _, err := io.ReadFull(fr.r, b[:]); err != nil {
+		return 0, err
 	}
+	return b[0], nil
+}
+
+func (fr *frameReader) readLen() (int, error) {
+	var b [4]byte
+	if _, err := io.ReadFull(fr.r, b[:]); err != nil {
+		return 0, err
+	}
+	return int(binary.BigEndian.Uint32(b[:])), nil
+}
+
+func (fr *frameReader) readBytes() ([]byte, error) {
+	n, err := fr.readLen()
+	if err != nil {
+		return nil, err
+	}
+	if n > len(fr.scratch) {
+		fr.scratch = make([]byte, n)
+	}
+	if _, err := io.ReadFull(fr.r, fr.scratch[:n]); err != nil {
+		return nil, err
+	}
+	return fr.scratch[:n], nil
+}
+
+func (fr *frameReader) readString() (string, error) {
+	b, err := fr.readBytes()
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (fr *frameReader) readError() error {
+	b, err := fr.readBytes()
+	if err != nil {
+		return err
+	}
+	var be bunErrorJSON
+	if err := json.Unmarshal(b, &be); err != nil {
+		return fmt.Errorf("render error: %s", string(b))
+	}
+	se := formatRenderError(&be)
+	if se != nil {
+		return se
+	}
+	return fmt.Errorf("render error")
+}
+
+func writeFrame(w io.Writer, kind byte, payload []byte) error {
+	var header [5]byte
+	header[0] = kind
+	binary.BigEndian.PutUint32(header[1:], uint32(len(payload)))
+	if _, err := w.Write(header[:]); err != nil {
+		return err
+	}
+	if len(payload) > 0 {
+		_, err := w.Write(payload)
+		return err
+	}
+	return nil
+}
+
+func isStaleConn(err error) bool {
+	return errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET)
+}
+
+func isBrokenConn(err error) bool {
+	if err == nil {
+		return false
+	}
+	if isStaleConn(err) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
+}
+
+func (r *Renderer) withConn(timeout time.Duration, fn func(*rendererConn) error) error {
+	conn := <-r.conns
+	if conn.Conn == nil {
+		nc, err := newRendererConn(r.socket)
+		if err != nil {
+			r.conns <- conn
+			return err
+		}
+		conn = nc
+	}
+
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+	err := fn(conn)
+	_ = conn.SetDeadline(time.Time{})
+	if isBrokenConn(err) || conn.broken {
+		_ = conn.Close()
+		conn.Conn = nil
+	}
+	r.conns <- conn
+	return err
+}
+
+// retryStale re-runs a transaction once when the pooled connection went stale,
+// e.g. after a long idle period. Only call for transactions without side effects
+// visible to the caller (buffered reads, builds) — never for streamed output.
+// A retried build re-runs Bun.build to the same outdir; recovery, not idempotence.
+func (r *Renderer) retryStale(timeout time.Duration, fn func(*rendererConn) error) error {
+	err := r.withConn(timeout, fn)
+	if isStaleConn(err) {
+		err = r.withConn(timeout, fn)
+	}
+	return err
 }
 
 func startRendererProcess(cfg rendererProcessConfig) (*Renderer, error) {
@@ -146,10 +279,15 @@ func startRendererProcess(cfg rendererProcessConfig) (*Renderer, error) {
 		return nil, err
 	}
 
+	conns := make(chan *rendererConn, connPoolSize)
+	for i := 0; i < connPoolSize; i++ {
+		conns <- &rendererConn{}
+	}
+
 	return &Renderer{
 		cmd:     cmd,
 		socket:  socket,
-		client:  newHTTPClient(socket),
+		conns:   conns,
 		cleanup: cfg.cleanup,
 	}, nil
 }
@@ -244,14 +382,7 @@ func formatRenderError(e *bunErrorJSON) *core.StructuredError {
 	return bunErrorToStructured(e, "Render Error")
 }
 
-func derefString(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
-
-// MarshalRenderRequestJSON builds the JSON body for POST /render (exported for tests).
+// MarshalRenderRequestJSON builds the JSON body for a render request (exported for tests).
 func MarshalRenderRequestJSON(path string, props any) ([]byte, error) {
 	return json.Marshal(renderRequestPayload{
 		Path:  path,
@@ -259,88 +390,96 @@ func MarshalRenderRequestJSON(path string, props any) ([]byte, error) {
 	})
 }
 
-func (r *Renderer) postRender(ctx context.Context, path string, props any) (*http.Response, error) {
-	jsonBody, err := MarshalRenderRequestJSON(path, props)
-	if err != nil {
-		return nil, err
-	}
-	req, err := newJSONRequest(ctx, "/render", jsonBody)
-	if err != nil {
-		return nil, err
-	}
-	return r.client.Do(req)
-}
-
-func newJSONRequest(ctx context.Context, endpoint string, body []byte) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost"+endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	return req, nil
-}
-
-// renderFromDecoder consumes Bun /render output: one legacy JSON object or two NDJSON lines (head then html).
-func renderFromDecoder(dec *json.Decoder) (head, html string, err error) {
-	type firstMsg struct {
-		Error *bunErrorJSON `json:"error"`
-		Head  *string       `json:"head"`
-		HTML  *string       `json:"html"`
-	}
-
-	var first firstMsg
-	if err := dec.Decode(&first); err != nil {
-		return "", "", fmt.Errorf("render response: %w", err)
-	}
-	if first.Error != nil {
-		se := formatRenderError(first.Error)
-		if se != nil {
-			return "", "", se
-		}
-		return "", "", fmt.Errorf("render error")
-	}
-
-	if first.HTML != nil {
-		return derefString(first.Head), *first.HTML, nil
-	}
-
-	head = derefString(first.Head)
-
-	var second struct {
-		Error *bunErrorJSON `json:"error"`
-		HTML  *string       `json:"html"`
-	}
-	if err := dec.Decode(&second); err != nil {
-		return "", "", fmt.Errorf("render body: %w", err)
-	}
-	if second.Error != nil {
-		se := formatRenderError(second.Error)
-		if se != nil {
-			return "", "", se
-		}
-		return "", "", fmt.Errorf("render error")
-	}
-	if second.HTML == nil {
-		return "", "", fmt.Errorf("missing html in render response")
-	}
-	return head, *second.HTML, nil
-}
-
 func (r *Renderer) Render(path string, props any) (core.RenderedPage, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
-	defer cancel()
-
-	resp, err := r.postRender(ctx, path, props)
+	payload, err := MarshalRenderRequestJSON(path, props)
 	if err != nil {
 		return core.RenderedPage{}, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	head, body, err := renderFromDecoder(json.NewDecoder(resp.Body))
+	var page core.RenderedPage
+	err = r.retryStale(renderTimeout, func(c *rendererConn) error {
+		if err := writeFrame(c, frameKindRender, payload); err != nil {
+			return err
+		}
+		kind, err := c.readByte()
+		if err != nil {
+			return err
+		}
+		switch kind {
+		case frameKindError:
+			return c.readError()
+		case frameKindRender:
+			if page.Head, err = c.readString(); err != nil {
+				return err
+			}
+			page.Body, err = c.readString()
+			return err
+		default:
+			return fmt.Errorf("unexpected render response kind %d", kind)
+		}
+	})
 	if err != nil {
 		return core.RenderedPage{}, err
 	}
-	return core.RenderedPage{Head: head, Body: body}, nil
+	return page, nil
+}
+
+// RenderBodyTo streams the rendered body to w. The head is delivered via onHead
+// before any body bytes are written, so callers can emit the HTML preamble first.
+func (r *Renderer) RenderBodyTo(w io.Writer, path string, props any, onHead func(head string) error) error {
+	payload, err := MarshalRenderRequestJSON(path, props)
+	if err != nil {
+		return err
+	}
+	return r.withConn(renderTimeout, func(c *rendererConn) error {
+		if err := writeFrame(c, frameKindRender, payload); err != nil {
+			return err
+		}
+		kind, err := c.readByte()
+		if err != nil {
+			return err
+		}
+		switch kind {
+		case frameKindError:
+			return c.readError()
+		case frameKindRender:
+			head, err := c.readString()
+			if err != nil {
+				return err
+			}
+			if err := onHead(head); err != nil {
+				c.broken = true
+				return err
+			}
+			bodyLen, err := c.readLen()
+			if err != nil {
+				return err
+			}
+			// The render itself is done; draining to a slow client must not
+			// trip the render deadline.
+			_ = c.SetDeadline(time.Time{})
+			if err := copyStreamed(w, c, bodyLen); err != nil {
+				c.broken = true
+				return err
+			}
+			return nil
+		default:
+			return fmt.Errorf("unexpected render response kind %d", kind)
+		}
+	})
+}
+
+var streamBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 32*1024)
+		return &b
+	},
+}
+
+func copyStreamed(w io.Writer, r io.Reader, n int) error {
+	buf := streamBufPool.Get().(*[]byte)
+	defer streamBufPool.Put(buf)
+	_, err := io.CopyBuffer(w, io.LimitReader(r, int64(n)), *buf)
+	return err
 }
 
 func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
@@ -356,9 +495,6 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 		return nil, fmt.Errorf("entryNames length %d does not match entrypoints length %d", len(entryNames), len(entrypoints))
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), buildTimeout)
-	defer cancel()
-
 	reqBody := map[string]any{
 		"entrypoints": entrypoints,
 		"outdir":      outdir,
@@ -372,7 +508,7 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 		Error   *bunErrorJSON                     `json:"error"`
 	}
 
-	if err := r.postJSON(ctx, "/build", reqBody, &result); err != nil {
+	if err := r.buildExchange(reqBody, &result); err != nil {
 		return nil, err
 	}
 
@@ -418,9 +554,6 @@ func (r *Renderer) BuildSSR(entrypoints []string, outdir string, framework strin
 		return fmt.Errorf("missing outdir")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), buildTimeout)
-	defer cancel()
-
 	reqBody := map[string]any{
 		"entrypoints": entrypoints,
 		"outdir":      outdir,
@@ -433,7 +566,7 @@ func (r *Renderer) BuildSSR(entrypoints []string, outdir string, framework strin
 		Error *bunErrorJSON `json:"error"`
 	}
 
-	if err := r.postJSON(ctx, "/build", reqBody, &result); err != nil {
+	if err := r.buildExchange(reqBody, &result); err != nil {
 		return err
 	}
 
@@ -452,24 +585,32 @@ func (r *Renderer) BuildSSR(entrypoints []string, outdir string, framework strin
 	return nil
 }
 
-func (r *Renderer) postJSON(ctx context.Context, endpoint string, body any, result any) error {
-	jsonBody, err := json.Marshal(body)
+func (r *Renderer) buildExchange(reqBody any, result any) error {
+	payload, err := json.Marshal(reqBody)
 	if err != nil {
 		return err
 	}
-
-	req, err := newJSONRequest(ctx, endpoint, jsonBody)
-	if err != nil {
-		return err
-	}
-
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	return json.NewDecoder(resp.Body).Decode(result)
+	return r.retryStale(buildTimeout, func(c *rendererConn) error {
+		if err := writeFrame(c, frameKindBuild, payload); err != nil {
+			return err
+		}
+		kind, err := c.readByte()
+		if err != nil {
+			return err
+		}
+		switch kind {
+		case frameKindBuild:
+			b, err := c.readBytes()
+			if err != nil {
+				return err
+			}
+			return json.Unmarshal(b, result)
+		case frameKindError:
+			return c.readError()
+		default:
+			return fmt.Errorf("unexpected build response kind %d", kind)
+		}
+	})
 }
 
 func waitForSocket(socketPath string, timeout time.Duration) error {

@@ -117,11 +117,11 @@ func TestDevRendererSourceContainsPlugins(t *testing.T) {
 	for _, fw := range []core.Framework{core.FrameworkReact} {
 		a := ResolveAdapter(fw)
 		src := a.DevRendererSource()
-		if !strings.Contains(src, "Bun.serve") {
-			t.Fatalf("%s dev source missing Bun.serve", a.Name())
+		if !strings.Contains(src, "Bun.listen") {
+			t.Fatalf("%s dev source missing Bun.listen", a.Name())
 		}
-		if !strings.Contains(src, "/render") && !strings.Contains(src, "/build") {
-			t.Fatal("missing route handlers")
+		if !strings.Contains(src, "handleRender") && !strings.Contains(src, "handleBuild") {
+			t.Fatal("missing frame handlers")
 		}
 	}
 }

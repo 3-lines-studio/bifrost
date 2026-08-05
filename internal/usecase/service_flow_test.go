@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -30,6 +31,18 @@ func (f *fakeRenderer) Render(componentPath string, props any) (core.RenderedPag
 		return f.renderFn(componentPath, props)
 	}
 	return core.RenderedPage{}, nil
+}
+
+func (f *fakeRenderer) RenderBodyTo(w io.Writer, componentPath string, props any, onHead func(head string) error) error {
+	page, err := f.Render(componentPath, props)
+	if err != nil {
+		return err
+	}
+	if err := onHead(page.Head); err != nil {
+		return err
+	}
+	_, err = io.WriteString(w, page.Body)
+	return err
 }
 
 func (f *fakeRenderer) Build(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
@@ -93,14 +106,18 @@ func TestPageServiceDevSSRBuildsThenRenders(t *testing.T) {
 	if output.Action != core.ActionRenderSSR {
 		t.Fatalf("ServePage() action = %v", output.Action)
 	}
-	if output.HTML == "" {
-		t.Fatal("expected HTML output")
+	if output.Stream == nil {
+		t.Fatal("expected stream output")
 	}
-	if !strings.Contains(output.HTML, "<div>Hello</div>") {
-		t.Fatalf("expected rendered body, got %q", output.HTML)
+	var buf strings.Builder
+	if err := output.Stream(&buf); err != nil {
+		t.Fatalf("Stream() error = %v", err)
 	}
-	if !strings.Contains(output.HTML, "<title>Home</title>") {
-		t.Fatalf("expected head, got %q", output.HTML)
+	if !strings.Contains(buf.String(), "<div>Hello</div>") {
+		t.Fatalf("expected rendered body, got %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "<title>Home</title>") {
+		t.Fatalf("expected head, got %q", buf.String())
 	}
 	if renderer.buildCalls != 1 || renderer.buildSSRCalls != 1 {
 		t.Fatalf("expected one dev setup build, got Build=%d BuildSSR=%d", renderer.buildCalls, renderer.buildSSRCalls)
@@ -262,6 +279,50 @@ func main() {
 
 	if _, err := os.Stat(filepath.Join(tmpDir, ".bifrost", ".gitkeep")); err != nil {
 		t.Fatalf("expected .bifrost root preserved: %v", err)
+	}
+}
+
+func TestBuildProjectCopiesPublicFromModuleRoot(t *testing.T) {
+	t.Setenv("GOTOOLCHAIN", "local")
+	tmpDir := t.TempDir()
+	writeGoModWithBifrost(t, tmpDir)
+	appRoot := filepath.Join(tmpDir, "cmd", "server")
+	writeTestFile(t, filepath.Join(appRoot, "main.go"), `package main
+import "github.com/3-lines-studio/bifrost"
+func main() {
+	_ = bifrost.Page("/", "./web/pages/home.tsx", bifrost.WithClient())
+}`)
+	writeTestFile(t, filepath.Join(tmpDir, "web", "pages", "home.tsx"), "<title>Home</title>")
+	writeTestFile(t, filepath.Join(tmpDir, "public", "app.js"), "console.log('embedded public');")
+
+	renderer := &fakeRenderer{
+		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+			name := entryNames[0]
+			return map[string]core.ClientBuildResult{
+				name: {Script: "/dist/" + name + ".js"},
+			}, nil
+		},
+	}
+	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
+
+	result := service.BuildProject(context.Background(), BuildInput{
+		MainFile:   filepath.Join(appRoot, "main.go"),
+		ModuleRoot: tmpDir,
+		AppRoot:    appRoot,
+	})
+	if result.Error != nil {
+		t.Fatalf("BuildProject() error = %v", result.Error)
+	}
+	if !result.Success {
+		t.Fatal("expected build success")
+	}
+
+	copied, err := os.ReadFile(filepath.Join(appRoot, ".bifrost", "public", "app.js"))
+	if err != nil {
+		t.Fatalf("expected public asset copied into .bifrost/public: %v", err)
+	}
+	if string(copied) != "console.log('embedded public');" {
+		t.Fatalf("unexpected public asset content: %q", string(copied))
 	}
 }
 

@@ -15,17 +15,36 @@ type HTMLDocumentShell struct {
 	scriptSrc string
 	styleTags string
 	chunks    []string
+	staticLen int
+}
+
+// lengthCounter counts bytes written without retaining them.
+type lengthCounter int
+
+func (c *lengthCounter) Write(p []byte) (int, error) {
+	*c += lengthCounter(len(p))
+	return len(p), nil
+}
+
+func (c *lengthCounter) WriteString(s string) (int, error) {
+	*c += lengthCounter(len(s))
+	return len(s), nil
 }
 
 func NewHTMLDocumentShell(scriptSrc string, criticalCSS string, cssHrefs []string, chunks []string) (HTMLDocumentShell, error) {
 	if scriptSrc == "" {
 		return HTMLDocumentShell{}, errors.New("missing script src")
 	}
-	return HTMLDocumentShell{
+	shell := HTMLDocumentShell{
 		scriptSrc: scriptSrc,
 		styleTags: RenderStyleTags(criticalCSS, cssHrefs),
 		chunks:    append([]string(nil), chunks...),
-	}, nil
+	}
+	var n lengthCounter
+	_ = shell.WritePreamble(&n, "", "en", "")
+	_ = shell.WriteSuffix(&n, emptyPropsJSON)
+	shell.staticLen = int(n)
+	return shell, nil
 }
 
 // MarshalBifrostPropsJSON marshals props for embedding in the __BIFROST_PROPS__ script tag.
@@ -188,7 +207,18 @@ func (s HTMLDocumentShell) Render(bodyHTML string, props any, headHTML string, h
 		return "", err
 	}
 
+	lang := SanitizeHTMLLang(htmlLang)
+	class := SanitizeHTMLClass(htmlClass)
+	slack := 32
+	if lang != DefaultHTMLLang {
+		slack += len(lang)
+	}
+	if class != "" {
+		slack += len(class)*5 + 16
+	}
+
 	var sb strings.Builder
+	sb.Grow(s.staticLen + len(headHTML) + len(bodyHTML) + len(propsJSON) + slack)
 	if err := s.WritePreamble(&sb, headHTML, htmlLang, htmlClass); err != nil {
 		return "", err
 	}

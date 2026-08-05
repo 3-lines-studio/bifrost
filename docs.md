@@ -637,7 +637,7 @@ myapp/
 └── go.mod
 ```
 
-`.bifrost/`, `public/`, and component paths (`./pages/...`) resolve relative to `dir(main.go)` — the directory containing your main package. For single-binary projects where `main.go` is at the module root, this is the module root. `embed.go` must be in the same directory as `main.go` because `//go:embed` cannot reach parent directories.
+`.bifrost/` and component paths (`./pages/...`) resolve relative to `dir(main.go)` — the directory containing your main package. For single-binary projects where `main.go` is at the module root, this is the module root. `public/` resolves to `dir(main.go)/public` when it exists, otherwise to `<module root>/public` (matching how component paths fall back to the module root). `embed.go` must be in the same directory as `main.go` because `//go:embed` cannot reach parent directories.
 
 ### Multi-binary Projects
 

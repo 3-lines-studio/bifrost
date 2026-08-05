@@ -91,14 +91,3 @@ func LookupStaticRoute(entry *ManifestEntry, normalizedPath string) (htmlPath st
 	htmlPath, ok = entry.StaticRoutes[normalizedPath]
 	return htmlPath, ok
 }
-
-func MatchStaticRoute(manifest *Manifest, entryName string, requestPath string) (htmlPath string, found bool) {
-	if manifest == nil {
-		return "", false
-	}
-	entry, ok := manifest.Entries[entryName]
-	if !ok {
-		return "", false
-	}
-	return LookupStaticRoute(&entry, NormalizePath(requestPath))
-}

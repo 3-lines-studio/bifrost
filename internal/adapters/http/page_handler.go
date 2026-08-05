@@ -126,13 +126,26 @@ func (h *PageHandler) dispatchPageOutput(w http.ResponseWriter, req *http.Reques
 	case core.ActionRenderSSR:
 		if output.Markdown != "" {
 			h.serveMarkdown(w, output.Markdown)
+		} else if output.Stream != nil {
+			h.serveStreamed(w, req, output.Stream)
 		} else {
 			h.serveHTML(w, output.HTML)
 		}
 
 	case core.ActionRenderClientOnlyShell,
 		core.ActionRenderStaticPrerender:
-		h.serveHTML(w, output.HTML)
+		if output.Stream != nil {
+			h.serveStreamed(w, req, output.Stream)
+		} else {
+			h.serveHTML(w, output.HTML)
+		}
+	}
+}
+
+func (h *PageHandler) serveStreamed(w http.ResponseWriter, req *http.Request, stream func(io.Writer) error) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := stream(w); err != nil {
+		h.serveError(w, req, err)
 	}
 }
 
