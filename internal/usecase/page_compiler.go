@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/3-lines-studio/bifrost/internal/adapters/react"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
@@ -43,32 +44,24 @@ func CalculateImportPath(entryPath, absComponentPath string) (string, error) {
 	return relPath, nil
 }
 
-// WriteSSREntryFile writes the framework SSR entry template with COMPONENT_PATH replaced.
-func WriteSSREntryFile(adapter core.FrameworkAdapter, entryPath, importPath string) error {
-	content := strings.ReplaceAll(adapter.SSREntryTemplate(), "COMPONENT_PATH", importPath)
+// WriteSSREntryFile writes the React SSR entry template with COMPONENT_PATH replaced.
+func WriteSSREntryFile(entryPath, importPath string) error {
+	content := strings.ReplaceAll(react.SSREntryTemplate(), "COMPONENT_PATH", importPath)
 	return os.WriteFile(entryPath, []byte(content), 0o644)
 }
 
 // WriteClientEntryFile writes the client/hydration entry for the given page mode.
-func WriteClientEntryFile(adapter core.FrameworkAdapter, entryPath, importPath string, mode core.PageMode) error {
-	var tmpl string
-	if mode == core.ModeClientOnly {
-		tmpl = adapter.ClientEntryTemplate(core.ModeClientOnly)
-	} else {
-		tmpl = adapter.ClientEntryTemplate(core.ModeSSR)
-	}
+func WriteClientEntryFile(entryPath, importPath string, mode core.PageMode) error {
+	tmpl := react.ClientEntryTemplate(mode)
 	content := strings.ReplaceAll(tmpl, "COMPONENT_PATH", importPath)
 	return os.WriteFile(entryPath, []byte(content), 0o644)
 }
 
 // CompileDevPageOnDemand writes client + SSR entry files under .bifrost/entries and runs
 // client Build and SSR BuildSSR. Used by the dev server first-request setup path.
-func CompileDevPageOnDemand(renderer Renderer, cwd string, entryName string, config core.PageConfig, adapter core.FrameworkAdapter) error {
+func CompileDevPageOnDemand(renderer Renderer, cwd string, entryName string, config core.PageConfig) error {
 	if renderer == nil {
 		return fmt.Errorf("renderer is nil")
-	}
-	if adapter == nil {
-		return fmt.Errorf("adapter is nil")
 	}
 
 	entryDir := filepath.Join(cwd, ".bifrost", "entries")
@@ -84,17 +77,17 @@ func CompileDevPageOnDemand(renderer Renderer, cwd string, entryName string, con
 		return fmt.Errorf("empty component path")
 	}
 
-	entryFile := filepath.Join(entryDir, entryName+adapter.EntryFileExtension())
+	entryFile := filepath.Join(entryDir, entryName+react.EntryFileExtension)
 	importPath, err := CalculateImportPath(entryFile, absComponent)
 	if err != nil {
 		return fmt.Errorf("failed to calculate import path: %w", err)
 	}
 
-	if err := WriteClientEntryFile(adapter, entryFile, importPath, config.Mode); err != nil {
+	if err := WriteClientEntryFile(entryFile, importPath, config.Mode); err != nil {
 		return fmt.Errorf("failed to write client entry file: %w", err)
 	}
 
-	if _, err := renderer.Build([]string{entryFile}, outdir, []string{entryName}, adapter.Name()); err != nil {
+	if _, err := renderer.Build([]string{entryFile}, outdir, []string{entryName}); err != nil {
 		return fmt.Errorf("failed to build client entry: %w", err)
 	}
 
@@ -104,15 +97,15 @@ func CompileDevPageOnDemand(renderer Renderer, cwd string, entryName string, con
 	}
 
 	ssrEntryName := entryName + "-ssr"
-	ssrEntryFile := filepath.Join(entryDir, ssrEntryName+adapter.EntryFileExtension())
+	ssrEntryFile := filepath.Join(entryDir, ssrEntryName+react.EntryFileExtension)
 	ssrImportPath, err := CalculateImportPath(ssrEntryFile, absComponent)
 	if err != nil {
 		return fmt.Errorf("failed to calculate SSR import path: %w", err)
 	}
-	if err := WriteSSREntryFile(adapter, ssrEntryFile, ssrImportPath); err != nil {
+	if err := WriteSSREntryFile(ssrEntryFile, ssrImportPath); err != nil {
 		return fmt.Errorf("failed to write SSR entry file: %w", err)
 	}
-	if err := renderer.BuildSSR([]string{ssrEntryFile}, ssrDir, adapter.Name()); err != nil {
+	if err := renderer.BuildSSR([]string{ssrEntryFile}, ssrDir); err != nil {
 		return fmt.Errorf("failed to build SSR entry: %w", err)
 	}
 	if _, err := normalizeSSRBundle(ssrDir, entryName); err != nil {

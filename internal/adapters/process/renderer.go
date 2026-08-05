@@ -3,9 +3,7 @@ package process
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	_ "embed"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,7 +33,7 @@ var (
 	reactCompilerPluginSource string
 )
 
-func RuntimeSource(mode core.Mode, frameworks ...core.Framework) string {
+func RuntimeSource(mode core.Mode) string {
 	tailwindPlugin := `(await import("bun-plugin-tailwind")).default`
 	if mode == core.ModeProd {
 		tailwindPlugin = "undefined"
@@ -68,22 +66,9 @@ type renderRequestPayload struct {
 	Props any    `json:"props"`
 }
 
-func uniqueSocketPath() string {
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	id := hex.EncodeToString(b[:])
-	return filepath.Join(os.TempDir(), fmt.Sprintf("bifrost-%d-%s.sock", os.Getpid(), id))
-}
-
-func removeStaleSocket(path string) {
-	if info, err := os.Stat(path); err == nil && !info.IsDir() {
-		_ = os.Remove(path)
-	}
-}
-
 func NewRenderer(mode core.Mode, source string, extraEnv ...string) (*Renderer, error) {
 	if source == "" {
-		source = RuntimeSource(mode, core.FrameworkReact)
+		source = RuntimeSource(mode)
 	}
 
 	cwd, err := os.Getwd()
@@ -127,8 +112,20 @@ func newHTTPClient(socket string) *http.Client {
 }
 
 func startRendererProcess(cfg rendererProcessConfig) (*Renderer, error) {
-	socket := uniqueSocketPath()
-	removeStaleSocket(socket)
+	socketDir, err := os.MkdirTemp("", "bifrost-socket-*")
+	if err != nil {
+		if cfg.cleanup != nil {
+			cfg.cleanup()
+		}
+		return nil, fmt.Errorf("failed to create runtime socket directory: %w", err)
+	}
+	socket := filepath.Join(socketDir, "runtime.sock")
+	cleanup := func() {
+		_ = os.RemoveAll(socketDir)
+		if cfg.cleanup != nil {
+			cfg.cleanup()
+		}
+	}
 
 	cmd := exec.Command(cfg.command[0], cfg.command[1:]...)
 	cmd.Dir = cfg.cwd
@@ -140,13 +137,11 @@ func startRendererProcess(cfg rendererProcessConfig) (*Renderer, error) {
 	}
 
 	if err := cmd.Start(); err != nil {
-		if cfg.cleanup != nil {
-			cfg.cleanup()
-		}
+		cleanup()
 		return nil, fmt.Errorf("failed to start runtime process: %w", err)
 	}
 
-	if err := waitForStartedSocket(cmd, socket, cfg.cleanup); err != nil {
+	if err := waitForStartedSocket(cmd, socket, cleanup); err != nil {
 		return nil, err
 	}
 
@@ -154,7 +149,7 @@ func startRendererProcess(cfg rendererProcessConfig) (*Renderer, error) {
 		cmd:     cmd,
 		socket:  socket,
 		client:  newHTTPClient(socket),
-		cleanup: cfg.cleanup,
+		cleanup: cleanup,
 	}, nil
 }
 
@@ -357,7 +352,7 @@ func (r *Renderer) RenderContext(ctx context.Context, path string, props any) (c
 	return core.RenderedPage{Head: head, Body: body}, nil
 }
 
-func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
 	if len(entrypoints) == 0 {
 		return nil, fmt.Errorf("missing entrypoints")
 	}
@@ -377,7 +372,6 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 		"entrypoints": entrypoints,
 		"outdir":      outdir,
 		"entryNames":  entryNames,
-		"framework":   framework,
 	}
 
 	var result struct {
@@ -423,7 +417,7 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 	return out, nil
 }
 
-func (r *Renderer) BuildSSR(entrypoints []string, outdir string, framework string) error {
+func (r *Renderer) BuildSSR(entrypoints []string, outdir string) error {
 	if len(entrypoints) == 0 {
 		return fmt.Errorf("missing entrypoints")
 	}
@@ -439,7 +433,6 @@ func (r *Renderer) BuildSSR(entrypoints []string, outdir string, framework strin
 		"entrypoints": entrypoints,
 		"outdir":      outdir,
 		"target":      "bun",
-		"framework":   framework,
 	}
 
 	var result struct {

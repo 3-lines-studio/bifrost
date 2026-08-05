@@ -2,7 +2,6 @@ package core
 
 import (
 	"encoding/json"
-	"reflect"
 	"regexp"
 	"strings"
 )
@@ -47,155 +46,9 @@ func stripReservedKeysFromMap(m map[string]any) (cleaned map[string]any, lang st
 	return cleaned, rawLang, rawClass, true
 }
 
-// reservedKeysFromStruct looks up the reserved HTML lang/class keys in struct props
-// without a JSON round trip. When any reserved key is found it returns a map of the
-// remaining fields, matching the legacy JSON-decoded output shape.
-func reservedKeysFromStruct(props any) (cleaned map[string]any, lang string, class string, hasReserved bool) {
-	t := reflect.TypeOf(props)
-	v := reflect.ValueOf(props)
-	if t == nil {
-		return nil, "", "", false
-	}
-	for t.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return nil, "", "", false
-		}
-		t = t.Elem()
-		v = v.Elem()
-	}
-	if t.Kind() != reflect.Struct {
-		return nil, "", "", false
-	}
-	lang, class, hasReserved = findReservedStructFields(t, v)
-	if !hasReserved {
-		return nil, "", "", false
-	}
-	return structFieldsAsMap(t, v), lang, class, true
-}
-
-func findReservedStructFields(t reflect.Type, v reflect.Value) (lang string, class string, found bool) {
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		fv := v.Field(i)
-		if f.Anonymous {
-			tag := f.Tag.Get("json")
-			if tag == "-" {
-				continue
-			}
-			name, _, _ := strings.Cut(tag, ",")
-			if name == "" {
-				ft := f.Type
-				if ft.Kind() == reflect.Pointer {
-					if fv.IsNil() {
-						continue
-					}
-					ft = ft.Elem()
-					fv = fv.Elem()
-				}
-				if ft.Kind() == reflect.Struct {
-					l, c, f2 := findReservedStructFields(ft, fv)
-					if f2 {
-						lang, class, found = l, c, true
-					}
-				}
-				continue
-			}
-		}
-		if f.PkgPath != "" {
-			continue
-		}
-		name := jsonFieldName(f)
-		switch name {
-		case PropHTMLLang:
-			if fv.Kind() == reflect.String {
-				lang, found = fv.String(), true
-			}
-		case PropHTMLClass:
-			if fv.Kind() == reflect.String {
-				class, found = fv.String(), true
-			}
-		}
-	}
-	return lang, class, found
-}
-
-func structFieldsAsMap(t reflect.Type, v reflect.Value) map[string]any {
-	cleaned := make(map[string]any, t.NumField())
-	var walk func(t reflect.Type, v reflect.Value)
-	walk = func(t reflect.Type, v reflect.Value) {
-		for i := 0; i < t.NumField(); i++ {
-			f := t.Field(i)
-			fv := v.Field(i)
-			if f.Anonymous {
-				tag := f.Tag.Get("json")
-				if tag == "-" {
-					continue
-				}
-				name, _, _ := strings.Cut(tag, ",")
-				if name == "" {
-					ft := f.Type
-					if ft.Kind() == reflect.Pointer {
-						if fv.IsNil() {
-							continue
-						}
-						ft = ft.Elem()
-						fv = fv.Elem()
-					}
-					if ft.Kind() == reflect.Struct {
-						walk(ft, fv)
-					}
-					continue
-				}
-			}
-			if f.PkgPath != "" {
-				continue
-			}
-			name := jsonFieldName(f)
-			if name == PropHTMLLang || name == PropHTMLClass || name == "-" {
-				continue
-			}
-			if jsonFieldOmitEmpty(f) && fv.IsZero() {
-				continue
-			}
-			cleaned[name] = fv.Interface()
-		}
-	}
-	walk(t, v)
-	return cleaned
-}
-
-func jsonFieldName(f reflect.StructField) string {
-	tag := f.Tag.Get("json")
-	if tag == "" {
-		return f.Name
-	}
-	name, _, _ := strings.Cut(tag, ",")
-	if name == "" {
-		return f.Name
-	}
-	return name
-}
-
-func jsonFieldOmitEmpty(f reflect.StructField) bool {
-	tag := f.Tag.Get("json")
-	_, _, has := strings.Cut(tag, ",")
-	return has && strings.Contains(tag, "omitempty")
-}
-
 func isPropsMap(props any) bool {
 	_, ok := props.(map[string]any)
 	return ok
-}
-
-func isStructProps(props any) bool {
-	t := reflect.TypeOf(props)
-	if t == nil {
-		return false
-	}
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	return t.Kind() == reflect.Struct
 }
 
 func jsonRoundTrip(props any) map[string]any {
@@ -227,23 +80,15 @@ func ResolveHTMLDocumentAttrs(appDefaultLang, pageLang, pageClass string, props 
 				propsForReact = props
 			}
 		default:
-			cleaned, rawLang, rawClass, hasReserved := reservedKeysFromStruct(props)
+			// Use encoding/json for typed maps and structs so tags and MarshalJSON
+			// define the same props shape sent to React.
+			cleaned, rawLang, rawClass, hasReserved := stripReservedKeysFromMap(jsonRoundTrip(props))
 			if hasReserved {
 				fromLoaderLang = rawLang
 				fromLoaderClass = rawClass
 				propsForReact = cleaned
-			} else if isStructProps(props) {
-				propsForReact = props
 			} else {
-				// Typed maps, slices, scalars: legacy JSON round trip to find reserved keys.
-				cleaned, rawLang, rawClass, hasReserved := stripReservedKeysFromMap(jsonRoundTrip(props))
-				if hasReserved {
-					fromLoaderLang = rawLang
-					fromLoaderClass = rawClass
-					propsForReact = cleaned
-				} else {
-					propsForReact = props
-				}
+				propsForReact = props
 			}
 		}
 	}

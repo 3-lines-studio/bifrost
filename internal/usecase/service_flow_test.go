@@ -19,8 +19,8 @@ type fakeRenderer struct {
 	buildSSRBatchSizes   []int
 	individualBuildCalls int
 	renderCalls          int
-	buildFn              func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error)
-	buildSSRFn           func(entrypoints []string, outdir string, framework string) error
+	buildFn              func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error)
+	buildSSRFn           func(entrypoints []string, outdir string) error
 	renderFn             func(componentPath string, props any) (core.RenderedPage, error)
 }
 
@@ -32,22 +32,22 @@ func (f *fakeRenderer) Render(componentPath string, props any) (core.RenderedPag
 	return core.RenderedPage{}, nil
 }
 
-func (f *fakeRenderer) Build(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+func (f *fakeRenderer) Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
 	f.buildCalls++
 	if len(entryNames) == 1 {
 		f.individualBuildCalls++
 	}
 	if f.buildFn != nil {
-		return f.buildFn(entrypoints, outdir, entryNames, framework)
+		return f.buildFn(entrypoints, outdir, entryNames)
 	}
 	return map[string]core.ClientBuildResult{}, nil
 }
 
-func (f *fakeRenderer) BuildSSR(entrypoints []string, outdir string, framework string) error {
+func (f *fakeRenderer) BuildSSR(entrypoints []string, outdir string) error {
 	f.buildSSRCalls++
 	f.buildSSRBatchSizes = append(f.buildSSRBatchSizes, len(entrypoints))
 	if f.buildSSRFn != nil {
-		return f.buildSSRFn(entrypoints, outdir, framework)
+		return f.buildSSRFn(entrypoints, outdir)
 	}
 	return nil
 }
@@ -57,7 +57,7 @@ func TestPageServiceDevSSRBuildsThenRenders(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "export default function Page(){ return <div>Hello</div> }")
 
 	renderer := &fakeRenderer{
-		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
+		buildSSRFn: func(entrypoints []string, outdir string) error {
 			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
 			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
 			return nil
@@ -69,7 +69,7 @@ func TestPageServiceDevSSRBuildsThenRenders(t *testing.T) {
 			return core.RenderedPage{Head: "<title>Home</title>", Body: "<div>Hello</div>"}, nil
 		},
 	}
-	service := NewPageService(renderer, nil, nil)
+	service := NewPageService(renderer, nil)
 
 	restore := chdirForTest(t, tmpDir)
 	defer restore()
@@ -109,13 +109,13 @@ func TestPageServiceStaticPrerenderReturnsNotFoundForMissingPath(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "blog.tsx"), "export default function Page(){ return <div>Blog</div> }")
 
 	renderer := &fakeRenderer{
-		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
+		buildSSRFn: func(entrypoints []string, outdir string) error {
 			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
 			writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
 			return nil
 		},
 	}
-	service := NewPageService(renderer, nil, nil)
+	service := NewPageService(renderer, nil)
 
 	restore := chdirForTest(t, tmpDir)
 	defer restore()
@@ -158,7 +158,7 @@ func main() {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "about.tsx"), "<title>About</title>")
 
 	renderer := &fakeRenderer{
-		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
 			if len(entryNames) > 1 {
 				return nil, errors.New("batch failed")
 			}
@@ -170,7 +170,7 @@ func main() {
 			}, nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
+	service := NewBuildService(renderer, nil, &mockCLIOutput{})
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "main.go"),
@@ -223,14 +223,14 @@ func main() {
 	writeTestFile(t, filepath.Join(tmpDir, ".bifrost", "public", "stale.txt"), "stale")
 
 	renderer := &fakeRenderer{
-		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
 			name := entryNames[0]
 			return map[string]core.ClientBuildResult{
 				name: {Script: "/dist/" + name + ".js"},
 			}, nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
+	service := NewBuildService(renderer, nil, &mockCLIOutput{})
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "main.go"),
@@ -276,14 +276,14 @@ func main() {
 	writeTestFile(t, filepath.Join(tmpDir, "public", "app.js"), "console.log('embedded public');")
 
 	renderer := &fakeRenderer{
-		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
 			name := entryNames[0]
 			return map[string]core.ClientBuildResult{
 				name: {Script: "/dist/" + name + ".js"},
 			}, nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
+	service := NewBuildService(renderer, nil, &mockCLIOutput{})
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(appRoot, "main.go"),
@@ -404,14 +404,14 @@ func main() {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "about.tsx"), "<title>About</title>")
 
 	renderer := &fakeRenderer{
-		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
 			result := make(map[string]core.ClientBuildResult, len(entryNames))
 			for _, name := range entryNames {
 				result[name] = core.ClientBuildResult{Script: "/dist/" + name + ".js"}
 			}
 			return result, nil
 		},
-		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
+		buildSSRFn: func(entrypoints []string, outdir string) error {
 			for _, entryPath := range entrypoints {
 				name := strings.TrimSuffix(filepath.Base(entryPath), filepath.Ext(entryPath))
 				writeTestFile(t, filepath.Join(outdir, name+".js"), "// ssr")
@@ -419,8 +419,8 @@ func main() {
 			return nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
-	service.compileRuntimeFn = func(bifrostDir string, frameworks []core.Framework) error { return nil }
+	service := NewBuildService(renderer, nil, &mockCLIOutput{})
+	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "main.go"),
@@ -462,14 +462,14 @@ func main() {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "about.tsx"), "<title>About</title>")
 
 	renderer := &fakeRenderer{
-		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
 			result := make(map[string]core.ClientBuildResult, len(entryNames))
 			for _, name := range entryNames {
 				result[name] = core.ClientBuildResult{Script: "/dist/" + name + ".js"}
 			}
 			return result, nil
 		},
-		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
+		buildSSRFn: func(entrypoints []string, outdir string) error {
 			if len(entrypoints) > 1 {
 				return errors.New("batch failed")
 			}
@@ -478,8 +478,8 @@ func main() {
 			return nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
-	service.compileRuntimeFn = func(bifrostDir string, frameworks []core.Framework) error { return nil }
+	service := NewBuildService(renderer, nil, &mockCLIOutput{})
+	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "main.go"),
@@ -512,20 +512,20 @@ func main() {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "<title>Home</title>")
 
 	renderer := &fakeRenderer{
-		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
 			return map[string]core.ClientBuildResult{
 				entryNames[0]: {Script: "/dist/" + entryNames[0] + ".js"},
 			}, nil
 		},
-		buildSSRFn: func(entrypoints []string, outdir string, framework string) error {
+		buildSSRFn: func(entrypoints []string, outdir string) error {
 			name := strings.TrimSuffix(filepath.Base(entrypoints[0]), filepath.Ext(entrypoints[0]))
 			writeTestFile(t, filepath.Join(outdir, ".bifrost", "entries", name+".js"), "// misplaced ssr")
 			writeTestFile(t, filepath.Join(outdir, "nested", name+".js"), "// misplaced ssr duplicate")
 			return nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
-	service.compileRuntimeFn = func(bifrostDir string, frameworks []core.Framework) error { return nil }
+	service := NewBuildService(renderer, nil, &mockCLIOutput{})
+	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "main.go"),
@@ -550,8 +550,8 @@ func main() {
 
 func writeGoModWithBifrost(t *testing.T, dir string) {
 	t.Helper()
-	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\n\ngo 1.25\n\nrequire github.com/3-lines-studio/bifrost v0.0.0\n\nreplace github.com/3-lines-studio/bifrost => ./bifrost_stub\n")
-	writeTestFile(t, filepath.Join(dir, "bifrost_stub", "go.mod"), "module github.com/3-lines-studio/bifrost\n\ngo 1.25\n")
+	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\n\ngo 1.26.5\n\nrequire github.com/3-lines-studio/bifrost v0.0.0\n\nreplace github.com/3-lines-studio/bifrost => ./bifrost_stub\n")
+	writeTestFile(t, filepath.Join(dir, "bifrost_stub", "go.mod"), "module github.com/3-lines-studio/bifrost\n\ngo 1.26.5\n")
 	writeTestFile(t, filepath.Join(dir, "bifrost_stub", "bifrost.go"), `package bifrost
 
 type Route struct{}
@@ -604,7 +604,7 @@ func Register() {
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "<title>Home</title>")
 
 	renderer := &fakeRenderer{
-		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
 			result := make(map[string]core.ClientBuildResult, len(entryNames))
 			for _, name := range entryNames {
 				result[name] = core.ClientBuildResult{Script: "/dist/" + name + ".js"}
@@ -612,8 +612,8 @@ func Register() {
 			return result, nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
-	service.compileRuntimeFn = func(bifrostDir string, frameworks []core.Framework) error { return nil }
+	service := NewBuildService(renderer, nil, &mockCLIOutput{})
+	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "main.go"),
@@ -649,7 +649,7 @@ func main() {
 	writeTestFile(t, filepath.Join(tmpDir, "cmd", "app", "pages", "home.tsx"), "<title>Home</title>")
 
 	renderer := &fakeRenderer{
-		buildFn: func(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
+		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
 			result := make(map[string]core.ClientBuildResult, len(entryNames))
 			for _, name := range entryNames {
 				result[name] = core.ClientBuildResult{Script: "/dist/" + name + ".js"}
@@ -657,8 +657,8 @@ func main() {
 			return result, nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{}, nil)
-	service.compileRuntimeFn = func(bifrostDir string, frameworks []core.Framework) error { return nil }
+	service := NewBuildService(renderer, nil, &mockCLIOutput{})
+	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "cmd", "app", "main.go"),
@@ -692,7 +692,7 @@ func main() {
 	_ = bifrost.Page("/", "./pages/home.tsx", bifrost.WithClient())
 }`)
 
-	service := NewBuildService(&fakeRenderer{}, nil, &mockCLIOutput{}, nil)
+	service := NewBuildService(&fakeRenderer{}, nil, &mockCLIOutput{})
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "main.go"),
 		ModuleRoot: tmpDir,

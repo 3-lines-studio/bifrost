@@ -1,6 +1,9 @@
 package core
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 type Route struct {
 	Pattern       string
@@ -17,11 +20,21 @@ func Page(pattern string, componentPath string, opts ...PageOption) Route {
 }
 
 func PageConfigFromRoute(route Route) (PageConfig, error) {
+	if route.Pattern == "" {
+		return PageConfig{}, fmt.Errorf("bifrost: page pattern cannot be empty")
+	}
+	if strings.TrimSpace(route.ComponentPath) == "" {
+		return PageConfig{}, fmt.Errorf("bifrost: component path cannot be empty for pattern %q", route.Pattern)
+	}
+
 	config := PageConfig{
 		ComponentPath: route.ComponentPath,
 		Mode:          ModeSSR,
 	}
 	for _, opt := range route.Options {
+		if opt == nil {
+			return PageConfig{}, fmt.Errorf("bifrost: page %q has a nil option", route.ComponentPath)
+		}
 		opt(&config)
 	}
 	if config.modeOptions == 3 {

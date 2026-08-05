@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"github.com/3-lines-studio/bifrost/internal/adapters/env"
-	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
 	adaptersfs "github.com/3-lines-studio/bifrost/internal/adapters/fs"
 	adaptershttp "github.com/3-lines-studio/bifrost/internal/adapters/http"
 	"github.com/3-lines-studio/bifrost/internal/adapters/runtime"
@@ -29,7 +28,6 @@ type App struct {
 	manifest     *core.Manifest
 	pageConfigs  map[string]*core.PageConfig
 	config       *core.Config
-	adapter      core.FrameworkAdapter
 	routesSealed bool
 }
 
@@ -40,6 +38,9 @@ func New(assetsFS embed.FS, routes ...core.Route) (*App, error) {
 func NewWithOptions(assetsFS embed.FS, opts []core.ConfigOption, routes ...core.Route) (*App, error) {
 	config := &core.Config{}
 	for _, o := range opts {
+		if o == nil {
+			return nil, fmt.Errorf("bifrost: config option cannot be nil")
+		}
 		o(config)
 	}
 	return newApp(assetsFS, routes, config)
@@ -52,7 +53,6 @@ func newApp(assetsFS embed.FS, routes []core.Route, config *core.Config) (*App, 
 		isDev:       mode == core.ModeDev,
 		pageConfigs: make(map[string]*core.PageConfig),
 		config:      config,
-		adapter:     framework.DefaultAdapter(),
 	}
 	if err := app.addRoutes(routes); err != nil {
 		return nil, err
@@ -62,20 +62,32 @@ func newApp(assetsFS embed.FS, routes []core.Route, config *core.Config) (*App, 
 		return app, nil
 	}
 
-	h, err := runtime.NewHost(assetsFS, mode, app.adapter)
+	h, err := runtime.NewHost(assetsFS, mode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bifrost renderer: %w", err)
 	}
 	app.host = h
 	app.manifest = h.Manifest()
+	if mode != core.ModeDev {
+		if err := validateProductionManifest(app.routeConfigs, app.manifest); err != nil {
+			_ = h.Stop()
+			return nil, fmt.Errorf("bifrost: invalid build assets: %w", err)
+		}
+	}
 
 	return app, nil
 }
 
 func (a *App) addRoutes(routes []core.Route) error {
 	modes := make(map[string]core.PageMode, len(a.pageConfigs)+len(routes))
+	patterns := make(map[string]struct{}, len(a.routes)+len(routes))
+	entryComponents := make(map[string]string, len(a.routes)+len(routes))
 	for componentPath, config := range a.pageConfigs {
 		modes[componentPath] = config.Mode
+	}
+	for _, route := range a.routes {
+		patterns[route.Pattern] = struct{}{}
+		entryComponents[core.EntryNameForPath(route.ComponentPath)] = route.ComponentPath
 	}
 
 	storedRoutes := make([]core.Route, len(routes))
@@ -86,6 +98,22 @@ func (a *App) addRoutes(routes []core.Route) error {
 		if err != nil {
 			return err
 		}
+		if _, exists := patterns[route.Pattern]; exists {
+			return fmt.Errorf("bifrost: duplicate page pattern %q", route.Pattern)
+		}
+		patterns[route.Pattern] = struct{}{}
+
+		entryName := core.EntryNameForPath(route.ComponentPath)
+		if previous, exists := entryComponents[entryName]; exists && previous != route.ComponentPath {
+			return fmt.Errorf(
+				"bifrost: components %q and %q map to the same build entry %q",
+				previous,
+				route.ComponentPath,
+				entryName,
+			)
+		}
+		entryComponents[entryName] = route.ComponentPath
+
 		if previous, ok := modes[route.ComponentPath]; ok && previous != pc.Mode {
 			return fmt.Errorf(
 				"bifrost: component %q cannot use both %s and %s modes",
@@ -112,11 +140,24 @@ func (a *App) Handle(routes ...core.Route) error {
 	if a.routesSealed {
 		return fmt.Errorf("bifrost: Handle after Wrap or Handler")
 	}
+	if !a.isDev && a.manifest != nil {
+		configs := make([]core.PageConfig, len(routes))
+		for i, route := range routes {
+			config, err := core.PageConfigFromRoute(route)
+			if err != nil {
+				return err
+			}
+			configs[i] = config
+		}
+		if err := validateProductionManifest(configs, a.manifest); err != nil {
+			return fmt.Errorf("bifrost: invalid build assets: %w", err)
+		}
+	}
 	return a.addRoutes(routes)
 }
 
 func (a *App) runExportMode() {
-	h, err := runtime.NewHost(a.assetsFS, core.ModeExport, a.adapter)
+	h, err := runtime.NewHost(a.assetsFS, core.ModeExport)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Export failed: %v\n", err)
 		os.Exit(1)
@@ -131,6 +172,7 @@ func (a *App) runExportMode() {
 
 	if err := a.ExportStaticPages(outputDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Export failed: %v\n", err)
+		_ = a.Stop()
 		os.Exit(1)
 	}
 
@@ -163,7 +205,7 @@ func (a *App) Wrap(api Router) http.Handler {
 	}
 
 	fsAdapter := adaptersfs.NewEmbedFileSystem(a.assetsFS)
-	pageService := usecase.NewPageService(a.host.Client(), fsAdapter, a.adapter)
+	pageService := usecase.NewPageService(a.host.Client(), fsAdapter)
 
 	for i, route := range a.routes {
 		config := a.routeConfigs[i]

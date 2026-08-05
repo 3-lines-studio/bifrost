@@ -30,7 +30,7 @@ Bifrost is organized into focused internal packages:
 - `internal/adapters/process` — Bun renderer process and bundle IPC
 - `internal/adapters/runtime` — Renderer host lifecycle and embedded runtime
 - `internal/adapters/fs` — Filesystem and embed abstractions
-- `internal/adapters/framework` — React entry templates
+- `internal/adapters/react` — React entry templates and runtime source
 - `internal/adapters/cli` — Terminal output and build reports
 - Root `bifrost` package — Public `App` API (`New`, `Page`, `Wrap`, …)
 
@@ -88,8 +88,10 @@ func main() {
     // Setup API routes
     api := http.NewServeMux()
     
-    // Start server
-    log.Fatal(http.ListenAndServe(":8080", app.Wrap(api)))
+    // Start server. Return from main so deferred cleanup runs.
+    if err := http.ListenAndServe(":8080", app.Wrap(api)); err != nil {
+        log.Printf("server stopped: %v", err)
+    }
 }
 ```
 
@@ -257,7 +259,7 @@ Routes normally go to `New`. To add routes later, call `Handle` before `Wrap` or
 func (app *App) Handle(routes ...Route) error
 ```
 
-`Handle` returns an error for conflicting shared-component modes or if route registration is already sealed.
+`Handle` returns an error for invalid or duplicate routes, build-entry name collisions, conflicting shared-component modes, stale production assets, or route registration after `Wrap`/`Handler`.
 
 Bifrost provides two methods to get an `http.Handler`:
 
@@ -514,6 +516,8 @@ Bifrost returns initialization errors from `New` in production:
 
 - Missing `embed.FS`
 - Missing or invalid `manifest.json`
+- Missing, stale, or mode-mismatched page entries
+- Missing client scripts, client HTML shells, or SSR bundles
 - Missing embedded Bun runtime for SSR pages
 
 Handle the error before starting the HTTP server. This keeps setup failures out of request handling.
@@ -684,7 +688,7 @@ Each build writes only to its own `dir(main.go)/.bifrost/`. No collision — eve
 
 ## Best Practices
 
-1. **Always defer Stop()**: `defer app.Stop()` after creating the app
+1. **Always stop the app**: `defer app.Stop()` after creation, return from `main` on server errors instead of calling `log.Fatal`, and call `Stop` during graceful signal shutdown
 2. **Use typed options**: `WithLoader()`, `WithClient()`, `WithStatic()`
 3. **Test mode behavior**: Set `BIFROST_DEV=1` explicitly in tests that render components
 4. **Strict production**: Always embed `.bifrost` and run `bifrost build ./main.go`

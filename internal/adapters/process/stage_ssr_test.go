@@ -79,6 +79,30 @@ func TestExtractSSRBundlesFromEmbed(t *testing.T) {
 	}
 }
 
+func TestStageSSRBundlesRejectsUnsafePaths(t *testing.T) {
+	t.Parallel()
+
+	paths := []string{"../../outside.js", "/ssr/../../../outside.js", "/other/bundle.js"}
+	for _, ssrPath := range paths {
+		t.Run(ssrPath, func(t *testing.T) {
+			readCalled := false
+			manifest := &core.Manifest{Entries: map[string]core.ManifestEntry{
+				"page": {SSR: ssrPath},
+			}}
+			_, _, err := StageSSRBundles(func(string) ([]byte, error) {
+				readCalled = true
+				return nil, nil
+			}, manifest)
+			if err == nil {
+				t.Fatal("expected unsafe path to return an error")
+			}
+			if readCalled {
+				t.Fatal("unsafe path reached the file reader")
+			}
+		})
+	}
+}
+
 func TestResolveStagedSSRBundlePath(t *testing.T) {
 	t.Parallel()
 

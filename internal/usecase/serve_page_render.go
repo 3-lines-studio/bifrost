@@ -152,9 +152,10 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 			}
 		}
 		return ServePageOutput{
-			Action:   core.ActionRenderSSR,
-			Markdown: md,
-			Props:    syncPropsForReact,
+			Action:     core.ActionRenderSSR,
+			Markdown:   md,
+			IsMarkdown: true,
+			Props:      syncPropsForReact,
 		}
 	}
 

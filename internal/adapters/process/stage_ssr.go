@@ -3,6 +3,7 @@ package process
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -32,6 +33,10 @@ func StageSSRBundles(read ReadSSRBundle, manifest *core.Manifest) (tempDir strin
 		if entry.SSR == "" {
 			continue
 		}
+		if _, pathErr := cleanSSRBundlePath(entry.SSR); pathErr != nil {
+			cleanup()
+			return "", nil, fmt.Errorf("invalid SSR bundle path for %s: %w", entryName, pathErr)
+		}
 		data, rerr := read(entry.SSR)
 		if rerr != nil {
 			cleanup()
@@ -54,6 +59,17 @@ func StageSSRBundles(read ReadSSRBundle, manifest *core.Manifest) (tempDir strin
 // ResolveStagedSSRBundlePath maps a manifest SSR path such as /ssr/page-ssr.js to the
 // absolute path used inside an extracted SSR temp directory.
 func ResolveStagedSSRBundlePath(tempDir string, manifestSSRPath string) string {
-	clean := strings.TrimPrefix(filepath.ToSlash(manifestSSRPath), "/")
+	clean, err := cleanSSRBundlePath(manifestSSRPath)
+	if err != nil {
+		return ""
+	}
 	return filepath.Join(tempDir, filepath.FromSlash(clean))
+}
+
+func cleanSSRBundlePath(manifestSSRPath string) (string, error) {
+	clean := path.Clean(strings.TrimLeft(filepath.ToSlash(manifestSSRPath), "/"))
+	if clean == "." || !strings.HasPrefix(clean, "ssr/") {
+		return "", fmt.Errorf("path %q must stay under /ssr", manifestSSRPath)
+	}
+	return clean, nil
 }

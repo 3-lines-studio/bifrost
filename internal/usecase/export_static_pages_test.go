@@ -1,9 +1,12 @@
 package usecase
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
@@ -51,5 +54,61 @@ func TestExportStaticPages_MergesRoutesForSharedComponent(t *testing.T) {
 	}
 	if _, ok := entry.StaticRoutes["/second"]; !ok {
 		t.Fatal("missing /second")
+	}
+}
+
+func TestExportStaticPagesReturnsRenderErrors(t *testing.T) {
+	const component = "./pages/broken.tsx"
+	err := ExportStaticPages(ExportStaticPagesInput{
+		OutputDir: t.TempDir(),
+		Routes:    []core.Route{core.Page("/broken", component, core.WithStatic())},
+		Manifest: &core.Manifest{Entries: map[string]core.ManifestEntry{
+			core.EntryNameForPath(component): {Script: "/dist/broken.js"},
+		}},
+		SSBundlePath: func(string) string { return "/tmp/broken-ssr.js" },
+		Renderer: &fakeRenderer{renderFn: func(string, any) (core.RenderedPage, error) {
+			return core.RenderedPage{}, errors.New("render failed")
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "render failed") {
+		t.Fatalf("ExportStaticPages() error = %v, want render failure", err)
+	}
+}
+
+func TestExportStaticPagesReturnsLoaderErrors(t *testing.T) {
+	const component = "./pages/broken.tsx"
+	err := ExportStaticPages(ExportStaticPagesInput{
+		OutputDir: t.TempDir(),
+		Routes: []core.Route{core.Page("/broken/{slug}", component, core.WithStaticData(func(context.Context) ([]core.StaticPathData, error) {
+			return nil, errors.New("load failed")
+		}))},
+		Manifest: &core.Manifest{Entries: map[string]core.ManifestEntry{
+			core.EntryNameForPath(component): {Script: "/dist/broken.js"},
+		}},
+		SSBundlePath: func(string) string { return "/tmp/broken-ssr.js" },
+		Renderer:     &fakeRenderer{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "load failed") {
+		t.Fatalf("ExportStaticPages() error = %v, want loader failure", err)
+	}
+}
+
+func TestNormalizeStaticExportPathRejectsUnsafeOrDynamicPaths(t *testing.T) {
+	for _, raw := range []string{"", "../outside", "/a/../outside", `\\outside`, "/page?x=1", "/page#part", "/blog/{slug}"} {
+		t.Run(raw, func(t *testing.T) {
+			if _, _, err := normalizeStaticExportPath(raw); err == nil {
+				t.Fatalf("normalizeStaticExportPath(%q) returned no error", raw)
+			}
+		})
+	}
+}
+
+func TestNormalizeStaticExportPathNormalizesURLPaths(t *testing.T) {
+	normalized, cleaned, err := normalizeStaticExportPath("blog//post/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized != "/blog/post" || cleaned != "/blog/post" {
+		t.Fatalf("got normalized=%q cleaned=%q", normalized, cleaned)
 	}
 }

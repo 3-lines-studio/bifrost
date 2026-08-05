@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
@@ -28,6 +27,7 @@ type ServePageOutput struct {
 	Action     core.PageAction
 	HTML       string
 	Markdown   string
+	IsMarkdown bool
 	StaticPath string
 	RoutePath  string
 	Props      any
@@ -38,7 +38,6 @@ type ServePageOutput struct {
 type PageService struct {
 	renderer   Renderer
 	fs         FileSystem
-	adapter    core.FrameworkAdapter
 	buildGroup singleflightGroup
 }
 
@@ -51,18 +50,20 @@ type pageRequestState struct {
 	shell      *core.HTMLDocumentShell
 }
 
-func NewPageService(renderer Renderer, fs FileSystem, adapter core.FrameworkAdapter) *PageService {
-	if adapter == nil {
-		adapter = framework.DefaultAdapter()
-	}
+func NewPageService(renderer Renderer, fs FileSystem) *PageService {
 	return &PageService{
 		renderer: renderer,
 		fs:       fs,
-		adapter:  adapter,
 	}
 }
 
 func (s *PageService) ServePage(ctx context.Context, input ServePageInput) ServePageOutput {
+	if input.Markdown && input.Config.Mode != core.ModeSSR {
+		return ServePageOutput{
+			Action: core.ActionRenderSSR,
+			Error:  fmt.Errorf("markdown output is only supported in SSR mode"),
+		}
+	}
 	return s.executeRequest(ctx, s.prepareRequest(input))
 }
 
@@ -145,13 +146,6 @@ func (s *PageService) executeRequest(ctx context.Context, state pageRequestState
 }
 
 func (s *PageService) renderForMode(ctx context.Context, state pageRequestState) ServePageOutput {
-	if state.input.Markdown && state.input.Config.Mode != core.ModeSSR {
-		return ServePageOutput{
-			Action: core.ActionRenderSSR,
-			Error:  fmt.Errorf("markdown output is only supported in SSR mode"),
-		}
-	}
-
 	switch state.input.Config.Mode {
 	case core.ModeClientOnly:
 		html, err := s.renderClientOnlyShell(ctx, state)
@@ -172,6 +166,5 @@ func (s *PageService) buildAndRender(ctx context.Context, input ServePageInput) 
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
-	adapter := framework.ResolveAdapter(core.FrameworkFromComponentPath(input.Config.ComponentPath))
-	return CompileDevPageOnDemand(s.renderer, cwd, input.EntryName, input.Config, adapter)
+	return CompileDevPageOnDemand(s.renderer, cwd, input.EntryName, input.Config)
 }

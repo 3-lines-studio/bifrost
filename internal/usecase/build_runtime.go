@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
+	"github.com/3-lines-studio/bifrost/internal/adapters/react"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
@@ -73,14 +73,14 @@ func (s *BuildService) runExportMode(moduleRoot, appRoot, bifrostDir string, man
 	return nil
 }
 
-func (s *BuildService) compileEmbeddedRuntime(bifrostDir string, frameworks []core.Framework) error {
+func (s *BuildService) compileEmbeddedRuntime(bifrostDir string) error {
 	runtimeDir := filepath.Join(bifrostDir, "runtime")
 	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
 		return fmt.Errorf("failed to create runtime dir: %w", err)
 	}
 
 	tempSourcePath := filepath.Join(runtimeDir, "renderer.ts")
-	sourceContent := framework.RuntimeSource(core.ModeProd, frameworks...)
+	sourceContent := react.RuntimeSource(core.ModeProd)
 
 	if err := os.WriteFile(tempSourcePath, []byte(sourceContent), 0644); err != nil {
 		return fmt.Errorf("failed to write temp source: %w", err)

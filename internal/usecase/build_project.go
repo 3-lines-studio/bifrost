@@ -1,11 +1,6 @@
 package usecase
 
-import (
-	"context"
-
-	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
-	"github.com/3-lines-studio/bifrost/internal/core"
-)
+import "context"
 
 type BuildInput struct {
 	MainFile   string
@@ -28,19 +23,14 @@ type BuildService struct {
 	renderer         Renderer
 	fs               FileSystem
 	cli              CLIOutput
-	adapter          core.FrameworkAdapter
-	compileRuntimeFn func(bifrostDir string, frameworks []core.Framework) error
+	compileRuntimeFn func(bifrostDir string) error
 }
 
-func NewBuildService(renderer Renderer, fs FileSystem, cli CLIOutput, adapter core.FrameworkAdapter) *BuildService {
-	if adapter == nil {
-		adapter = framework.DefaultAdapter()
-	}
+func NewBuildService(renderer Renderer, fs FileSystem, cli CLIOutput) *BuildService {
 	svc := &BuildService{
 		renderer: renderer,
 		fs:       fs,
 		cli:      cli,
-		adapter:  adapter,
 	}
 	svc.compileRuntimeFn = svc.compileEmbeddedRuntime
 	return svc
@@ -59,7 +49,9 @@ func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) Build
 	if err := s.createOutputDirs(run); err != nil {
 		return BuildOutput{Success: false, Error: err}
 	}
-	s.copyPublicAssets(run)
+	if err := s.copyPublicAssets(run); err != nil {
+		return BuildOutput{Success: false, Error: err}
+	}
 	s.buildSSRBundles(run)
 	s.generateClientEntries(run)
 	s.buildClientAssets(run)

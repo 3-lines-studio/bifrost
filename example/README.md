@@ -4,7 +4,7 @@ This is an example application demonstrating Bifrost's SSR capabilities.
 
 ## Prerequisites
 
-- Go 1.25+
+- Go 1.26.5+
 - Bun
 
 ## Development

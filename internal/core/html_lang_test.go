@@ -4,6 +4,12 @@ import (
 	"testing"
 )
 
+type customHTMLProps struct{}
+
+func (customHTMLProps) MarshalJSON() ([]byte, error) {
+	return []byte(`{"title":"custom","__bifrost_html_lang":"nl"}`), nil
+}
+
 func TestResolveHTMLDocumentAttrs_PrecedenceLadder(t *testing.T) {
 	props := map[string]any{
 		PropHTMLLang: "de",
@@ -81,6 +87,20 @@ func TestResolveHTMLDocumentAttrs_StructWithReservedKeys(t *testing.T) {
 	}
 	if outMap["title"] != "x" {
 		t.Fatal("other props preserved")
+	}
+}
+
+func TestResolveHTMLDocumentAttrs_UsesMarshalJSON(t *testing.T) {
+	lang, _, out := ResolveHTMLDocumentAttrs("en", "fr", "", customHTMLProps{})
+	if lang != "nl" {
+		t.Fatalf("expected lang from MarshalJSON, got %q", lang)
+	}
+	outMap, ok := out.(map[string]any)
+	if !ok || outMap["title"] != "custom" {
+		t.Fatalf("unexpected props from MarshalJSON: %#v", out)
+	}
+	if _, exists := outMap[PropHTMLLang]; exists {
+		t.Fatal("reserved lang key was not stripped")
 	}
 }
 

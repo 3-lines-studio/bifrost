@@ -104,6 +104,61 @@ func TestNewRejectsConflictingPageOptions(t *testing.T) {
 	}
 }
 
+func TestNewWithOptionsRejectsNilOption(t *testing.T) {
+	t.Setenv("BIFROST_EXPORT", "1")
+
+	a, err := NewWithOptions(testFS, []core.ConfigOption{nil})
+	if err == nil {
+		t.Fatal("expected nil config option to return an error")
+	}
+	if a != nil {
+		t.Fatal("expected nil app on config validation error")
+	}
+}
+
+func TestAddRoutesRejectsDuplicatePatterns(t *testing.T) {
+	a := &App{pageConfigs: make(map[string]*core.PageConfig)}
+	err := a.addRoutes([]core.Route{
+		core.Page("/same", "./first.tsx"),
+		core.Page("/same", "./second.tsx"),
+	})
+	if err == nil {
+		t.Fatal("expected duplicate pattern to return an error")
+	}
+	if len(a.routes) != 0 {
+		t.Fatal("failed route batch changed app routes")
+	}
+}
+
+func TestAddRoutesRejectsEntryNameCollisions(t *testing.T) {
+	a := &App{pageConfigs: make(map[string]*core.PageConfig)}
+	err := a.addRoutes([]core.Route{
+		core.Page("/nested", "./pages/foo/bar.tsx"),
+		core.Page("/flat", "./pages/foo-bar.tsx"),
+	})
+	if err == nil {
+		t.Fatal("expected build entry collision to return an error")
+	}
+	if len(a.routes) != 0 {
+		t.Fatal("failed route batch changed app routes")
+	}
+}
+
+func TestHandleRejectsMissingProductionManifestEntry(t *testing.T) {
+	a := &App{
+		pageConfigs: make(map[string]*core.PageConfig),
+		manifest:    &core.Manifest{Entries: map[string]core.ManifestEntry{}},
+	}
+
+	err := a.Handle(core.Page("/new", "./new.tsx"))
+	if err == nil || !strings.Contains(err.Error(), "missing manifest entry") {
+		t.Fatalf("Handle() error = %v, want missing manifest entry", err)
+	}
+	if len(a.routes) != 0 {
+		t.Fatal("failed Handle changed app routes")
+	}
+}
+
 func TestHandleBeforeWrap(t *testing.T) {
 	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")

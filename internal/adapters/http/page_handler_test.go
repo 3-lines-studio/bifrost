@@ -150,6 +150,18 @@ type testRedirectErr struct {
 	code int
 }
 
+func TestServeError_InvalidRedirectStatusReturns500(t *testing.T) {
+	h := &PageHandler{}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/private", nil)
+
+	h.serveError(rec, req, &testRedirectErr{url: "/login", code: 99})
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
+
 func (e *testRedirectErr) Error() string           { return "redirect" }
 func (e *testRedirectErr) RedirectURL() string     { return e.url }
 func (e *testRedirectErr) RedirectStatusCode() int { return e.code }
@@ -252,8 +264,9 @@ func TestDispatchPageOutput_ServeMarkdownContentType(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	h.dispatchPageOutput(rec, req, usecase.ServePageOutput{
-		Action:   core.ActionRenderSSR,
-		Markdown: "# About\n\nSome content.",
+		Action:     core.ActionRenderSSR,
+		Markdown:   "# About\n\nSome content.",
+		IsMarkdown: true,
 	})
 
 	if rec.Code != http.StatusOK {
@@ -268,18 +281,21 @@ func TestDispatchPageOutput_ServeMarkdownContentType(t *testing.T) {
 	}
 }
 
-func TestDispatchPageOutput_MarkdownEmptyFallsBackToHTML(t *testing.T) {
+func TestDispatchPageOutput_ServesEmptyMarkdown(t *testing.T) {
 	h := &PageHandler{}
 	req := httptest.NewRequest(http.MethodGet, "/about.md", nil)
 	rec := httptest.NewRecorder()
 
 	h.dispatchPageOutput(rec, req, usecase.ServePageOutput{
-		Action: core.ActionRenderSSR,
-		HTML:   "<div>fallback</div>",
+		Action:     core.ActionRenderSSR,
+		IsMarkdown: true,
 	})
 
 	ct := rec.Header().Get("Content-Type")
-	if ct != "text/html; charset=utf-8" {
-		t.Errorf("expected html content-type fallback, got %q", ct)
+	if ct != "text/markdown; charset=utf-8" {
+		t.Errorf("expected markdown content type, got %q", ct)
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("expected empty markdown body, got %q", rec.Body.String())
 	}
 }

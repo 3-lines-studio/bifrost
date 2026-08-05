@@ -6,9 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
-	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
 	"github.com/3-lines-studio/bifrost/internal/adapters/process"
+	"github.com/3-lines-studio/bifrost/internal/adapters/react"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
@@ -19,18 +20,14 @@ type Host struct {
 	manifest   *core.Manifest
 	ssrTempDir string
 	ssrCleanup func()
-	adapter    core.FrameworkAdapter
+	stopOnce   sync.Once
+	stopErr    error
 }
 
-func NewHost(assetsFS embed.FS, mode core.Mode, adapter core.FrameworkAdapter) (*Host, error) {
-	if adapter == nil {
-		adapter = framework.DefaultAdapter()
-	}
-
+func NewHost(assetsFS embed.FS, mode core.Mode) (*Host, error) {
 	r := &Host{
 		isDev:    mode == core.ModeDev,
 		assetsFS: assetsFS,
-		adapter:  adapter,
 	}
 
 	switch mode {
@@ -81,7 +78,7 @@ func (r *Host) setupRuntimeForExport(exportDir string) error {
 	r.ssrTempDir = ssrTempDir
 	r.ssrCleanup = ssrCleanup
 
-	return r.startRendererFromSource(core.ModeProd, framework.RuntimeSource(core.ModeProd, core.FrameworkReact), ssrCleanup)
+	return r.startRendererFromSource(core.ModeProd, react.RuntimeSource(core.ModeProd), ssrCleanup)
 }
 
 func (r *Host) initProdMode() (*Host, error) {
@@ -134,7 +131,7 @@ func (r *Host) setupEmbeddedRuntime() error {
 }
 
 func (r *Host) initDevMode() (*Host, error) {
-	if err := r.startRendererFromSource(core.ModeDev, framework.RuntimeSource(core.ModeDev, core.FrameworkReact), nil); err != nil {
+	if err := r.startRendererFromSource(core.ModeDev, react.RuntimeSource(core.ModeDev), nil); err != nil {
 		return nil, err
 	}
 	return r, nil
@@ -159,10 +156,15 @@ func (h *Host) ResolveSSRBundlePath(manifestSSRPath string) string {
 func (h *Host) IsDev() bool { return h.isDev }
 
 func (h *Host) Stop() error {
-	if h.client != nil {
-		return h.client.Stop()
-	}
-	return nil
+	h.stopOnce.Do(func() {
+		if h.client != nil {
+			h.stopErr = h.client.Stop()
+		}
+		if h.ssrCleanup != nil {
+			h.ssrCleanup()
+		}
+	})
+	return h.stopErr
 }
 
 func copySSRBundlesFromDisk(exportDir string, manifest *core.Manifest) (string, func(), error) {
@@ -188,8 +190,11 @@ func (r *Host) startRendererFromSource(mode core.Mode, source string, cleanup fu
 }
 
 func (r *Host) startRendererFromExecutable(executablePath string, cleanup func()) error {
-	client, err := process.NewRendererFromExecutable(executablePath, cleanup)
+	client, err := process.NewRendererFromExecutable(executablePath, nil)
 	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
 		return fmt.Errorf("failed to start embedded runtime: %w", err)
 	}
 	r.client = client

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/3-lines-studio/bifrost/internal/adapters/cli"
-	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
+	"github.com/3-lines-studio/bifrost/internal/adapters/react"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
@@ -30,12 +30,10 @@ type buildPage struct {
 	entryName        string
 	absComponentPath string
 	modeLabel        string
-	framework        core.Framework
-	adapter          core.FrameworkAdapter
 }
 
 func (p buildPage) entryPath(entriesDir string) string {
-	return filepath.Join(entriesDir, p.entryName+p.adapter.EntryFileExtension())
+	return filepath.Join(entriesDir, p.entryName+react.EntryFileExtension)
 }
 
 func (p buildPage) ssrEntryName() string {
@@ -43,7 +41,7 @@ func (p buildPage) ssrEntryName() string {
 }
 
 func (p buildPage) ssrEntryPath(entriesDir string) string {
-	return filepath.Join(entriesDir, p.ssrEntryName()+p.adapter.EntryFileExtension())
+	return filepath.Join(entriesDir, p.ssrEntryName()+react.EntryFileExtension)
 }
 
 type buildRun struct {
@@ -105,15 +103,24 @@ func (s *BuildService) newBuildRun(input BuildInput) (*buildRun, error) {
 	}
 	run.report.SetPageCount(len(pageConfigs))
 
+	entryComponents := make(map[string]string, len(pageConfigs))
 	for i, config := range pageConfigs {
-		fw := core.FrameworkFromComponentPath(config.ComponentPath)
+		entryName := core.EntryNameForPath(config.ComponentPath)
+		if previous, exists := entryComponents[entryName]; exists && previous != config.ComponentPath {
+			return nil, fmt.Errorf(
+				"components %q and %q map to the same build entry %q",
+				previous,
+				config.ComponentPath,
+				entryName,
+			)
+		}
+		entryComponents[entryName] = config.ComponentPath
+
 		page := buildPage{
 			config:           config,
-			entryName:        core.EntryNameForPath(config.ComponentPath),
+			entryName:        entryName,
 			absComponentPath: resolveComponentPath(input.AppRoot, input.ModuleRoot, config.ComponentPath),
 			modeLabel:        config.Mode.BuildLabel(),
-			framework:        fw,
-			adapter:          framework.ResolveAdapter(fw),
 		}
 		run.pages[i] = page
 		if config.Mode == core.ModeStaticPrerender {
@@ -170,23 +177,19 @@ func (s *BuildService) createOutputDirs(run *buildRun) error {
 	return nil
 }
 
-func (s *BuildService) copyPublicAssets(run *buildRun) {
+func (s *BuildService) copyPublicAssets(run *buildRun) error {
 	if err := s.copyPublicDir(run.paths.publicDir, run.paths.publicDestDir); err != nil {
-		run.report.AddWarning("Public assets", "Failed to copy public assets", []string{err.Error()})
+		return fmt.Errorf("failed to copy public assets: %w", err)
 	}
+	return nil
 }
 
 func (s *BuildService) buildSSRBundles(run *buildRun) {
 	step := run.report.StartStep("Building SSR bundles")
 	errors := make([]BuildError, 0)
-
-	type fwGroup struct {
-		adapter core.FrameworkAdapter
-		paths   []string
-		names   []string
-		pages   []buildPage
-	}
-	groups := map[string]*fwGroup{}
+	var paths []string
+	var names []string
+	var pages []buildPage
 
 	for _, page := range run.pages {
 		if page.config.Mode == core.ModeClientOnly {
@@ -205,7 +208,7 @@ func (s *BuildService) buildSSRBundles(run *buildRun) {
 			continue
 		}
 
-		if err := WriteSSREntryFile(page.adapter, ssrEntryPath, importPath); err != nil {
+		if err := WriteSSREntryFile(ssrEntryPath, importPath); err != nil {
 			run.markSSRFailed(page.entryName)
 			errors = append(errors, BuildError{
 				Page:    page.config.ComponentPath,
@@ -215,42 +218,30 @@ func (s *BuildService) buildSSRBundles(run *buildRun) {
 			continue
 		}
 
-		fw := page.adapter.Name()
-		grp, ok := groups[fw]
-		if !ok {
-			grp = &fwGroup{adapter: page.adapter}
-			groups[fw] = grp
-		}
-		grp.paths = append(grp.paths, ssrEntryPath)
-		grp.names = append(grp.names, page.entryName)
-		grp.pages = append(grp.pages, page)
+		paths = append(paths, ssrEntryPath)
+		names = append(names, page.entryName)
+		pages = append(pages, page)
 	}
 
-	for fw, grp := range groups {
-		if err := s.renderer.BuildSSR(grp.paths, run.paths.ssrDir, fw); err != nil {
-			run.report.AddWarning("SSR build", fmt.Sprintf("Batch SSR build for %s failed; falling back to per-page builds", fw), []string{err.Error()})
-			s.buildSSRBundlesIndividually(run, grp.pages, &errors)
+	if len(paths) > 0 {
+		if err := s.renderer.BuildSSR(paths, run.paths.ssrDir); err != nil {
+			run.report.AddWarning("SSR build", "Batch SSR build failed; falling back to per-page builds", []string{err.Error()})
+			s.buildSSRBundlesIndividually(run, pages, &errors)
 		}
 	}
 
-	var allPages []buildPage
-	for _, grp := range groups {
-		allPages = append(allPages, grp.pages...)
-	}
-	s.validateSSRBundles(run, allPages, &errors)
+	s.validateSSRBundles(run, pages, &errors)
 
-	for _, grp := range groups {
-		for _, entryName := range grp.names {
-			if run.ssrFailedFor(entryName) {
-				continue
-			}
-			run.updateManifestEntry(entryName, func(entry *core.ManifestEntry) {
-				entry.Script = "/dist/" + entryName + ".js"
-				entry.CSS = "/dist/" + entryName + ".css"
-				entry.SSR = "/ssr/" + entryName + "-ssr.js"
-				entry.Mode = "ssr"
-			})
+	for _, entryName := range names {
+		if run.ssrFailedFor(entryName) {
+			continue
 		}
+		run.updateManifestEntry(entryName, func(entry *core.ManifestEntry) {
+			entry.Script = "/dist/" + entryName + ".js"
+			entry.CSS = "/dist/" + entryName + ".css"
+			entry.SSR = "/ssr/" + entryName + "-ssr.js"
+			entry.Mode = "ssr"
+		})
 	}
 
 	step.Success = len(errors) == 0
@@ -267,7 +258,7 @@ func (s *BuildService) buildSSRBundles(run *buildRun) {
 func (s *BuildService) buildSSRBundlesIndividually(run *buildRun, pages []buildPage, errors *[]BuildError) {
 	for _, page := range pages {
 		ssrEntryPath := page.ssrEntryPath(run.paths.entriesDir)
-		if err := s.renderer.BuildSSR([]string{ssrEntryPath}, run.paths.ssrDir, page.adapter.Name()); err != nil {
+		if err := s.renderer.BuildSSR([]string{ssrEntryPath}, run.paths.ssrDir); err != nil {
 			run.markSSRFailed(page.entryName)
 			*errors = append(*errors, parseBuildError(page.entryName, err))
 		}
@@ -306,13 +297,7 @@ func (s *BuildService) generateClientEntries(run *buildRun) {
 			continue
 		}
 
-		var writeErr error
-		if page.config.Mode == core.ModeClientOnly {
-			writeErr = WriteClientEntryFile(page.adapter, entryPath, importPath, core.ModeClientOnly)
-		} else {
-			writeErr = WriteClientEntryFile(page.adapter, entryPath, importPath, core.ModeSSR)
-		}
-		if writeErr != nil {
+		if writeErr := WriteClientEntryFile(entryPath, importPath, page.config.Mode); writeErr != nil {
 			errors = append(errors, BuildError{
 				Page:    page.entryName,
 				Message: "Failed to write client entry",
@@ -331,40 +316,26 @@ func (s *BuildService) generateClientEntries(run *buildRun) {
 func (s *BuildService) buildClientAssets(run *buildRun) {
 	step := run.report.StartStep("Building client assets")
 	errors := make([]BuildError, 0)
-
-	type fwGroup struct {
-		adapter core.FrameworkAdapter
-		paths   []string
-		names   []string
-		pages   []buildPage
-	}
-	groups := map[string]*fwGroup{}
+	var paths []string
+	var names []string
+	var pages []buildPage
 
 	for _, page := range run.pages {
 		if run.ssrFailedFor(page.entryName) {
 			continue
 		}
-		fw := page.adapter.Name()
-		grp, ok := groups[fw]
-		if !ok {
-			grp = &fwGroup{adapter: page.adapter}
-			groups[fw] = grp
-		}
-		grp.paths = append(grp.paths, page.entryPath(run.paths.entriesDir))
-		grp.names = append(grp.names, page.entryName)
-		grp.pages = append(grp.pages, page)
+		paths = append(paths, page.entryPath(run.paths.entriesDir))
+		names = append(names, page.entryName)
+		pages = append(pages, page)
 	}
 
 	builtMap := make(map[string]core.ClientBuildResult)
-	for fw, grp := range groups {
-		if len(grp.paths) > 0 {
-			var err error
-			result, err := s.renderer.Build(grp.paths, run.paths.outdir, grp.names, fw)
-			if err != nil {
-				result = s.buildClientAssetsIndividually(run, grp.pages, grp.adapter, &errors)
-			}
-			maps.Copy(builtMap, result)
+	if len(paths) > 0 {
+		result, err := s.renderer.Build(paths, run.paths.outdir, names)
+		if err != nil {
+			result = s.buildClientAssetsIndividually(run, pages, &errors)
 		}
+		maps.Copy(builtMap, result)
 	}
 
 	for _, page := range run.pages {
@@ -389,7 +360,7 @@ func (s *BuildService) buildClientAssets(run *buildRun) {
 	}
 }
 
-func (s *BuildService) buildClientAssetsIndividually(run *buildRun, pages []buildPage, adapter core.FrameworkAdapter, errors *[]BuildError) map[string]core.ClientBuildResult {
+func (s *BuildService) buildClientAssetsIndividually(run *buildRun, pages []buildPage, errors *[]BuildError) map[string]core.ClientBuildResult {
 	builtMap := make(map[string]core.ClientBuildResult)
 	for _, page := range pages {
 		if run.ssrFailedFor(page.entryName) {
@@ -399,7 +370,6 @@ func (s *BuildService) buildClientAssetsIndividually(run *buildRun, pages []buil
 			[]string{page.entryPath(run.paths.entriesDir)},
 			run.paths.outdir,
 			[]string{page.entryName},
-			adapter.Name(),
 		)
 		if err != nil {
 			*errors = append(*errors, parseBuildError(page.entryName, err))
@@ -474,17 +444,8 @@ func (s *BuildService) compileRuntime(run *buildRun) error {
 		return nil
 	}
 
-	seen := make(map[core.Framework]struct{})
-	var frameworks []core.Framework
-	for _, page := range run.pages {
-		if _, ok := seen[page.framework]; !ok {
-			seen[page.framework] = struct{}{}
-			frameworks = append(frameworks, page.framework)
-		}
-	}
-
 	step := run.report.StartStep("Compiling Bun runtime")
-	if err := s.compileRuntimeFn(run.paths.bifrostDir, frameworks); err != nil {
+	if err := s.compileRuntimeFn(run.paths.bifrostDir); err != nil {
 		run.report.AddError("Runtime", "Failed to compile embedded runtime", []string{err.Error()})
 		run.report.EndStep(step, false, "")
 		return fmt.Errorf("runtime compilation failed: %w", err)

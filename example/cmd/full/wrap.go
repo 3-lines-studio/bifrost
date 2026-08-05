@@ -61,5 +61,7 @@ func main() {
 	fmt.Println("  Bifrost pages: /, /about, /product")
 	fmt.Println("  API routes: /api/health, /api/info")
 
-	log.Fatal(http.ListenAndServe(":8080", handler))
+	if err := http.ListenAndServe(":8080", handler); err != nil {
+		log.Printf("server stopped: %v", err)
+	}
 }

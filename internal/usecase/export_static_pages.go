@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -31,6 +32,7 @@ func ExportStaticPages(in ExportStaticPagesInput) error {
 		Entries: make(map[string]core.ManifestEntry),
 	}
 	cache := stylesheetCache{byKey: make(map[string]string)}
+	var exportErrors []error
 
 	for _, route := range in.Routes {
 		config, err := core.PageConfigFromRoute(route)
@@ -42,9 +44,17 @@ func ExportStaticPages(in ExportStaticPagesInput) error {
 		}
 
 		entryName := core.EntryNameForPath(config.ComponentPath)
+		if in.SSBundlePath == nil {
+			exportErrors = append(exportErrors, fmt.Errorf("static page %s: SSR bundle resolver is not available", route.Pattern))
+			continue
+		}
 		ssrBundlePath := in.SSBundlePath(entryName)
 		if ssrBundlePath == "" {
-			fmt.Printf("Warning: No SSR bundle for %s, skipping\n", route.Pattern)
+			exportErrors = append(exportErrors, fmt.Errorf("static page %s: no SSR bundle for component %s", route.Pattern, config.ComponentPath))
+			continue
+		}
+		if in.Renderer == nil {
+			exportErrors = append(exportErrors, fmt.Errorf("static page %s: renderer is not available", route.Pattern))
 			continue
 		}
 
@@ -53,7 +63,7 @@ func ExportStaticPages(in ExportStaticPagesInput) error {
 			var err error
 			entries, err = config.StaticDataLoader(context.Background())
 			if err != nil {
-				fmt.Printf("Warning: Failed to load static data for %s: %v, skipping\n", route.Pattern, err)
+				exportErrors = append(exportErrors, fmt.Errorf("static page %s: failed to load static data: %w", route.Pattern, err))
 				continue
 			}
 		} else {
@@ -83,7 +93,17 @@ func ExportStaticPages(in ExportStaticPagesInput) error {
 		}
 
 		for _, entry := range entries {
-			fmt.Printf("Exporting %s...\n", entry.Path)
+			normalizedPath, cleanedRoutePath, err := normalizeStaticExportPath(entry.Path)
+			if err != nil {
+				exportErrors = append(exportErrors, fmt.Errorf("static page %s: %w", route.Pattern, err))
+				continue
+			}
+			if _, exists := manifestEntry.StaticRoutes[normalizedPath]; exists {
+				exportErrors = append(exportErrors, fmt.Errorf("static page %s: duplicate output path %q", route.Pattern, normalizedPath))
+				continue
+			}
+
+			fmt.Printf("Exporting %s...\n", normalizedPath)
 
 			appDefault := ""
 			if in.AppConfig != nil {
@@ -93,7 +113,7 @@ func ExportStaticPages(in ExportStaticPagesInput) error {
 
 			page, err := in.Renderer.Render(ssrBundlePath, propsForReact)
 			if err != nil {
-				fmt.Printf("Warning: Failed to render %s: %v, skipping\n", entry.Path, err)
+				exportErrors = append(exportErrors, fmt.Errorf("static page %s: failed to render %s: %w", route.Pattern, normalizedPath, err))
 				continue
 			}
 
@@ -110,44 +130,41 @@ func ExportStaticPages(in ExportStaticPagesInput) error {
 
 			html, err := core.RenderHTMLShell(page.Body, propsForReact, manifestEntry.Script, page.Head, criticalCSS, styleHrefs, manifestEntry.Chunks, lang, htmlClass)
 			if err != nil {
-				fmt.Printf("Warning: Failed to build HTML for %s: %v, skipping\n", entry.Path, err)
-				continue
-			}
-
-			cleanedRoutePath := path.Clean("/" + entry.Path)
-			if strings.Contains(cleanedRoutePath, "..") {
-				fmt.Printf("Warning: Unsafe route path %s, skipping\n", entry.Path)
+				exportErrors = append(exportErrors, fmt.Errorf("static page %s: failed to build HTML for %s: %w", route.Pattern, normalizedPath, err))
 				continue
 			}
 
 			htmlPath := filepath.Join(pagesDir, filepath.FromSlash(cleanedRoutePath), "index.html")
 			absHTML, err := filepath.Abs(htmlPath)
 			if err != nil {
-				fmt.Printf("Warning: Failed to resolve path for %s: %v, skipping\n", entry.Path, err)
+				exportErrors = append(exportErrors, fmt.Errorf("static page %s: failed to resolve output path for %s: %w", route.Pattern, normalizedPath, err))
 				continue
 			}
 			absPages, err := filepath.Abs(pagesDir)
 			if err != nil {
-				fmt.Printf("Warning: Failed to resolve pages dir: %v, skipping\n", err)
+				exportErrors = append(exportErrors, fmt.Errorf("static page %s: failed to resolve pages directory: %w", route.Pattern, err))
 				continue
 			}
-			if !strings.HasPrefix(absHTML, absPages+string(filepath.Separator)) {
-				fmt.Printf("Warning: Route path %s escapes output directory, skipping\n", entry.Path)
+			if absHTML != absPages && !strings.HasPrefix(absHTML, absPages+string(filepath.Separator)) {
+				exportErrors = append(exportErrors, fmt.Errorf("static page %s: output path %q escapes the pages directory", route.Pattern, normalizedPath))
 				continue
 			}
 
 			if err := os.MkdirAll(filepath.Dir(htmlPath), 0755); err != nil {
-				fmt.Printf("Warning: Failed to create directory for %s: %v, skipping\n", entry.Path, err)
+				exportErrors = append(exportErrors, fmt.Errorf("static page %s: failed to create output directory for %s: %w", route.Pattern, normalizedPath, err))
 				continue
 			}
 
 			if err := os.WriteFile(htmlPath, []byte(html), 0644); err != nil {
-				fmt.Printf("Warning: Failed to write %s: %v, skipping\n", entry.Path, err)
+				exportErrors = append(exportErrors, fmt.Errorf("static page %s: failed to write %s: %w", route.Pattern, normalizedPath, err))
 				continue
 			}
 
-			normalizedPath := core.NormalizePath(entry.Path)
-			manifestEntry.StaticRoutes[normalizedPath] = "/pages/routes" + cleanedRoutePath + "/index.html"
+			manifestPath := "/pages/routes/index.html"
+			if cleanedRoutePath != "/" {
+				manifestPath = "/pages/routes" + cleanedRoutePath + "/index.html"
+			}
+			manifestEntry.StaticRoutes[normalizedPath] = manifestPath
 		}
 
 		exportManifest.Entries[entryName] = manifestEntry
@@ -155,9 +172,37 @@ func ExportStaticPages(in ExportStaticPagesInput) error {
 
 	manifestData, err := json.MarshalIndent(exportManifest, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal export manifest: %w", err)
+		exportErrors = append(exportErrors, fmt.Errorf("failed to marshal export manifest: %w", err))
+		return errors.Join(exportErrors...)
 	}
 
 	manifestPath := filepath.Join(in.OutputDir, "export-manifest.json")
-	return os.WriteFile(manifestPath, manifestData, 0644)
+	if err := os.WriteFile(manifestPath, manifestData, 0644); err != nil {
+		exportErrors = append(exportErrors, fmt.Errorf("failed to write export manifest: %w", err))
+	}
+	return errors.Join(exportErrors...)
+}
+
+func normalizeStaticExportPath(raw string) (normalized string, cleaned string, err error) {
+	if raw == "" {
+		return "", "", fmt.Errorf("static output path cannot be empty")
+	}
+	if strings.Contains(raw, "\\") {
+		return "", "", fmt.Errorf("static output path %q must use URL slashes", raw)
+	}
+	if strings.ContainsAny(raw, "?#") {
+		return "", "", fmt.Errorf("static output path %q cannot contain a query or fragment", raw)
+	}
+	if strings.ContainsAny(raw, "{}") {
+		return "", "", fmt.Errorf("static output path %q must be a concrete URL path", raw)
+	}
+
+	for segment := range strings.SplitSeq(raw, "/") {
+		if segment == "." || segment == ".." {
+			return "", "", fmt.Errorf("static output path %q contains an unsafe segment", raw)
+		}
+	}
+
+	cleaned = path.Clean("/" + strings.TrimLeft(raw, "/"))
+	return core.NormalizePath(cleaned), cleaned, nil
 }

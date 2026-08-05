@@ -56,10 +56,24 @@ func TestPageWithStatic(t *testing.T) {
 	}
 }
 
-func TestPageConfigFromRoute_RejectsConflictingModes(t *testing.T) {
-	route := Page("/", "./page.tsx", WithClient(), WithStatic())
-	if _, err := PageConfigFromRoute(route); err == nil {
-		t.Fatal("expected conflicting page modes to return an error")
+func TestPageConfigFromRoute_RejectsInvalidRoute(t *testing.T) {
+	tests := []struct {
+		name  string
+		route Route
+	}{
+		{name: "conflicting modes", route: Page("/", "./page.tsx", WithClient(), WithStatic())},
+		{name: "empty pattern", route: Page("", "./page.tsx")},
+		{name: "empty component", route: Page("/", "")},
+		{name: "blank component", route: Page("/", "  ")},
+		{name: "nil option", route: Page("/", "./page.tsx", nil)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := PageConfigFromRoute(tt.route); err == nil {
+				t.Fatal("expected invalid route to return an error")
+			}
+		})
 	}
 }
 

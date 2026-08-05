@@ -8,7 +8,7 @@ import (
 )
 
 func (s *BuildService) copyPublicDir(src, dst string) error {
-	info, err := os.Stat(src)
+	info, err := os.Lstat(src)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -16,6 +16,9 @@ func (s *BuildService) copyPublicDir(src, dst string) error {
 		return err
 	}
 
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("public path cannot be a symbolic link: %s", src)
+	}
 	if !info.IsDir() {
 		return fmt.Errorf("public path is not a directory: %s", src)
 	}
@@ -37,6 +40,9 @@ func (s *BuildService) copyDirRecursive(src, dst string) error {
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("public assets cannot contain symbolic links: %s", srcPath)
+		}
 		if entry.IsDir() {
 			if err := s.copyDirRecursive(srcPath, dstPath); err != nil {
 				return err

@@ -49,7 +49,7 @@ func TestRenderSSR_MarkdownOutputSkipsShellWrapping(t *testing.T) {
 			}, nil
 		},
 	}
-	service := NewPageService(renderer, nil, nil)
+	service := NewPageService(renderer, nil)
 
 	input := ServePageInput{
 		Config: core.PageConfig{
@@ -74,6 +74,9 @@ func TestRenderSSR_MarkdownOutputSkipsShellWrapping(t *testing.T) {
 	if output.HTML != "" {
 		t.Errorf("expected empty HTML (shell wrapping skipped), got %q", output.HTML)
 	}
+	if !output.IsMarkdown {
+		t.Fatal("expected markdown output marker")
+	}
 	if output.Markdown == "" {
 		t.Fatal("expected non-empty markdown output")
 	}
@@ -85,7 +88,7 @@ func TestRenderSSR_MarkdownOutputSkipsShellWrapping(t *testing.T) {
 	}
 }
 
-func TestRenderForMode_MarkdownOnlyAllowedInSSR(t *testing.T) {
+func TestServePage_MarkdownOnlyAllowedInSSR(t *testing.T) {
 	cases := []struct {
 		name string
 		mode core.PageMode
@@ -95,17 +98,15 @@ func TestRenderForMode_MarkdownOnlyAllowedInSSR(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			service := NewPageService(&fakeRenderer{}, nil, nil)
-			state := pageRequestState{
-				input: ServePageInput{
-					Config: core.PageConfig{
-						ComponentPath: "./pages/home.tsx",
-						Mode:          tc.mode,
-					},
-					Markdown: true,
+			service := NewPageService(&fakeRenderer{}, nil)
+			output := service.ServePage(context.Background(), ServePageInput{
+				Config: core.PageConfig{
+					ComponentPath: "./pages/home.tsx",
+					Mode:          tc.mode,
 				},
-			}
-			output := service.renderForMode(context.Background(), state)
+				IsDev:    false,
+				Markdown: true,
+			})
 			if output.Error == nil {
 				t.Fatal("expected error for markdown in non-SSR mode")
 			}
@@ -126,7 +127,7 @@ func TestRenderForMode_MarkdownSSRDoesNotError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setup shell: %v", err)
 	}
-	service := NewPageService(renderer, nil, nil)
+	service := NewPageService(renderer, nil)
 	state := pageRequestState{
 		input: ServePageInput{
 			Config: core.PageConfig{
@@ -145,7 +146,7 @@ func TestRenderForMode_MarkdownSSRDoesNotError(t *testing.T) {
 	if output.Error != nil {
 		t.Fatalf("expected no error for markdown in SSR mode, got %v", output.Error)
 	}
-	if output.Markdown == "" {
+	if output.Markdown == "" || !output.IsMarkdown {
 		t.Fatal("expected markdown output")
 	}
 }

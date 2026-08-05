@@ -359,16 +359,10 @@ function buildEntriesPayload(
   return out;
 }
 
-const componentCache = new Map<
-  string,
-  { Component: any; Head?: any }
->();
-
 async function handleRender(req: Bun.BunRequest): Promise<Response> {
   let body: {
     path?: string;
     props?: Record<string, unknown>;
-    framework?: string;
   };
   try {
     body = await req.json();
@@ -377,8 +371,7 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
     return createError(`Failed to parse request: ${message}`);
   }
 
-  const { path, props, framework } = body;
-  const fw = framework ?? "react";
+  const { path, props } = body;
 
   if (!path) {
     return createError("Missing 'path' in request");
@@ -398,29 +391,11 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
       return renderResponse(result.head ?? "", result.html ?? "");
     }
 
-    const cached = componentCache.get(path);
-    let Component: any;
-    let Head: any | undefined;
+    const Component = mod.Page;
+    const Head = mod.Head;
 
-    if (!isDev && cached) {
-      Component = cached.Component;
-      Head = cached.Head;
-    } else {
-      Component =
-        mod.default ||
-        mod.Page ||
-        Object.values(mod).find((x: any) => typeof x === "function");
-      Head = mod.Head;
-
-      if (!isDev && Component) {
-        componentCache.set(path, { Component, Head });
-      }
-    }
-
-    if (!Component) {
-      return createError(
-        `No component export found in ${path}. Expected default export, Page export, or a function export.`,
-      );
+    if (typeof Component !== "function") {
+      return createError(`No Page function export found in ${path}.`);
     }
 
     const React = await import("react");
@@ -434,7 +409,9 @@ async function handleRender(req: Bun.BunRequest): Promise<Response> {
         const headEl = React.createElement(Head, componentProps);
         head = renderToString(headEl);
       } catch (headErr) {
-        console.error("Error rendering head:", headErr);
+        const message =
+          headErr instanceof Error ? headErr.message : String(headErr);
+        return createError(`Head render error: ${message}`, headErr as Error);
       }
     }
 
@@ -462,7 +439,6 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
     outdir?: string;
     target?: string;
     entryNames?: string[];
-    framework?: string;
   };
   try {
     body = await req.json();
@@ -471,7 +447,7 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
     return createError(`Failed to parse request: ${message}`);
   }
 
-  const { entrypoints, outdir, target, entryNames, framework } = body;
+  const { entrypoints, outdir, target, entryNames } = body;
 
   if (!Array.isArray(entrypoints) || entrypoints.length === 0) {
     return createError("Missing entrypoints");
@@ -487,8 +463,6 @@ async function handleBuild(req: Bun.BunRequest): Promise<Response> {
     (process.env.BIFROST_PROD === "1" ||
       process.env.BIFROST_PROD === "true") &&
     !isSSR;
-
-  const fw = framework ?? "react";
 
   try {
     const plugins: any[] = [

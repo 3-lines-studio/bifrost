@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -150,6 +153,34 @@ func TestRendererRenderContextHonorsCancellation(t *testing.T) {
 	}
 }
 
+func TestRendererSocketUsesPrivateTempDirectory(t *testing.T) {
+	if _, err := exec.LookPath("bun"); err != nil {
+		t.Skip("bun is not available")
+	}
+
+	r, err := NewRenderer(core.ModeDev, `Bun.serve({ unix: process.env.BIFROST_SOCKET, fetch() { return new Response("ok") } });`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socketDir := filepath.Dir(r.socket)
+
+	info, err := os.Stat(socketDir)
+	if err != nil {
+		_ = r.Stop()
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		_ = r.Stop()
+		t.Fatalf("socket directory mode = %o, want 700", got)
+	}
+	if err := r.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(socketDir); !os.IsNotExist(err) {
+		t.Fatalf("socket directory still exists after Stop: %v", err)
+	}
+}
+
 func TestRendererStopIsIdempotent(t *testing.T) {
 	cleanupCalls := 0
 	r := &Renderer{cleanup: func() { cleanupCalls++ }}
@@ -165,8 +196,8 @@ func TestRendererStopIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestRuntimeSourceIncludesOnlyReactPluginsForReact(t *testing.T) {
-	src := RuntimeSource(core.ModeDev, core.FrameworkReact)
+func TestRuntimeSourceIncludesReactPlugins(t *testing.T) {
+	src := RuntimeSource(core.ModeDev)
 	if !strings.Contains(src, "react-compiler") {
 		t.Fatal("expected react-compiler plugin in react runtime source")
 	}
@@ -178,12 +209,5 @@ func TestRuntimeSourceIncludesOnlyReactPluginsForReact(t *testing.T) {
 	}
 	if strings.Contains(src, "svelte-plugin") {
 		t.Fatal("did not expect react plugin in react-only runtime source")
-	}
-}
-
-func TestRuntimeSourceOmitsBothFrameworkPluginsWhenEmpty(t *testing.T) {
-	src := RuntimeSource(core.ModeDev)
-	if strings.Contains(src, "svelte/compiler") {
-		t.Fatal("did not expect react import when no frameworks specified")
 	}
 }

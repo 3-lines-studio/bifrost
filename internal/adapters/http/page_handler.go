@@ -146,7 +146,7 @@ func (h *PageHandler) dispatchPageOutput(w http.ResponseWriter, req *http.Reques
 		h.serveError(w, req, errNeedsSetup)
 
 	case core.ActionRenderSSR:
-		if output.Markdown != "" {
+		if output.IsMarkdown {
 			h.serveMarkdown(w, output.Markdown)
 		} else {
 			h.serveHTML(w, output.HTML)
@@ -218,8 +218,11 @@ func (h *PageHandler) serveError(w http.ResponseWriter, req *http.Request, err e
 		if status == 0 {
 			status = http.StatusFound
 		}
-		http.Redirect(w, req, redirectErr.RedirectURL(), status)
-		return
+		if status >= 300 && status <= 399 {
+			http.Redirect(w, req, redirectErr.RedirectURL(), status)
+			return
+		}
+		err = fmt.Errorf("invalid redirect status %d: %w", status, err)
 	}
 
 	logRequestError(req, err)

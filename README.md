@@ -8,7 +8,8 @@ Server-side rendering for React pages from Go: register routes, embed build outp
 
 ## Requirements
 
-- [Go](https://go.dev/dl/) 1.25 or newer
+- Linux or macOS (Bifrost uses Unix sockets; Windows is not supported)
+- [Go](https://go.dev/dl/) 1.26.5 or newer
 - [Bun](https://bun.sh) on the machine where you develop and where you run production builds; SSR production binaries embed the Bun runtime (static-only apps do not)
 
 ## Install

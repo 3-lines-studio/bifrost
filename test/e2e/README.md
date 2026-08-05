@@ -42,7 +42,7 @@ Tests error handling and redirects:
 ## Running Tests
 
 ### Prerequisites
-- Go 1.25+
+- Go 1.26.5+
 - Bun installed and available in PATH
 
 ### Run all checks from the repo root (recommended)

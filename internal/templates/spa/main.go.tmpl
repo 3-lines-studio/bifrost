@@ -24,6 +24,6 @@ func main() {
 	addr := ":8080"
 	log.Printf("Server running on http://localhost%s", addr)
 	if err := http.ListenAndServe(addr, app.Handler()); err != nil {
-		log.Fatal(err)
+		log.Printf("server stopped: %v", err)
 	}
 }

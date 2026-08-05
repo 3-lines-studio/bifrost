@@ -170,5 +170,7 @@ func main() {
 
 	fmt.Println("Try: go run ./wrap.go for router integration demo")
 
-	log.Fatal(http.ListenAndServe(":8080", app.Handler()))
+	if err := http.ListenAndServe(":8080", app.Handler()); err != nil {
+		log.Printf("server stopped: %v", err)
+	}
 }

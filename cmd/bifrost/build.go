@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/3-lines-studio/bifrost/internal/adapters/cli"
-	"github.com/3-lines-studio/bifrost/internal/adapters/framework"
 	"github.com/3-lines-studio/bifrost/internal/adapters/fs"
 	"github.com/3-lines-studio/bifrost/internal/adapters/process"
+	"github.com/3-lines-studio/bifrost/internal/adapters/react"
 	"github.com/3-lines-studio/bifrost/internal/core"
 	"github.com/3-lines-studio/bifrost/internal/usecase"
 )
@@ -130,9 +130,7 @@ func runBuild(args []string) {
 		os.Exit(1)
 	}
 
-	adapter := framework.DefaultAdapter()
-
-	runtime, err := process.NewRenderer(core.ModeDev, framework.RuntimeSource(core.ModeDev, core.FrameworkReact), "BIFROST_PROD=1")
+	runtime, err := process.NewRenderer(core.ModeDev, react.RuntimeSource(core.ModeDev), "BIFROST_PROD=1")
 	if err != nil {
 		output.PrintHeader("Bifrost Build")
 		output.PrintError("Failed to initialize build engine: %v", err)
@@ -140,7 +138,7 @@ func runBuild(args []string) {
 	}
 	defer func() { _ = runtime.Stop() }()
 
-	buildService := usecase.NewBuildService(runtime, fsAdapter, output, adapter)
+	buildService := usecase.NewBuildService(runtime, fsAdapter, output)
 
 	input := usecase.BuildInput{
 		MainFile:   mainFileAbs,
