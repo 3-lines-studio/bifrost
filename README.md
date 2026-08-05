@@ -45,6 +45,10 @@ Hot reload on `.go` file changes with reverse proxy on `:3000` → `:8080`. Fron
 
 3. `go build` your app and run it **without** `BIFROST_DEV=1`.
 
+`bifrost build` exits non-zero if a required page or bundle fails. Build-scanned `Page` declarations must use string-literal component paths and direct Bifrost option calls; unsupported indirect forms fail with a clear error.
+
+Production `/dist/` assets are content-hashed and served with a one-year immutable cache policy.
+
 `go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest` installs a binary named `bifrost`; run `bifrost init`, `bifrost dev`, `bifrost build`, or `bifrost doctor`.
 
 ## `.bifrost` directory

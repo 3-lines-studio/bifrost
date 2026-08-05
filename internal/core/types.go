@@ -71,6 +71,7 @@ type PageConfig struct {
 	StaticDataLoader StaticDataLoader
 	HTMLLang         string
 	HTMLClass        string
+	modeOptions      uint8
 }
 
 type PageOption func(*PageConfig)
@@ -84,12 +85,14 @@ func WithLoader(loader PropsLoader) PageOption {
 func WithClient() PageOption {
 	return func(c *PageConfig) {
 		c.Mode = ModeClientOnly
+		c.modeOptions |= 1
 	}
 }
 
 func WithStatic() PageOption {
 	return func(c *PageConfig) {
 		c.Mode = ModeStaticPrerender
+		c.modeOptions |= 2
 	}
 }
 
@@ -97,6 +100,7 @@ func WithStaticData(loader StaticDataLoader) PageOption {
 	return func(c *PageConfig) {
 		c.Mode = ModeStaticPrerender
 		c.StaticDataLoader = loader
+		c.modeOptions |= 2
 	}
 }
 
@@ -139,17 +143,10 @@ type Renderer interface {
 }
 
 type Config struct {
-	Framework       Framework
 	DefaultHTMLLang string
 }
 
 type ConfigOption func(*Config)
-
-func WithFramework(fw Framework) ConfigOption {
-	return func(c *Config) {
-		c.Framework = fw
-	}
-}
 
 func WithDefaultHTMLLang(lang string) ConfigOption {
 	return func(c *Config) {

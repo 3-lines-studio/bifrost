@@ -14,7 +14,7 @@ import (
 //go:embed testdata/embedded_files/app.js
 var embeddedAssetFS embed.FS
 
-//go:embed .bifrost/public/app.js
+//go:embed .bifrost/public/app.js .bifrost/dist/app.js
 var embeddedPublicFS embed.FS
 
 func TestCleanPath(t *testing.T) {
@@ -112,6 +112,36 @@ func TestAssetHandler_ServesValidDevFile(t *testing.T) {
 	}
 	if w.Body.String() != "console.log('hi')" {
 		t.Errorf("unexpected body: %s", w.Body.String())
+	}
+}
+
+func TestAssetHandler_ProductionAssetsAreImmutable(t *testing.T) {
+	handler := NewAssetHandler(embeddedPublicFS, false)
+	req := httptest.NewRequest(http.MethodGet, "/dist/app.js", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if got := w.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+}
+
+func TestAssetHandler_Production404IsNotImmutable(t *testing.T) {
+	handler := NewAssetHandler(embeddedPublicFS, false)
+	req := httptest.NewRequest(http.MethodGet, "/dist/missing.js", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+	if got := w.Header().Get("Cache-Control"); got != "" {
+		t.Fatalf("Cache-Control = %q, want empty", got)
 	}
 }
 

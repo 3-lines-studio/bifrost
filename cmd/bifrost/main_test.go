@@ -143,9 +143,6 @@ func TestCLI_BuildHelp(t *testing.T) {
 			if !strings.Contains(string(out), "bifrost build") {
 				t.Errorf("expected build usage, got:\n%s", out)
 			}
-			if !strings.Contains(string(out), "(react)") {
-				t.Errorf("expected framework list to include (react), got:\n%s", out)
-			}
 			if !strings.Contains(string(out), "--go-build") {
 				t.Errorf("expected --go-build flag in build usage, got:\n%s", out)
 			}

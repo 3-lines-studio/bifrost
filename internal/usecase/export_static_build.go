@@ -26,7 +26,7 @@ type staticPathExport struct {
 	Props any    `json:"props"`
 }
 
-func WriteStaticBuildExport(w io.Writer, routes []core.Route, pageConfigs map[string]*core.PageConfig) error {
+func WriteStaticBuildExport(w io.Writer, routes []core.Route) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -34,53 +34,38 @@ func WriteStaticBuildExport(w io.Writer, routes []core.Route, pageConfigs map[st
 		Version: 1,
 		Pages:   make([]staticPageExport, 0),
 	}
+	pageIndex := make(map[string]int)
 
-	componentToPattern := make(map[string]string)
 	for _, route := range routes {
-		config := core.PageConfigFromRoute(route)
-		if config.Mode == core.ModeStaticPrerender {
-			componentToPattern[config.ComponentPath] = route.Pattern
+		config, err := core.PageConfigFromRoute(route)
+		if err != nil {
+			return err
 		}
-	}
-
-	for componentPath, config := range pageConfigs {
 		if config.Mode != core.ModeStaticPrerender {
 			continue
 		}
 
-		var entries []core.StaticPathData
+		entries := []core.StaticPathData{{Path: route.Pattern, Props: map[string]any{}}}
 		if config.StaticDataLoader != nil {
 			var err error
 			entries, err = config.StaticDataLoader(ctx)
 			if err != nil {
-				return fmt.Errorf("failed to load static data for %s: %w", componentPath, err)
-			}
-		} else {
-			pattern := componentToPattern[componentPath]
-			if pattern == "" {
-				continue
-			}
-			entries = []core.StaticPathData{
-				{
-					Path:  pattern,
-					Props: map[string]any{},
-				},
+				return fmt.Errorf("failed to load static data for %s: %w", config.ComponentPath, err)
 			}
 		}
 
-		pageExport := staticPageExport{
-			ComponentPath: componentPath,
-			Entries:       make([]staticPathExport, len(entries)),
+		idx, ok := pageIndex[config.ComponentPath]
+		if !ok {
+			idx = len(export.Pages)
+			pageIndex[config.ComponentPath] = idx
+			export.Pages = append(export.Pages, staticPageExport{ComponentPath: config.ComponentPath})
 		}
-
-		for i, entry := range entries {
-			pageExport.Entries[i] = staticPathExport{
+		for _, entry := range entries {
+			export.Pages[idx].Entries = append(export.Pages[idx].Entries, staticPathExport{
 				Path:  entry.Path,
 				Props: entry.Props,
-			}
+			})
 		}
-
-		export.Pages = append(export.Pages, pageExport)
 	}
 
 	encoder := json.NewEncoder(w)
@@ -92,6 +77,6 @@ func WriteStaticBuildExport(w io.Writer, routes []core.Route, pageConfigs map[st
 	return nil
 }
 
-func WriteStaticBuildExportToStdout(routes []core.Route, pageConfigs map[string]*core.PageConfig) error {
-	return WriteStaticBuildExport(os.Stdout, routes, pageConfigs)
+func WriteStaticBuildExportToStdout(routes []core.Route) error {
+	return WriteStaticBuildExport(os.Stdout, routes)
 }

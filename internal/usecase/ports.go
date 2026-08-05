@@ -1,16 +1,27 @@
 package usecase
 
 import (
+	"context"
+
 	"github.com/3-lines-studio/bifrost/internal/adapters/fs"
 	"github.com/3-lines-studio/bifrost/internal/core"
-	"io"
 )
 
 type Renderer interface {
 	Render(componentPath string, props any) (core.RenderedPage, error)
-	RenderBodyTo(w io.Writer, componentPath string, props any, onHead func(head string) error) error
 	Build(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error)
 	BuildSSR(entrypoints []string, outdir string, framework string) error
+}
+
+type contextRenderer interface {
+	RenderContext(ctx context.Context, componentPath string, props any) (core.RenderedPage, error)
+}
+
+func renderWithContext(ctx context.Context, renderer Renderer, componentPath string, props any) (core.RenderedPage, error) {
+	if renderer, ok := renderer.(contextRenderer); ok {
+		return renderer.RenderContext(ctx, componentPath, props)
+	}
+	return renderer.Render(componentPath, props)
 }
 
 type CLIOutput interface {

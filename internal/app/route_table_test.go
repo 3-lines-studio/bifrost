@@ -62,6 +62,19 @@ func captureStdout(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
+func configsForRoutes(t *testing.T, routes []core.Route) []core.PageConfig {
+	t.Helper()
+	configs := make([]core.PageConfig, len(routes))
+	for i, route := range routes {
+		config, err := core.PageConfigFromRoute(route)
+		if err != nil {
+			t.Fatalf("PageConfigFromRoute() error: %v", err)
+		}
+		configs[i] = config
+	}
+	return configs
+}
+
 func TestPrintRouteTable_FormatsRoutes(t *testing.T) {
 	routes := []core.Route{
 		core.Page("/", "./pages/home.tsx"),
@@ -70,7 +83,7 @@ func TestPrintRouteTable_FormatsRoutes(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		printRouteTable(routes)
+		printRouteTable(routes, configsForRoutes(t, routes))
 	})
 
 	if !strings.Contains(out, "Bifrost routes:") {
@@ -101,7 +114,7 @@ func TestPrintRouteTable_FormatsRoutes(t *testing.T) {
 
 func TestPrintRouteTable_EmptyRoutes(t *testing.T) {
 	out := captureStdout(t, func() {
-		printRouteTable(nil)
+		printRouteTable(nil, nil)
 	})
 
 	if out != "" {
@@ -117,7 +130,7 @@ func TestPrintRouteTable_ModeLabels(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		printRouteTable(routes)
+		printRouteTable(routes, configsForRoutes(t, routes))
 	})
 
 	for _, want := range []string{"ssr", "client", "static"} {

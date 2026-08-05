@@ -50,7 +50,10 @@ func Page(a, b string) {}
 	}
 
 	svc := &BuildService{}
-	configs, _ := svc.scanFileForPages(fset, file)
+	configs, _, err := svc.scanFileForPages(fset, file)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(configs) != 0 {
 		t.Fatalf("expected no pages from non-bifrost Page calls, got %v", configs)
 	}
@@ -70,7 +73,10 @@ func main() {
 	}
 
 	svc := &BuildService{}
-	configs, _ := svc.scanFileForPages(fset, file)
+	configs, _, err := svc.scanFileForPages(fset, file)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(configs) != 1 {
 		t.Fatalf("expected 1 page, got %d", len(configs))
 	}
@@ -96,7 +102,10 @@ func main() {
 	}
 
 	svc := &BuildService{}
-	configs, _ := svc.scanFileForPages(fset, file)
+	configs, _, err := svc.scanFileForPages(fset, file)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(configs) != 1 {
 		t.Fatalf("expected 1 page, got %d", len(configs))
 	}
@@ -105,6 +114,83 @@ func main() {
 	}
 	if configs[0].Mode != core.ModeStaticPrerender {
 		t.Fatalf("expected static-prerender mode, got %v", configs[0].Mode)
+	}
+}
+
+func TestScanFileForPages_RejectsNonLiteralComponentPath(t *testing.T) {
+	src := `package main
+import "github.com/3-lines-studio/bifrost"
+const home = "./pages/home.tsx"
+func main() { _ = bifrost.Page("/", home) }
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "main.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = (&BuildService{}).scanFileForPages(fset, file)
+	if err == nil {
+		t.Fatal("expected non-literal component path to fail")
+	}
+}
+
+func TestScanFileForPages_RejectsIndirectOptions(t *testing.T) {
+	src := `package main
+import "github.com/3-lines-studio/bifrost"
+func main() {
+	opts := []bifrost.PageOption{bifrost.WithClient()}
+	_ = bifrost.Page("/", "./pages/home.tsx", opts...)
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "main.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = (&BuildService{}).scanFileForPages(fset, file)
+	if err == nil {
+		t.Fatal("expected indirect page options to fail")
+	}
+}
+
+func TestScanFileForPages_RejectsMixedModesForSharedComponent(t *testing.T) {
+	src := `package main
+import "github.com/3-lines-studio/bifrost"
+func main() {
+	_ = bifrost.Page("/ssr", "./pages/home.tsx")
+	_ = bifrost.Page("/client", "./pages/home.tsx", bifrost.WithClient())
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "main.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = (&BuildService{}).scanFileForPages(fset, file)
+	if err == nil {
+		t.Fatal("expected mixed modes to fail")
+	}
+}
+
+func TestScanFileForPages_RejectsConflictingModeOptions(t *testing.T) {
+	src := `package main
+import "github.com/3-lines-studio/bifrost"
+func main() {
+	_ = bifrost.Page("/", "./pages/home.tsx", bifrost.WithClient(), bifrost.WithStatic())
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "main.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = (&BuildService{}).scanFileForPages(fset, file)
+	if err == nil {
+		t.Fatal("expected conflicting mode options to fail")
 	}
 }
 
@@ -123,7 +209,10 @@ func main() {
 	}
 
 	svc := &BuildService{}
-	configs, seen := svc.scanFileForPages(fset, file)
+	configs, seen, err := svc.scanFileForPages(fset, file)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(configs) != 1 {
 		t.Fatalf("expected 1 unique page, got %d", len(configs))
 	}

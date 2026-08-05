@@ -162,7 +162,10 @@ func main() {
 	}
 
 	// Mode 1: Simple Handler (default)
-	app := bifrost.New(bifrostFS, routes...)
+	app, err := bifrost.New(bifrostFS, routes...)
+	if err != nil {
+		log.Fatalf("create app: %v", err)
+	}
 	defer app.Stop()
 
 	fmt.Println("Try: go run ./wrap.go for router integration demo")

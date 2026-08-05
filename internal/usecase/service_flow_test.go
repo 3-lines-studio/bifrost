@@ -3,7 +3,6 @@ package usecase
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -31,18 +30,6 @@ func (f *fakeRenderer) Render(componentPath string, props any) (core.RenderedPag
 		return f.renderFn(componentPath, props)
 	}
 	return core.RenderedPage{}, nil
-}
-
-func (f *fakeRenderer) RenderBodyTo(w io.Writer, componentPath string, props any, onHead func(head string) error) error {
-	page, err := f.Render(componentPath, props)
-	if err != nil {
-		return err
-	}
-	if err := onHead(page.Head); err != nil {
-		return err
-	}
-	_, err = io.WriteString(w, page.Body)
-	return err
 }
 
 func (f *fakeRenderer) Build(entrypoints []string, outdir string, entryNames []string, framework string) (map[string]core.ClientBuildResult, error) {
@@ -106,18 +93,11 @@ func TestPageServiceDevSSRBuildsThenRenders(t *testing.T) {
 	if output.Action != core.ActionRenderSSR {
 		t.Fatalf("ServePage() action = %v", output.Action)
 	}
-	if output.Stream == nil {
-		t.Fatal("expected stream output")
+	if !strings.Contains(output.HTML, "<div>Hello</div>") {
+		t.Fatalf("expected rendered body, got %q", output.HTML)
 	}
-	var buf strings.Builder
-	if err := output.Stream(&buf); err != nil {
-		t.Fatalf("Stream() error = %v", err)
-	}
-	if !strings.Contains(buf.String(), "<div>Hello</div>") {
-		t.Fatalf("expected rendered body, got %q", buf.String())
-	}
-	if !strings.Contains(buf.String(), "<title>Home</title>") {
-		t.Fatalf("expected head, got %q", buf.String())
+	if !strings.Contains(output.HTML, "<title>Home</title>") {
+		t.Fatalf("expected head, got %q", output.HTML)
 	}
 	if renderer.buildCalls != 1 || renderer.buildSSRCalls != 1 {
 		t.Fatalf("expected one dev setup build, got Build=%d BuildSSR=%d", renderer.buildCalls, renderer.buildSSRCalls)

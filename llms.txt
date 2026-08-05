@@ -2,7 +2,7 @@
 
 > Bifrost is a Go library for server-side rendering React components using Bun. It bridges Go backends with React frontends via Unix socket communication.
 
-Bifrost enables Go HTTP servers to render React components on the server, providing full SSR capabilities while maintaining a simple API. Static pages are pre-rendered at build time into HTML with client-side React hydration (MPA-style), requiring no Bun runtime to serve. Development hot reload is handled by `bifrost dev` with built-in reverse proxy. Production deployment uses embedded assets for single binary distribution.
+Bifrost enables Go HTTP servers to render React components on the server with a small API. React SSR uses `renderToString` and buffers the completed page before writing the HTTP response. Static pages are pre-rendered at build time into HTML with client-side React hydration (MPA-style), requiring no Bun runtime to serve. Development hot reload is handled by `bifrost dev` with built-in reverse proxy. Production deployment uses embedded assets for single binary distribution.
 
 ## Features
 
@@ -11,6 +11,8 @@ Bifrost enables Go HTTP servers to render React components on the server, provid
 - MPA-style static pages with pre-rendered HTML + client hydration (no runtime Bun)
 - Hot reload via `bifrost dev` (build+proxy+watcher)
 - Single binary deployment with embedded assets
+- Strict production builds: any required page or bundle failure exits non-zero
+- Content-hashed production assets with immutable browser caching
 - Project scaffolding with templates (`minimal`, `spa`)
 
 ## Docs
@@ -45,15 +47,20 @@ When creating a new project, choose from:
 - `minimal` (default): Basic SSR setup with props loading
 - `spa`: Client-only single page application with `WithClient()`
 
-## New API
+## API
+
+Bifrost v1 supports React only. Build-scanned `Page` declarations use string-literal component paths and direct Bifrost option calls; unsupported indirect forms fail instead of being skipped.
 
 ```go
-app := bifrost.New(
+app, err := bifrost.New(
     bifrostFS,
     bifrost.Page("/", "./pages/home.tsx", bifrost.WithLoader(loadProps)),
     bifrost.Page("/about", "./pages/about.tsx", bifrost.WithClient()),
     bifrost.Page("/blog", "./pages/blog.tsx", bifrost.WithStatic()),
 )
+if err != nil {
+    log.Fatal(err)
+}
 defer app.Stop()
 
 api := chi.NewRouter()

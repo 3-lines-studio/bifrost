@@ -41,7 +41,7 @@ func TestPrintBuildUsage_DocumentedOrdering(t *testing.T) {
 }
 
 func TestParseFlags_GoBuildDefault(t *testing.T) {
-	mf, _, gb, _ := parseFlags([]string{"./main.go", "--go-build"})
+	mf, gb, _ := parseFlags([]string{"./main.go", "--go-build"})
 	if mf != "./main.go" {
 		t.Errorf("expected mainFile './main.go', got '%s'", mf)
 	}
@@ -51,7 +51,7 @@ func TestParseFlags_GoBuildDefault(t *testing.T) {
 }
 
 func TestParseFlags_GoBuildEquals(t *testing.T) {
-	mf, _, gb, _ := parseFlags([]string{"./main.go", "--go-build=./myapp"})
+	mf, gb, _ := parseFlags([]string{"./main.go", "--go-build=./myapp"})
 	if mf != "./main.go" {
 		t.Errorf("expected mainFile './main.go', got '%s'", mf)
 	}
@@ -61,7 +61,7 @@ func TestParseFlags_GoBuildEquals(t *testing.T) {
 }
 
 func TestParseFlags_GoBuildSpace(t *testing.T) {
-	mf, _, gb, _ := parseFlags([]string{"./main.go", "--go-build", "./myapp"})
+	mf, gb, _ := parseFlags([]string{"./main.go", "--go-build", "./myapp"})
 	if mf != "./main.go" {
 		t.Errorf("expected mainFile './main.go', got '%s'", mf)
 	}
@@ -71,7 +71,7 @@ func TestParseFlags_GoBuildSpace(t *testing.T) {
 }
 
 func TestParseFlags_NoGoBuild(t *testing.T) {
-	mf, _, gb, _ := parseFlags([]string{"./main.go"})
+	mf, gb, _ := parseFlags([]string{"./main.go"})
 	if mf != "./main.go" {
 		t.Errorf("expected mainFile './main.go', got '%s'", mf)
 	}
@@ -81,7 +81,7 @@ func TestParseFlags_NoGoBuild(t *testing.T) {
 }
 
 func TestParseFlags_GoBuildFollowedByFlag(t *testing.T) {
-	mf, _, gb, _ := parseFlags([]string{"./main.go", "--go-build", "-f", "react"})
+	mf, gb, _ := parseFlags([]string{"./main.go", "--go-build", "--other"})
 	if mf != "./main.go" {
 		t.Errorf("expected mainFile './main.go', got '%s'", mf)
 	}
@@ -94,24 +94,11 @@ func TestParseFlags_GoBuildFollowedByFlag(t *testing.T) {
 // If the flag is placed first, parseFlags currently interprets the main file
 // as the --go-build output path and leaves mainFile empty.
 func TestParseFlags_GoBuildBeforeMainFile(t *testing.T) {
-	mf, _, gb, _ := parseFlags([]string{"--go-build", "./main.go"})
+	mf, gb, _ := parseFlags([]string{"--go-build", "./main.go"})
 	if mf != "" {
 		t.Errorf("expected mainFile to be empty when --go-build precedes it, got '%s'", mf)
 	}
 	if gb != "./main.go" {
 		t.Errorf("expected goBuildOutput './main.go', got '%s'", gb)
-	}
-}
-
-func TestParseFlags_FrameworkAndGoBuild(t *testing.T) {
-	mf, fw, gb, _ := parseFlags([]string{"./main.go", "-f", "react", "--go-build"})
-	if mf != "./main.go" {
-		t.Errorf("expected mainFile './main.go', got '%s'", mf)
-	}
-	if fw.String() != "react" {
-		t.Errorf("expected framework react, got '%s'", fw.String())
-	}
-	if gb != "./tmp/app" {
-		t.Errorf("expected goBuildOutput './tmp/app', got '%s'", gb)
 	}
 }

@@ -9,7 +9,9 @@ import (
 	"html"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
@@ -83,7 +85,7 @@ func ResolveMarkdown(next http.Handler) http.Handler {
 			req.URL.Path = req.URL.Path[:len(req.URL.Path)-3]
 			markdown = true
 		}
-		if strings.Contains(req.Header.Get("Accept"), "text/markdown") {
+		if acceptsMarkdown(req.Header.Get("Accept")) {
 			markdown = true
 		}
 		if markdown {
@@ -92,6 +94,26 @@ func ResolveMarkdown(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, req)
 	})
+}
+
+func acceptsMarkdown(accept string) bool {
+	for value := range strings.SplitSeq(accept, ",") {
+		mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(value))
+		if err != nil || !strings.EqualFold(mediaType, "text/markdown") {
+			continue
+		}
+		quality := 1.0
+		if rawQuality, ok := params["q"]; ok {
+			quality, err = strconv.ParseFloat(rawQuality, 64)
+			if err != nil {
+				continue
+			}
+		}
+		if quality > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *PageHandler) servePageInput(req *http.Request) usecase.ServePageInput {
@@ -126,26 +148,13 @@ func (h *PageHandler) dispatchPageOutput(w http.ResponseWriter, req *http.Reques
 	case core.ActionRenderSSR:
 		if output.Markdown != "" {
 			h.serveMarkdown(w, output.Markdown)
-		} else if output.Stream != nil {
-			h.serveStreamed(w, req, output.Stream)
 		} else {
 			h.serveHTML(w, output.HTML)
 		}
 
 	case core.ActionRenderClientOnlyShell,
 		core.ActionRenderStaticPrerender:
-		if output.Stream != nil {
-			h.serveStreamed(w, req, output.Stream)
-		} else {
-			h.serveHTML(w, output.HTML)
-		}
-	}
-}
-
-func (h *PageHandler) serveStreamed(w http.ResponseWriter, req *http.Request, stream func(io.Writer) error) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := stream(w); err != nil {
-		h.serveError(w, req, err)
+		h.serveHTML(w, output.HTML)
 	}
 }
 
@@ -194,8 +203,17 @@ func computeNextSteps(se *core.StructuredError) []string {
 	}
 }
 
+func logRequestError(req *http.Request, err error) {
+	slog.Error("request failed",
+		"method", req.Method,
+		"path", req.URL.Path,
+		"error", err.Error(),
+	)
+}
+
 func (h *PageHandler) serveError(w http.ResponseWriter, req *http.Request, err error) {
-	if redirectErr, ok := err.(core.RedirectError); ok {
+	var redirectErr core.RedirectError
+	if errors.As(err, &redirectErr) {
 		status := redirectErr.RedirectStatusCode()
 		if status == 0 {
 			status = http.StatusFound
@@ -204,11 +222,7 @@ func (h *PageHandler) serveError(w http.ResponseWriter, req *http.Request, err e
 		return
 	}
 
-	slog.Error("request failed",
-		"method", req.Method,
-		"path", req.URL.Path,
-		"error", err.Error(),
-	)
+	logRequestError(req, err)
 
 	data := core.ErrorData{
 		Message: err.Error(),

@@ -4,6 +4,8 @@ dist/
 !internal/templates/*/.bifrost/
 !internal/adapters/process/testembed/.bifrost/
 !internal/adapters/http/.bifrost/
+!internal/adapters/http/.bifrost/dist/
+!internal/adapters/http/.bifrost/dist/app.js
 tmp/
 bifrost
 !bifrost/

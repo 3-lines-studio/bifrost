@@ -1,6 +1,9 @@
 package process
 
 import (
+	"context"
+	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -124,6 +127,41 @@ func TestFormatRenderError_WithPosition(t *testing.T) {
 	}
 	if sub.LineText != "{#if}" {
 		t.Errorf("expected LineText '{#if}', got %q", sub.LineText)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestRendererRenderContextHonorsCancellation(t *testing.T) {
+	r := &Renderer{client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := r.RenderContext(ctx, "/page.js", nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want %v", err, context.Canceled)
+	}
+}
+
+func TestRendererStopIsIdempotent(t *testing.T) {
+	cleanupCalls := 0
+	r := &Renderer{cleanup: func() { cleanupCalls++ }}
+
+	if err := r.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if cleanupCalls != 1 {
+		t.Fatalf("cleanup calls = %d, want 1", cleanupCalls)
 	}
 }
 

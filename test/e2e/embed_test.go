@@ -2,5 +2,5 @@ package e2e
 
 import "embed"
 
-//go:embed all:.bifrost all:public
+//go:embed all:.bifrost
 var BifrostFS embed.FS

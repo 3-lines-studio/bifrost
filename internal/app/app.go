@@ -23,6 +23,7 @@ type Router interface {
 type App struct {
 	host         *runtime.Host
 	routes       []core.Route
+	routeConfigs []core.PageConfig
 	assetsFS     embed.FS
 	isDev        bool
 	manifest     *core.Manifest
@@ -32,72 +33,86 @@ type App struct {
 	routesSealed bool
 }
 
-func New(assetsFS embed.FS, routes ...core.Route) *App {
-	config := &core.Config{
-		Framework: core.FrameworkReact,
-	}
-	return newApp(assetsFS, routes, config)
+func New(assetsFS embed.FS, routes ...core.Route) (*App, error) {
+	return newApp(assetsFS, routes, &core.Config{})
 }
 
-func NewWithFramework(assetsFS embed.FS, fw core.Framework, routes ...core.Route) *App {
-	config := &core.Config{
-		Framework: fw,
-	}
-	return newApp(assetsFS, routes, config)
-}
-
-func NewWithOptions(assetsFS embed.FS, opts []core.ConfigOption, routes ...core.Route) *App {
-	config := &core.Config{
-		Framework: core.FrameworkReact,
-	}
+func NewWithOptions(assetsFS embed.FS, opts []core.ConfigOption, routes ...core.Route) (*App, error) {
+	config := &core.Config{}
 	for _, o := range opts {
 		o(config)
 	}
 	return newApp(assetsFS, routes, config)
 }
 
-func newApp(assetsFS embed.FS, routes []core.Route, config *core.Config) *App {
+func newApp(assetsFS embed.FS, routes []core.Route, config *core.Config) (*App, error) {
 	mode := env.DetectAppMode()
 	app := &App{
 		assetsFS:    assetsFS,
 		isDev:       mode == core.ModeDev,
 		pageConfigs: make(map[string]*core.PageConfig),
 		config:      config,
-		adapter:     framework.ResolveAdapter(config.Framework),
+		adapter:     framework.DefaultAdapter(),
 	}
-	app.addRoutes(routes)
-
-	if env.IsExportMarkerPresent() {
-		return app
+	if err := app.addRoutes(routes); err != nil {
+		return nil, err
 	}
 
-	if mode == core.ModeExport {
-		return app
+	if env.IsExportMarkerPresent() || mode == core.ModeExport {
+		return app, nil
 	}
 
 	h, err := runtime.NewHost(assetsFS, mode, app.adapter)
 	if err != nil {
-		panic(fmt.Sprintf("failed to create bifrost renderer: %v", err))
+		return nil, fmt.Errorf("failed to create bifrost renderer: %w", err)
 	}
 	app.host = h
 	app.manifest = h.Manifest()
 
-	return app
+	return app, nil
 }
 
-func (a *App) addRoutes(routes []core.Route) {
-	for _, route := range routes {
-		pc := core.PageConfigFromRoute(route)
-		a.pageConfigs[route.ComponentPath] = &pc
+func (a *App) addRoutes(routes []core.Route) error {
+	modes := make(map[string]core.PageMode, len(a.pageConfigs)+len(routes))
+	for componentPath, config := range a.pageConfigs {
+		modes[componentPath] = config.Mode
 	}
-	a.routes = append(a.routes, routes...)
+
+	storedRoutes := make([]core.Route, len(routes))
+	configs := make([]core.PageConfig, len(routes))
+	for i, route := range routes {
+		route.Options = append([]core.PageOption(nil), route.Options...)
+		pc, err := core.PageConfigFromRoute(route)
+		if err != nil {
+			return err
+		}
+		if previous, ok := modes[route.ComponentPath]; ok && previous != pc.Mode {
+			return fmt.Errorf(
+				"bifrost: component %q cannot use both %s and %s modes",
+				route.ComponentPath,
+				previous.BuildLabel(),
+				pc.Mode.BuildLabel(),
+			)
+		}
+		modes[route.ComponentPath] = pc.Mode
+		storedRoutes[i] = route
+		configs[i] = pc
+	}
+
+	for i := range storedRoutes {
+		config := configs[i]
+		a.pageConfigs[storedRoutes[i].ComponentPath] = &config
+	}
+	a.routes = append(a.routes, storedRoutes...)
+	a.routeConfigs = append(a.routeConfigs, configs...)
+	return nil
 }
 
-func (a *App) Handle(routes ...core.Route) {
+func (a *App) Handle(routes ...core.Route) error {
 	if a.routesSealed {
-		panic("bifrost: Handle after Wrap or Handler")
+		return fmt.Errorf("bifrost: Handle after Wrap or Handler")
 	}
-	a.addRoutes(routes)
+	return a.addRoutes(routes)
 }
 
 func (a *App) runExportMode() {
@@ -125,7 +140,7 @@ func (a *App) runExportMode() {
 
 func (a *App) Wrap(api Router) http.Handler {
 	if env.IsExportMarkerPresent() {
-		if err := usecase.WriteStaticBuildExportToStdout(a.routes, a.pageConfigs); err != nil {
+		if err := usecase.WriteStaticBuildExportToStdout(a.routes); err != nil {
 			fmt.Fprintf(os.Stderr, "export failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -150,8 +165,8 @@ func (a *App) Wrap(api Router) http.Handler {
 	fsAdapter := adaptersfs.NewEmbedFileSystem(a.assetsFS)
 	pageService := usecase.NewPageService(a.host.Client(), fsAdapter, a.adapter)
 
-	for _, route := range a.routes {
-		config := core.PageConfigFromRoute(route)
+	for i, route := range a.routes {
+		config := a.routeConfigs[i]
 		staticPath := a.getStaticPath(config)
 
 		handler := adaptershttp.NewPageHandler(pageService, config, a.manifest, a.assetsFS, a.isDev, staticPath, defaultLang)
@@ -159,7 +174,7 @@ func (a *App) Wrap(api Router) http.Handler {
 	}
 
 	if shouldPrintRouteTable() {
-		printRouteTable(a.routes)
+		printRouteTable(a.routes, a.routeConfigs)
 	}
 
 	return createAssetHandler(api, a)
@@ -219,7 +234,6 @@ func (a *App) ExportStaticPages(outputDir string) error {
 	return usecase.ExportStaticPages(usecase.ExportStaticPagesInput{
 		OutputDir:    outputDir,
 		Routes:       a.routes,
-		PageConfigs:  a.pageConfigs,
 		Manifest:     a.manifest,
 		AppConfig:    a.config,
 		SSBundlePath: a.getSSBundlePath,

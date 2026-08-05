@@ -70,7 +70,11 @@ func (h *AssetHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if !h.isDev {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
 	if err := serveBifrostFile(w, req, h.assetsFS, cleaned, !h.isDev, core.GetContentType(cleaned)); err != nil {
+		w.Header().Del("Cache-Control")
 		http.NotFound(w, req)
 	}
 }

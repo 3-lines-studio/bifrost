@@ -33,24 +33,9 @@ func findGoModRoot(startDir string) string {
 	return startDir
 }
 
-func parseFlags(args []string) (mainFile string, fw core.Framework, goBuildOutput string, remaining []string) {
-	fw = core.FrameworkReact
-
+func parseFlags(args []string) (mainFile string, goBuildOutput string, remaining []string) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-
-		if arg == "--framework" || arg == "-f" {
-			if i+1 < len(args) {
-				fw = core.FrameworkFromString(strings.ToLower(args[i+1]))
-				i++
-			}
-			continue
-		}
-
-		if after, ok := strings.CutPrefix(arg, "--framework="); ok {
-			fw = core.FrameworkFromString(strings.ToLower(after))
-			continue
-		}
 
 		if arg == "--go-build" {
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
@@ -74,11 +59,7 @@ func parseFlags(args []string) (mainFile string, fw core.Framework, goBuildOutpu
 		}
 	}
 
-	return mainFile, fw, goBuildOutput, remaining
-}
-
-func getAdapter(fw core.Framework) core.FrameworkAdapter {
-	return framework.ResolveAdapter(fw)
+	return mainFile, goBuildOutput, remaining
 }
 
 func printBuildUsage() {
@@ -92,8 +73,7 @@ func printBuildUsage() {
 	fmt.Println("  bifrost build ./main.go --go-build=./myapp")
 	fmt.Println()
 	fmt.Println("Flags:")
-	fmt.Println("  -f, --framework <name>  Framework to use (react)")
-	fmt.Println("  --go-build[=path]       Run go build after asset build (default: ./tmp/app)")
+	fmt.Println("  --go-build[=path]  Run go build after asset build (default: ./tmp/app)")
 }
 
 func ensureBifrostDir(fsAdapter fs.FileSystem, dir string) error {
@@ -115,7 +95,7 @@ func runBuild(args []string) {
 		os.Exit(0)
 	}
 
-	mainFile, fw, goBuildOutput, _ := parseFlags(args)
+	mainFile, goBuildOutput, _ := parseFlags(args)
 
 	if mainFile == "" {
 		printBuildUsage()
@@ -150,7 +130,7 @@ func runBuild(args []string) {
 		os.Exit(1)
 	}
 
-	adapter := getAdapter(fw)
+	adapter := framework.DefaultAdapter()
 
 	runtime, err := process.NewRenderer(core.ModeDev, framework.RuntimeSource(core.ModeDev, core.FrameworkReact), "BIFROST_PROD=1")
 	if err != nil {
@@ -171,6 +151,9 @@ func runBuild(args []string) {
 	result := buildService.BuildProject(context.Background(), input)
 	if result.Error != nil {
 		output.PrintError("%v", result.Error)
+		os.Exit(1)
+	}
+	if !result.Success {
 		os.Exit(1)
 	}
 

@@ -190,9 +190,6 @@ func (r *Host) startRendererFromSource(mode core.Mode, source string, cleanup fu
 func (r *Host) startRendererFromExecutable(executablePath string, cleanup func()) error {
 	client, err := process.NewRendererFromExecutable(executablePath, cleanup)
 	if err != nil {
-		if cleanup != nil {
-			cleanup()
-		}
 		return fmt.Errorf("failed to start embedded runtime: %w", err)
 	}
 	r.client = client

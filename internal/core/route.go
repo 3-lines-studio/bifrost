@@ -1,5 +1,7 @@
 package core
 
+import "fmt"
+
 type Route struct {
 	Pattern       string
 	ComponentPath string
@@ -14,7 +16,7 @@ func Page(pattern string, componentPath string, opts ...PageOption) Route {
 	}
 }
 
-func PageConfigFromRoute(route Route) PageConfig {
+func PageConfigFromRoute(route Route) (PageConfig, error) {
 	config := PageConfig{
 		ComponentPath: route.ComponentPath,
 		Mode:          ModeSSR,
@@ -22,5 +24,8 @@ func PageConfigFromRoute(route Route) PageConfig {
 	for _, opt := range route.Options {
 		opt(&config)
 	}
-	return config
+	if config.modeOptions == 3 {
+		return PageConfig{}, fmt.Errorf("bifrost: page %q has conflicting mode options", route.ComponentPath)
+	}
+	return config, nil
 }

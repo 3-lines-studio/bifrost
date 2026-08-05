@@ -32,7 +32,10 @@ func main() {
 		bifrost.Page("/product", "./pages/product.tsx", bifrost.WithStatic()),
 	}
 
-	app := bifrost.New(bifrostFS, bifrostRoutes...)
+	app, err := bifrost.New(bifrostFS, bifrostRoutes...)
+	if err != nil {
+		log.Fatalf("create app: %v", err)
+	}
 	defer app.Stop()
 
 	// Create chi router

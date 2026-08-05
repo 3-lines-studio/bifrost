@@ -38,11 +38,20 @@ func skipIfNoBun(t *testing.T) {
 	}
 }
 
+func mustNew(t *testing.T, routes ...core.Route) *App {
+	t.Helper()
+	a, err := New(testFS, routes...)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	return a
+}
+
 func TestNewCreatesApp(t *testing.T) {
 	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
-	a := New(testFS)
+	a := mustNew(t)
 	defer func() { _ = a.Stop() }()
 
 	if a == nil {
@@ -50,14 +59,61 @@ func TestNewCreatesApp(t *testing.T) {
 	}
 }
 
+func TestAddRoutesRejectsMixedModesForSharedComponent(t *testing.T) {
+	a := &App{pageConfigs: make(map[string]*core.PageConfig)}
+	if err := a.addRoutes([]core.Route{core.Page("/ssr", "./shared.tsx")}); err != nil {
+		t.Fatalf("addRoutes() error: %v", err)
+	}
+
+	err := a.addRoutes([]core.Route{
+		core.Page("/new", "./new.tsx"),
+		core.Page("/client", "./shared.tsx", core.WithClient()),
+	})
+	if err == nil {
+		t.Fatal("expected mixed modes for one component to return an error")
+	}
+	if len(a.routes) != 1 {
+		t.Fatalf("failed route batch changed app routes: got %d routes", len(a.routes))
+	}
+}
+
+func TestNewRejectsMixedModesForSharedComponent(t *testing.T) {
+	t.Setenv("BIFROST_EXPORT", "1")
+
+	a, err := New(testFS,
+		core.Page("/ssr", "./shared.tsx"),
+		core.Page("/client", "./shared.tsx", core.WithClient()),
+	)
+	if err == nil {
+		t.Fatal("expected mixed modes for one component to return an error")
+	}
+	if a != nil {
+		t.Fatal("expected nil app on route validation error")
+	}
+}
+
+func TestNewRejectsConflictingPageOptions(t *testing.T) {
+	t.Setenv("BIFROST_EXPORT", "1")
+
+	a, err := New(testFS, core.Page("/", "./page.tsx", core.WithClient(), core.WithStatic()))
+	if err == nil {
+		t.Fatal("expected conflicting page options to return an error")
+	}
+	if a != nil {
+		t.Fatal("expected nil app on page validation error")
+	}
+}
+
 func TestHandleBeforeWrap(t *testing.T) {
 	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
-	a := New(testFS)
+	a := mustNew(t)
 	defer func() { _ = a.Stop() }()
 
-	a.Handle(core.Page("/", "./example/components/hello.tsx"))
+	if err := a.Handle(core.Page("/", "./example/components/hello.tsx")); err != nil {
+		t.Fatalf("Handle() error: %v", err)
+	}
 
 	api := http.NewServeMux()
 	handler := a.Wrap(api)
@@ -71,34 +127,37 @@ func TestHandleBeforeWrap(t *testing.T) {
 	}
 }
 
-func TestHandleAfterWrapPanics(t *testing.T) {
+func TestHandleAfterWrapReturnsError(t *testing.T) {
 	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
-	a := New(testFS, core.Page("/", "./test.tsx"))
+	a := mustNew(t, core.Page("/", "./test.tsx"))
 	defer func() { _ = a.Stop() }()
 
 	_ = a.Wrap(http.NewServeMux())
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Handle after Wrap should panic")
-		}
-	}()
-
-	a.Handle(core.Page("/other", "./other.tsx"))
+	if err := a.Handle(core.Page("/other", "./other.tsx")); err == nil {
+		t.Error("Handle after Wrap should return an error")
+	}
 }
 
 func TestStrictProductionRequirements(t *testing.T) {
 	t.Setenv("BIFROST_DEV", "")
 
-	t.Run("production without assets FS panics", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("Expected panic in production without assets FS, got nil")
+	t.Run("production without assets FS returns error", func(t *testing.T) {
+		a, err := New(testFS)
+		if err == nil {
+			if a != nil {
+				_ = a.Stop()
 			}
-		}()
-		New(testFS)
+			t.Fatal("expected production setup error")
+		}
+		if a != nil {
+			t.Fatal("expected nil app on setup error")
+		}
+		if !strings.Contains(err.Error(), "embed.FS is required") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 }
 
@@ -164,7 +223,7 @@ func TestAppWrapWithServeMux(t *testing.T) {
 	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
-	a := New(testFS, core.Page("/", "./example/components/hello.tsx"))
+	a := mustNew(t, core.Page("/", "./example/components/hello.tsx"))
 	defer func() { _ = a.Stop() }()
 
 	api := http.NewServeMux()
@@ -188,7 +247,7 @@ func TestAppHandlerNoRouter(t *testing.T) {
 	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
-	a := New(testFS, core.Page("/", "./test.tsx"))
+	a := mustNew(t, core.Page("/", "./test.tsx"))
 	defer func() { _ = a.Stop() }()
 
 	handler := a.Handler()
@@ -220,7 +279,7 @@ func TestAppWrap(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			skipIfNoBun(t)
-			a := New(testFS, core.Page("/", "./test.tsx"))
+			a := mustNew(t, core.Page("/", "./test.tsx"))
 			defer func() { _ = a.Stop() }()
 
 			api := http.NewServeMux()
@@ -237,7 +296,7 @@ func TestAppWrapNilPanics(t *testing.T) {
 	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
-	a := New(testFS, core.Page("/", "./test.tsx"))
+	a := mustNew(t, core.Page("/", "./test.tsx"))
 	defer func() { _ = a.Stop() }()
 
 	defer func() {
@@ -254,7 +313,7 @@ func TestPageModeTypes(t *testing.T) {
 		skipIfNoBun(t)
 		t.Setenv("BIFROST_DEV", "1")
 
-		a := New(testFS, core.Page("/test", "./test.tsx", core.WithLoader(func(*http.Request) (any, error) {
+		a := mustNew(t, core.Page("/test", "./test.tsx", core.WithLoader(func(*http.Request) (any, error) {
 			return map[string]any{}, nil
 		})))
 		defer func() { _ = a.Stop() }()
@@ -272,7 +331,7 @@ func TestPageModeTypes(t *testing.T) {
 		skipIfNoBun(t)
 		t.Setenv("BIFROST_DEV", "1")
 
-		a := New(testFS, core.Page("/test", "./test.tsx", core.WithClient()))
+		a := mustNew(t, core.Page("/test", "./test.tsx", core.WithClient()))
 		defer func() { _ = a.Stop() }()
 
 		config := a.pageConfigs["./test.tsx"]
@@ -288,7 +347,7 @@ func TestPageModeTypes(t *testing.T) {
 		skipIfNoBun(t)
 		t.Setenv("BIFROST_DEV", "1")
 
-		a := New(testFS, core.Page("/test", "./test.tsx", core.WithStatic()))
+		a := mustNew(t, core.Page("/test", "./test.tsx", core.WithStatic()))
 		defer func() { _ = a.Stop() }()
 
 		config := a.pageConfigs["./test.tsx"]
@@ -313,7 +372,7 @@ func TestWithStaticData(t *testing.T) {
 
 	route := core.Page("/blog", "./blog.tsx", core.WithStaticData(loader))
 
-	a := New(testFS, route)
+	a := mustNew(t, route)
 	defer func() { _ = a.Stop() }()
 
 	config := a.pageConfigs["./blog.tsx"]
@@ -353,7 +412,7 @@ func TestDevModeWithStaticData(t *testing.T) {
 
 	route := core.Page("/blog", "./blog.tsx", core.WithStaticData(loader))
 
-	a := New(testFS, route)
+	a := mustNew(t, route)
 	defer func() { _ = a.Stop() }()
 
 	config := a.pageConfigs["./blog.tsx"]
@@ -371,7 +430,7 @@ func TestWrapPrintsRouteTableWhenForced(t *testing.T) {
 	t.Setenv("BIFROST_DEV", "1")
 	t.Setenv("BIFROST_ROUTE_TABLE", "1")
 
-	a := New(testFS,
+	a := mustNew(t,
 		core.Page("/", "./home.tsx"),
 		core.Page("/about", "./about.tsx", core.WithClient()),
 	)
@@ -413,7 +472,7 @@ func TestWrapSuppressesRouteTableWhenDisabled(t *testing.T) {
 	t.Setenv("BIFROST_DEV", "1")
 	t.Setenv("BIFROST_NO_ROUTE_TABLE", "1")
 
-	a := New(testFS, core.Page("/", "./home.tsx"))
+	a := mustNew(t, core.Page("/", "./home.tsx"))
 	defer func() { _ = a.Stop() }()
 
 	oldStdout := os.Stdout
@@ -452,7 +511,7 @@ func TestDevModeSetupBeforeStaticDataLoader(t *testing.T) {
 
 	route := core.Page("/blog", "./blog.tsx", core.WithStaticData(loader))
 
-	a := New(testFS, route)
+	a := mustNew(t, route)
 	defer func() { _ = a.Stop() }()
 
 	config := a.pageConfigs["./blog.tsx"]

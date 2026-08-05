@@ -10,8 +10,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version-file: go.mod
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12.2
+
+      - name: Run all checks
+        run: make check
+
       - name: Verify module on proxy.golang.org
         run: GOPROXY=proxy.golang.org go list -m github.com/3-lines-studio/bifrost@${{ github.ref_name }}

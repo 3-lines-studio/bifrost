@@ -13,43 +13,15 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version-file: go.mod
 
-      # Phase 0: Create required directories and files for embed
-      - name: Setup embed directories
-        run: |
-          mkdir -p example/.bifrost
-          touch example/.bifrost/.gitkeep
-
-      # Phase 1: Fast static analysis (fail fast)
-      - name: Lint
-        uses: golangci/golangci-lint-action@v7
-        with:
-          version: latest
-
-      # Phase 2: Setup dependencies
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
-      - name: Install example dependencies
-        run: cd example && bun install
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12.2
 
-      # Phase 3: Run doctor to validate environment
-      - name: Doctor
-        run: go run ./cmd/bifrost doctor ./example
-
-      # Phase 4: Build example assets (required for production tests)
-      - name: Build bifrost tool
-        run: go build -o /tmp/bifrost ./cmd/bifrost
-
-      - name: Build example assets
-        run: cd example && /tmp/bifrost build ./cmd/full/main.go || true
-
-      # Phase 4: Run all tests with race detector
-      - name: Test All
-        run: go test ./... -race
-
-      # Phase 5: Build verification
-      - name: Build
-        run: go build ./...
+      - name: Run all checks
+        run: make check

@@ -120,7 +120,7 @@ func TestPageConfigOptions(t *testing.T) {
 	t.Run("WithLoader sets PropsLoader", func(t *testing.T) {
 		loader := func(*http.Request) (any, error) { return nil, nil }
 		route := Page("/", "./pages/home.tsx", WithLoader(loader))
-		config := PageConfigFromRoute(route)
+		config := mustPageConfig(t, route)
 		if config.PropsLoader == nil {
 			t.Fatal("expected PropsLoader to be set")
 		}
@@ -128,7 +128,7 @@ func TestPageConfigOptions(t *testing.T) {
 
 	t.Run("WithClient sets client-only mode", func(t *testing.T) {
 		route := Page("/", "./pages/home.tsx", WithClient())
-		config := PageConfigFromRoute(route)
+		config := mustPageConfig(t, route)
 		if config.Mode != ModeClientOnly {
 			t.Fatalf("expected ModeClientOnly, got %v", config.Mode)
 		}
@@ -136,7 +136,7 @@ func TestPageConfigOptions(t *testing.T) {
 
 	t.Run("WithStatic sets static prerender mode", func(t *testing.T) {
 		route := Page("/", "./pages/home.tsx", WithStatic())
-		config := PageConfigFromRoute(route)
+		config := mustPageConfig(t, route)
 		if config.Mode != ModeStaticPrerender {
 			t.Fatalf("expected ModeStaticPrerender, got %v", config.Mode)
 		}
@@ -145,7 +145,7 @@ func TestPageConfigOptions(t *testing.T) {
 	t.Run("WithStaticData sets mode and loader", func(t *testing.T) {
 		loader := func(context.Context) ([]StaticPathData, error) { return nil, nil }
 		route := Page("/", "./pages/home.tsx", WithStaticData(loader))
-		config := PageConfigFromRoute(route)
+		config := mustPageConfig(t, route)
 		if config.Mode != ModeStaticPrerender {
 			t.Fatalf("expected ModeStaticPrerender, got %v", config.Mode)
 		}
@@ -156,7 +156,7 @@ func TestPageConfigOptions(t *testing.T) {
 
 	t.Run("WithHTMLLang sets HTMLLang", func(t *testing.T) {
 		route := Page("/", "./pages/home.tsx", WithHTMLLang("fr"))
-		config := PageConfigFromRoute(route)
+		config := mustPageConfig(t, route)
 		if config.HTMLLang != "fr" {
 			t.Fatalf("expected HTMLLang fr, got %q", config.HTMLLang)
 		}
@@ -164,7 +164,7 @@ func TestPageConfigOptions(t *testing.T) {
 
 	t.Run("WithHTMLClass sets HTMLClass", func(t *testing.T) {
 		route := Page("/", "./pages/home.tsx", WithHTMLClass("dark"))
-		config := PageConfigFromRoute(route)
+		config := mustPageConfig(t, route)
 		if config.HTMLClass != "dark" {
 			t.Fatalf("expected HTMLClass dark, got %q", config.HTMLClass)
 		}

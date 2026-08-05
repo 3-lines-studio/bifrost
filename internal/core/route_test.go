@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func mustPageConfig(t *testing.T, route Route) PageConfig {
+	t.Helper()
+	config, err := PageConfigFromRoute(route)
+	if err != nil {
+		t.Fatalf("PageConfigFromRoute() error: %v", err)
+	}
+	return config
+}
+
 func TestPageCreatesRoute(t *testing.T) {
 	route := Page("/", "./pages/home.tsx", WithLoader(func(*http.Request) (any, error) {
 		return map[string]any{"name": "World"}, nil
@@ -44,6 +53,13 @@ func TestPageWithStatic(t *testing.T) {
 
 	if len(route.Options) != 1 {
 		t.Errorf("Expected 1 option, got %d", len(route.Options))
+	}
+}
+
+func TestPageConfigFromRoute_RejectsConflictingModes(t *testing.T) {
+	route := Page("/", "./page.tsx", WithClient(), WithStatic())
+	if _, err := PageConfigFromRoute(route); err == nil {
+		t.Fatal("expected conflicting page modes to return an error")
 	}
 }
 

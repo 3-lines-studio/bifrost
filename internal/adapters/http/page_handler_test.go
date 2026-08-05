@@ -134,7 +134,7 @@ func TestServeError_RedirectErrorTakesPrecedence(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
 	rec := httptest.NewRecorder()
 
-	h.serveError(rec, req, redirectErr)
+	h.serveError(rec, req, fmt.Errorf("load user: %w", redirectErr))
 
 	if rec.Code != http.StatusFound {
 		t.Errorf("expected redirect status %d, got %d", http.StatusFound, rec.Code)
@@ -198,14 +198,16 @@ func TestResolveMarkdown_SuffixDetection(t *testing.T) {
 
 func TestResolveMarkdown_AcceptHeader(t *testing.T) {
 	cases := []struct {
-		name        string
-		urlPath     string
-		accept      string
+		name         string
+		urlPath      string
+		accept       string
 		wantMarkdown bool
 	}{
 		{name: "accept text/markdown", urlPath: "/about", accept: "text/markdown", wantMarkdown: true},
 		{name: "accept with q-value", urlPath: "/about", accept: "text/markdown;q=0.9", wantMarkdown: true},
 		{name: "accept mixed types", urlPath: "/about", accept: "text/markdown, text/html", wantMarkdown: true},
+		{name: "accept disabled by q zero", urlPath: "/about", accept: "text/markdown;q=0, text/html", wantMarkdown: false},
+		{name: "accept ignores substring", urlPath: "/about", accept: "application/text/markdownish", wantMarkdown: false},
 		{name: "accept text/html only", urlPath: "/about", accept: "text/html", wantMarkdown: false},
 		{name: "no accept header", urlPath: "/about", accept: "", wantMarkdown: false},
 		{name: "accept header plus suffix", urlPath: "/about.md", accept: "text/html", wantMarkdown: true},

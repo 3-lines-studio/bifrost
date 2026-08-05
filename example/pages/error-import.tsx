@@ -1,5 +1,6 @@
 import Layout from "@/layout/base";
-import invalid from "invalid-import";
+
+throw new Error('Could not resolve: "invalid-import"');
 
 export function Head() {
   return (
@@ -10,8 +11,6 @@ export function Head() {
 }
 
 export function Page() {
-  invalid.call();
-
   return (
     <Layout>
       <div>This will never render</div>

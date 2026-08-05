@@ -62,7 +62,10 @@ func newTestServer(t *testing.T, routes []bifrost.Route, devMode bool) *testServ
 		os.Unsetenv("BIFROST_DEV")
 	}
 
-	app := bifrost.New(BifrostFS, routes...)
+	app, err := bifrost.New(BifrostFS, routes...)
+	if err != nil {
+		t.Fatalf("create app: %v", err)
+	}
 
 	port := getFreePort(t)
 
@@ -101,7 +104,10 @@ func newTestServerWithWrap(t *testing.T, routes []bifrost.Route, devMode bool) *
 		os.Unsetenv("BIFROST_DEV")
 	}
 
-	app := bifrost.New(BifrostFS, routes...)
+	app, err := bifrost.New(BifrostFS, routes...)
+	if err != nil {
+		t.Fatalf("create app: %v", err)
+	}
 
 	port := getFreePort(t)
 

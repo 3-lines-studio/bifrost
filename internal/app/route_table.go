@@ -26,7 +26,7 @@ func isStdoutTerminal() bool {
 	return (stat.Mode() & os.ModeCharDevice) == os.ModeCharDevice
 }
 
-func printRouteTable(routes []core.Route) {
+func printRouteTable(routes []core.Route, configs []core.PageConfig) {
 	if len(routes) == 0 {
 		return
 	}
@@ -43,8 +43,7 @@ func printRouteTable(routes []core.Route) {
 	maxMode := len("MODE")
 
 	for i, route := range routes {
-		pc := core.PageConfigFromRoute(route)
-		modeLabel := pc.Mode.BuildLabel()
+		modeLabel := configs[i].Mode.BuildLabel()
 		rows[i] = row{
 			pattern:   route.Pattern,
 			component: route.ComponentPath,

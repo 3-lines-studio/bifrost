@@ -30,7 +30,7 @@ Bifrost is organized into focused internal packages:
 - `internal/adapters/process` — Bun renderer process and bundle IPC
 - `internal/adapters/runtime` — Renderer host lifecycle and embedded runtime
 - `internal/adapters/fs` — Filesystem and embed abstractions
-- `internal/adapters/framework` — Framework entry templates (e.g. React)
+- `internal/adapters/framework` — React entry templates
 - `internal/adapters/cli` — Terminal output and build reports
 - Root `bifrost` package — Public `App` API (`New`, `Page`, `Wrap`, …)
 
@@ -69,7 +69,7 @@ var bifrostFS embed.FS
 
 func main() {
     // Create Bifrost app
-    app := bifrost.New(
+    app, err := bifrost.New(
         bifrostFS,
         bifrost.Page("/", "./pages/home.tsx", 
             bifrost.WithLoader(func(req *http.Request) (any, error) {
@@ -80,6 +80,9 @@ func main() {
         ),
         bifrost.Page("/about", "./pages/about.tsx", bifrost.WithClient()),
     )
+    if err != nil {
+        log.Fatalf("create app: %v", err)
+    }
     defer app.Stop()
     
     // Setup API routes
@@ -123,7 +126,7 @@ go build -o myapp main.go
 `go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest` installs a binary named `bifrost`; run `bifrost init`, `bifrost dev`, `bifrost build`, or `bifrost doctor`.
 
 Requirements:
-- `embed.FS` is **mandatory** - panics at startup if missing
+- `embed.FS` is **mandatory** — `New` returns an error if it is missing
 - `.bifrost/manifest.json` must exist in embedded assets
 - SSR bundles extracted from `.bifrost/ssr/` in embed.FS (SSR pages only)
 - Embedded Bun runtime included only for SSR pages
@@ -138,26 +141,27 @@ Requirements:
 - Bun runtime automatically embedded
 - Required for server-side rendering
 
-Strict validation causes panic on:
+`New` returns an error on:
 - Missing `embed.FS` in production
-- Missing manifest.json in embedded assets
+- Missing or invalid `manifest.json` in embedded assets
+- Missing Bun or embedded runtime when SSR needs it
+- Conflicting page modes for one shared component
 
-## Framework Support
+## React Support
 
-Bifrost supports React.
-
-### React
-
-React is the default framework. Use `.tsx` components with `bifrost.New()`:
+Bifrost v1 supports React. Use `.tsx` components with `bifrost.New()`:
 
 ```go
-app := bifrost.New(bifrostFS,
+app, err := bifrost.New(bifrostFS,
     bifrost.Page("/", "./pages/home.tsx",
         bifrost.WithLoader(func(req *http.Request) (any, error) {
             return map[string]any{"name": "World"}, nil
         }),
     ),
 )
+if err != nil {
+    log.Fatalf("create app: %v", err)
+}
 ```
 
 React components follow standard conventions:
@@ -172,21 +176,19 @@ export function Page({ name }: { name: string }) {
 }
 ```
 
-**Auto-detection:** Pages use React adapters. Only `.tsx` components are supported.
+Only `.tsx` page components are supported.
 
 ## API Reference
 
 ### Creating an App
 
 ```go
-func New(assetsFS embed.FS, pages ...Route) *App
+func New(assetsFS embed.FS, pages ...Route) (*App, error)
 
-func NewWithFramework(assetsFS embed.FS, fw Framework, pages ...Route) *App
-
-func NewWithOptions(assetsFS embed.FS, opts []ConfigOption, pages ...Route) *App
+func NewWithOptions(assetsFS embed.FS, opts []ConfigOption, pages ...Route) (*App, error)
 ```
 
-Creates a new Bifrost application. Must be stopped with `app.Stop()` when done. `New` defaults to React. Use `NewWithFramework` when selecting a non-default framework constant (e.g. `bifrost.React`). Use `NewWithOptions` for app-wide settings such as `WithDefaultHTMLLang` or `WithFramework` inside the options slice.
+Creates a new Bifrost application. Setup failures return a nil app and a wrapped error. Call `app.Stop()` when done. Use `NewWithOptions` only for app-wide settings such as `WithDefaultHTMLLang`.
 
 **Parameters:**
 
@@ -233,8 +235,6 @@ func WithHTMLClass(class string) PageOption
 
 ```go
 func WithDefaultHTMLLang(lang string) ConfigOption
-
-func WithFramework(fw Framework) ConfigOption
 ```
 
 **Document language:** precedence is loader/static-data field `bifrost.PropHTMLLang` (`"__bifrost_html_lang"`) → `WithHTMLLang` → `WithDefaultHTMLLang` → `"en"`. The reserved key is stripped before props reach the component.
@@ -251,7 +251,15 @@ A function that receives the HTTP request and returns props to pass to the compo
 
 ### Registering Routes
 
-Bifrost provides two methods to get an http.Handler:
+Routes normally go to `New`. To add routes later, call `Handle` before `Wrap` or `Handler`:
+
+```go
+func (app *App) Handle(routes ...Route) error
+```
+
+`Handle` returns an error for conflicting shared-component modes or if route registration is already sealed.
+
+Bifrost provides two methods to get an `http.Handler`:
 
 **With API router:**
 
@@ -322,19 +330,11 @@ bifrost.Page("/user/{id}", "./pages/user.tsx",
 )
 ```
 
-#### Streaming HTML and First Contentful Paint
+#### SSR Performance
 
-For SSR pages, Bifrost streams the HTML response in two phases: the document head (including output from your `Head` component, critical CSS, stylesheets, and `modulepreload` links) is written and flushed as soon as it is ready, then the server-rendered body and trailing scripts follow. That lets the browser start downloading JavaScript and CSS while the main page tree is still being rendered in Bun.
+React SSR uses `renderToString`. Bifrost buffers the rendered page before writing the HTTP response so render failures can return a clean HTTP 500. Request cancellation propagates to the Go-to-Bun HTTP request.
 
-**Reverse proxies:** If you use nginx, Caddy, or another reverse proxy in front of your Go server, turn off response buffering for HTML routes (for example, in nginx, `proxy_buffering off` in the relevant `location`). Otherwise the proxy may wait for the full response and you will not see a better time to first byte or First Contentful Paint.
-
-**Streaming behavior by framework:**
-
-- **React:** SSR pages use `renderToReadableStream` for the page body; Bun forwards byte chunks after the usual head flush. **Suspense** (or other deferred server work) makes progressive HTML visible; synchronous trees still work but gain little. If streaming fails, Bifrost falls back to `renderToString` for that request.
-
-Errors that occur after bytes have been sent cannot be turned into an HTTP 500.
-
-**LCP-focused routing:** For marketing or landing routes where Largest Contentful Paint matters most, prefer **static prerender** (`WithStatic`) so HTML is served from prebuilt files with no Bun work per request. Pair that with hero images that use explicit dimensions and `fetchPriority="high"` where appropriate.
+For routes where latency, throughput, or Largest Contentful Paint matters most, prefer static prerender (`WithStatic`). Those routes serve prebuilt HTML without invoking Bun per request.
 
 ### Static Pages
 
@@ -387,11 +387,10 @@ bifrost build ./main.go
 ```
 
 Generates:
-- `.bifrost/pages/[page]/index.html`:
-  - Client-only: empty shell HTML
-  - Static prerender: full HTML with rendered body
-- `.bifrost/dist/` - JS/CSS bundles for hydration
-- `.bifrost/manifest.json` - Asset manifest with mode info
+- `.bifrost/pages/<entry>.html` — client-only shell HTML
+- `.bifrost/pages/routes/<url>/index.html` — static-prerender HTML
+- `.bifrost/dist/` — JS/CSS bundles for rendering or hydration
+- `.bifrost/manifest.json` — asset and route manifest
 
 #### Static with Data (`WithStaticData`)
 
@@ -511,13 +510,13 @@ Implementations should also satisfy `error` (typically via an `Error()` method) 
 
 ### Production Errors
 
-Bifrost **panics** on initialization errors in production:
+Bifrost returns initialization errors from `New` in production:
 
-- Missing `embed.FS` in production
-- Missing manifest.json in embedded assets
-- Missing embedded Bun runtime (for SSR pages)
+- Missing `embed.FS`
+- Missing or invalid `manifest.json`
+- Missing embedded Bun runtime for SSR pages
 
-This ensures fast failure at startup rather than runtime errors.
+Handle the error before starting the HTTP server. This keeps setup failures out of request handling.
 
 **Note:** Runtime-related errors only occur when the app has SSR pages. Static-only apps don't include or require the Bun runtime.
 
@@ -598,16 +597,28 @@ bifrost build ./main.go --go-build
 bifrost build ./main.go --go-build=./myapp
 ```
 
+**Build declaration rules:**
+
+The build scan accepts direct `bifrost.Page()` calls with:
+
+- a string-literal component path, such as `"./pages/home.tsx"`
+- direct Bifrost option calls, such as `bifrost.WithClient()`
+
+Indirect component paths (`Page("/", homePath)`) and expanded option slices (`opts...`) fail with a clear build error. This prevents the build from silently omitting or misclassifying a page. A component may back several routes, but every route using that component must use the same page mode.
+
 **Build Pipeline:**
 
-1. Import-graph scan (`go list -deps`) discovers all `bifrost.Page()` calls in any file/package reachable from the main package
-2. Detects `WithClient()` for mode classification
-3. Generates client entry files for each page
-4. Builds client bundles (JS/CSS) to `.bifrost/dist/`
-5. Builds SSR bundles to `.bifrost/ssr/` (for SSR pages)
-6. Generates manifest.json with asset mapping
-7. Pre-renders static HTML for client-only pages
-8. Copies public/ assets
+1. Scan the main module import graph for direct `bifrost.Page()` declarations
+2. Validate component paths, options, and shared-component modes
+3. Generate client and SSR entry files
+4. Build SSR bundles and client JS/CSS
+5. Generate client-only HTML shells
+6. Compile the embedded Bun runtime when SSR or static export needs it
+7. Export static-prerender routes
+8. Copy `public/` assets and write `manifest.json`
+9. Exit non-zero if any required page or bundle fails
+
+Production `/dist/` assets are content-hashed and served with `Cache-Control: public, max-age=31536000, immutable`.
 
 ### SSR Bundles
 
@@ -649,7 +660,7 @@ myrepo/
 ├── cmd/
 │   ├── web/
 │   │   ├── main.go
-│   │   ├── embed.go      # //go:embed all:.bifrost all:public
+│   │   ├── embed.go      # //go:embed all:.bifrost
 │   │   ├── pages/
 │   │   ├── public/
 │   │   └── .bifrost/     # web's build output
@@ -692,7 +703,7 @@ The architecture supports future extensions:
 
 ## Complete Example
 
-See the [example/](../example/) directory for a working implementation with:
+See the [example/](example/) directory for a working implementation with:
 
 - SSR and static pages
 - Dynamic routes with URL parameters

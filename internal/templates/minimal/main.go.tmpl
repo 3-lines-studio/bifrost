@@ -12,7 +12,7 @@ import (
 var bifrostFS embed.FS
 
 func main() {
-	app := bifrost.New(
+	app, err := bifrost.New(
 		bifrostFS,
 		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
 			return map[string]any{
@@ -20,6 +20,9 @@ func main() {
 			}, nil
 		})),
 	)
+	if err != nil {
+		log.Fatalf("create app: %v", err)
+	}
 	defer app.Stop()
 
 	addr := ":8080"

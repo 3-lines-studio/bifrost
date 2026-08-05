@@ -3,16 +3,13 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-func (s *PageService) renderClientOnlyShell(state pageRequestState) (string, error) {
+func (s *PageService) renderClientOnlyShell(ctx context.Context, state pageRequestState) (string, error) {
 	input := state.input
 	shell, err := s.resolveShell(state)
 	if err != nil {
@@ -22,7 +19,7 @@ func (s *PageService) renderClientOnlyShell(state pageRequestState) (string, err
 	if input.IsDev && s.renderer != nil {
 		ssrPath := filepath.Join(".bifrost/ssr", input.EntryName+"-ssr.js")
 		if _, err := os.Stat(ssrPath); err == nil {
-			page, err := s.renderer.Render(ssrPath, map[string]any{})
+			page, err := renderWithContext(ctx, s.renderer, ssrPath, map[string]any{})
 			if err == nil {
 				lang, htmlClass, _ := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
 				return shell.Render(page.Body, nil, page.Head, lang, htmlClass)
@@ -72,11 +69,19 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 			}
 		}
 
-		stream, err := s.streamRender(state, propsForReact, lang, htmlClass)
+		page, err := renderWithContext(ctx, s.renderer, state.renderPath, propsForReact)
+		if err != nil {
+			return ServePageOutput{
+				Action: core.ActionRenderStaticPrerender,
+				Error:  err,
+			}
+		}
+
+		html, err := s.renderPageHTMLWithArtifacts(state, propsForReact, page, lang, htmlClass)
 		return ServePageOutput{
 			Action: core.ActionRenderStaticPrerender,
+			HTML:   html,
 			Props:  propsForReact,
-			Stream: stream,
 			Error:  err,
 		}
 	}
@@ -90,34 +95,29 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 
 	lang, htmlClass, propsForReact := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
 
-	stream, err := s.streamRender(state, propsForReact, lang, htmlClass)
+	page, err := renderWithContext(ctx, s.renderer, state.renderPath, propsForReact)
+	if err != nil {
+		return ServePageOutput{
+			Action: core.ActionRenderStaticPrerender,
+			Error:  err,
+		}
+	}
+
+	html, err := s.renderPageHTMLWithArtifacts(state, propsForReact, page, lang, htmlClass)
 	return ServePageOutput{
 		Action: core.ActionRenderStaticPrerender,
-		Stream: stream,
+		HTML:   html,
 		Error:  err,
 	}
 }
 
-type pageTiming struct {
-	propsDur    time.Duration
-	renderStart time.Time
-	renderDur   time.Duration
-	entryName   string
-	path        string
-}
-
 func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) ServePageOutput {
 	input := state.input
-	var timing pageTiming
-	timing.entryName = input.EntryName
-	timing.path = input.RequestPath
 
 	var syncProps any
 	if input.Config.PropsLoader != nil {
-		propsStart := time.Now()
 		var err error
 		syncProps, err = input.Config.PropsLoader(input.Request)
-		timing.propsDur = time.Since(propsStart)
 		if err != nil {
 			return ServePageOutput{
 				Action: core.ActionRenderSSR,
@@ -135,16 +135,15 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		}
 	}
 
-	if input.Markdown {
-		timing.renderStart = time.Now()
-		page, err := s.renderer.Render(state.renderPath, syncPropsForReact)
-		timing.renderDur = time.Since(timing.renderStart)
-		if err != nil {
-			return ServePageOutput{
-				Action: core.ActionRenderSSR,
-				Error:  err,
-			}
+	page, err := renderWithContext(ctx, s.renderer, state.renderPath, syncPropsForReact)
+	if err != nil {
+		return ServePageOutput{
+			Action: core.ActionRenderSSR,
+			Error:  err,
 		}
+	}
+
+	if input.Markdown {
 		md, err := convertHTMLToMarkdown(page.Body)
 		if err != nil {
 			return ServePageOutput{
@@ -152,12 +151,6 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 				Error:  err,
 			}
 		}
-		slog.Info("bifrost page timing",
-			"entry", timing.entryName,
-			"path", timing.path,
-			"props_ms", timing.propsDur.Milliseconds(),
-			"render_ms", timing.renderDur.Milliseconds(),
-		)
 		return ServePageOutput{
 			Action:   core.ActionRenderSSR,
 			Markdown: md,
@@ -165,66 +158,13 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		}
 	}
 
-	shell, err := s.resolveShell(state)
-	if err != nil {
-		return ServePageOutput{
-			Action: core.ActionRenderSSR,
-			Error:  err,
-		}
-	}
-	propsJSON, err := core.MarshalBifrostPropsJSON(syncPropsForReact)
-	if err != nil {
-		return ServePageOutput{
-			Action: core.ActionRenderSSR,
-			Error:  err,
-		}
-	}
-
-	stream := func(w io.Writer) error {
-		timing.renderStart = time.Now()
-		err := s.renderer.RenderBodyTo(w, state.renderPath, syncPropsForReact, func(head string) error {
-			return shell.WritePreamble(w, head, lang, htmlClass)
-		})
-		timing.renderDur = time.Since(timing.renderStart)
-		if err != nil {
-			return err
-		}
-		slog.Info("bifrost page timing",
-			"entry", timing.entryName,
-			"path", timing.path,
-			"props_ms", timing.propsDur.Milliseconds(),
-			"render_ms", timing.renderDur.Milliseconds(),
-		)
-		return shell.WriteSuffix(w, propsJSON)
-	}
-
+	html, err := s.renderPageHTMLWithArtifacts(state, syncPropsForReact, page, lang, htmlClass)
 	return ServePageOutput{
 		Action: core.ActionRenderSSR,
+		HTML:   html,
 		Props:  syncPropsForReact,
-		Stream: stream,
+		Error:  err,
 	}
-}
-
-// streamRender builds a closure that streams a rendered page to w: preamble
-// with the rendered head, the body, then the props script and deferred scripts.
-func (s *PageService) streamRender(state pageRequestState, propsForReact any, lang string, htmlClass string) (func(io.Writer) error, error) {
-	shell, err := s.resolveShell(state)
-	if err != nil {
-		return nil, err
-	}
-	propsJSON, err := core.MarshalBifrostPropsJSON(propsForReact)
-	if err != nil {
-		return nil, err
-	}
-	return func(w io.Writer) error {
-		err := s.renderer.RenderBodyTo(w, state.renderPath, propsForReact, func(head string) error {
-			return shell.WritePreamble(w, head, lang, htmlClass)
-		})
-		if err != nil {
-			return err
-		}
-		return shell.WriteSuffix(w, propsJSON)
-	}, nil
 }
 
 func (s *PageService) resolveRenderPath(input ServePageInput) string {

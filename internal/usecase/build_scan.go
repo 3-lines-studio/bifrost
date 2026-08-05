@@ -7,7 +7,6 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,30 +63,38 @@ func scanDefaultHTMLLang(f *ast.File) string {
 	return lang
 }
 
-func parsePageBuildOptions(args []ast.Expr) (htmlLang string, htmlClass string) {
+func parsePageBuildOptions(args []ast.Expr) (htmlLang string, htmlClass string, err error) {
 	for _, arg := range args {
 		call, ok := arg.(*ast.CallExpr)
 		if !ok {
-			continue
+			return "", "", fmt.Errorf("page options must be direct bifrost option calls")
 		}
-		switch callExprSimpleName(call) {
-		case "WithHTMLLang":
-			if len(call.Args) < 1 {
-				continue
+		name := callExprSimpleName(call)
+		switch name {
+		case "WithLoader", "WithClient", "WithStatic", "WithStaticData":
+			continue
+		case "WithHTMLLang", "WithHTMLClass":
+			if len(call.Args) != 1 {
+				return "", "", fmt.Errorf("%s requires one string literal", name)
 			}
-			if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
-				htmlLang, _ = strconv.Unquote(lit.Value)
+			lit, ok := call.Args[0].(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return "", "", fmt.Errorf("%s requires a string literal during build", name)
 			}
-		case "WithHTMLClass":
-			if len(call.Args) < 1 {
-				continue
+			value, unquoteErr := strconv.Unquote(lit.Value)
+			if unquoteErr != nil {
+				return "", "", fmt.Errorf("invalid %s value: %w", name, unquoteErr)
 			}
-			if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
-				htmlClass, _ = strconv.Unquote(lit.Value)
+			if name == "WithHTMLLang" {
+				htmlLang = value
+			} else {
+				htmlClass = value
 			}
+		default:
+			return "", "", fmt.Errorf("unsupported page option %q during build", name)
 		}
 	}
-	return htmlLang, htmlClass
+	return htmlLang, htmlClass, nil
 }
 
 func goListMainModuleFiles(mainFile string) ([]string, error) {
@@ -143,10 +150,12 @@ func buildImportMap(file *ast.File) map[string]string {
 
 const bifrostImportPath = "github.com/3-lines-studio/bifrost"
 
-func (s *BuildService) scanFileForPages(fset *token.FileSet, node *ast.File) ([]core.PageConfig, map[string]bool) {
+func (s *BuildService) scanFileForPages(fset *token.FileSet, node *ast.File) ([]core.PageConfig, map[string]bool, error) {
 	var configs []core.PageConfig
 	seen := make(map[string]bool)
+	modes := make(map[string]core.PageMode)
 	importMap := buildImportMap(node)
+	var conflictErr error
 
 	ast.Inspect(node, func(n ast.Node) bool {
 		callExpr, ok := n.(*ast.CallExpr)
@@ -184,39 +193,59 @@ func (s *BuildService) scanFileForPages(fset *token.FileSet, node *ast.File) ([]
 		firstArg := callExpr.Args[argIndex]
 		lit, ok := firstArg.(*ast.BasicLit)
 		if !ok || lit.Kind != token.STRING {
-			slog.Warn("Page call with non-string component path", "position", fset.Position(callExpr.Pos()))
-			return true
+			conflictErr = fmt.Errorf("page component path must be a string literal at %s", fset.Position(callExpr.Pos()))
+			return false
 		}
 
 		path, err := strconv.Unquote(lit.Value)
 		if err != nil {
-			slog.Warn("Failed to unquote string", "position", fset.Position(lit.Pos()), "error", err)
-			return true
+			conflictErr = fmt.Errorf("invalid Page component path at %s: %w", fset.Position(lit.Pos()), err)
+			return false
 		}
 
-		mode := s.detectPageMode(callExpr.Args[argIndex:])
+		mode, err := s.detectPageMode(callExpr.Args[argIndex:])
+		if err != nil {
+			conflictErr = fmt.Errorf("page %q: %w", path, err)
+			return false
+		}
 
 		var optArgs []ast.Expr
 		if len(callExpr.Args) > 2 {
 			optArgs = callExpr.Args[2:]
 		}
-		htmlLang, htmlClass := parsePageBuildOptions(optArgs)
-
-		if !seen[path] {
-			seen[path] = true
-			configs = append(configs, core.PageConfig{
-				ComponentPath:    path,
-				Mode:             mode,
-				HTMLLang:         htmlLang,
-				HTMLClass:        htmlClass,
-				StaticDataLoader: nil,
-			})
+		htmlLang, htmlClass, err := parsePageBuildOptions(optArgs)
+		if err != nil {
+			conflictErr = fmt.Errorf("page %q: %w", path, err)
+			return false
 		}
+
+		if previous, ok := modes[path]; ok {
+			if previous != mode {
+				conflictErr = fmt.Errorf(
+					"component %q cannot use both %s and %s modes",
+					path,
+					previous.BuildLabel(),
+					mode.BuildLabel(),
+				)
+				return false
+			}
+			return true
+		}
+
+		seen[path] = true
+		modes[path] = mode
+		configs = append(configs, core.PageConfig{
+			ComponentPath:    path,
+			Mode:             mode,
+			HTMLLang:         htmlLang,
+			HTMLClass:        htmlClass,
+			StaticDataLoader: nil,
+		})
 
 		return true
 	})
 
-	return configs, seen
+	return configs, seen, conflictErr
 }
 
 func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, string, error) {
@@ -227,7 +256,7 @@ func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, string, er
 
 	fset := token.NewFileSet()
 	var mergedConfigs []core.PageConfig
-	globalSeen := make(map[string]bool)
+	globalModes := make(map[string]core.PageMode)
 	var defaultHTMLLang string
 
 	for _, goFile := range goFiles {
@@ -240,20 +269,31 @@ func (s *BuildService) scanPages(mainFile string) ([]core.PageConfig, string, er
 			defaultHTMLLang = scanDefaultHTMLLang(node)
 		}
 
-		configs, fileSeen := s.scanFileForPages(fset, node)
-		for _, cfg := range configs {
-			if !globalSeen[cfg.ComponentPath] {
-				globalSeen[cfg.ComponentPath] = true
-				mergedConfigs = append(mergedConfigs, cfg)
-			}
+		configs, _, err := s.scanFileForPages(fset, node)
+		if err != nil {
+			return nil, "", fmt.Errorf("scan %s: %w", goFile, err)
 		}
-		_ = fileSeen
+		for _, cfg := range configs {
+			if previous, ok := globalModes[cfg.ComponentPath]; ok {
+				if previous != cfg.Mode {
+					return nil, "", fmt.Errorf(
+						"component %q cannot use both %s and %s modes",
+						cfg.ComponentPath,
+						previous.BuildLabel(),
+						cfg.Mode.BuildLabel(),
+					)
+				}
+				continue
+			}
+			globalModes[cfg.ComponentPath] = cfg.Mode
+			mergedConfigs = append(mergedConfigs, cfg)
+		}
 	}
 
 	return mergedConfigs, defaultHTMLLang, nil
 }
 
-func (s *BuildService) detectPageMode(args []ast.Expr) core.PageMode {
+func (s *BuildService) detectPageMode(args []ast.Expr) (core.PageMode, error) {
 	hasClientOnly := false
 	hasStaticPrerender := false
 
@@ -282,18 +322,18 @@ func (s *BuildService) detectPageMode(args []ast.Expr) core.PageMode {
 	}
 
 	if hasClientOnly && hasStaticPrerender {
-		return core.ModeSSR
+		return core.ModeSSR, fmt.Errorf("conflicting page mode options")
 	}
 
 	if hasStaticPrerender {
-		return core.ModeStaticPrerender
+		return core.ModeStaticPrerender, nil
 	}
 
 	if hasClientOnly {
-		return core.ModeClientOnly
+		return core.ModeClientOnly, nil
 	}
 
-	return core.ModeSSR
+	return core.ModeSSR, nil
 }
 
 func (s *BuildService) extractTitleFromComponent(componentPath string) string {

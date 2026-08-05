@@ -15,7 +15,6 @@ import (
 type ExportStaticPagesInput struct {
 	OutputDir    string
 	Routes       []core.Route
-	PageConfigs  map[string]*core.PageConfig
 	Manifest     *core.Manifest
 	AppConfig    *core.Config
 	SSBundlePath func(entryName string) string
@@ -34,7 +33,10 @@ func ExportStaticPages(in ExportStaticPagesInput) error {
 	cache := stylesheetCache{byKey: make(map[string]string)}
 
 	for _, route := range in.Routes {
-		config := core.PageConfigFromRoute(route)
+		config, err := core.PageConfigFromRoute(route)
+		if err != nil {
+			return err
+		}
 		if config.Mode != core.ModeStaticPrerender {
 			continue
 		}
@@ -63,19 +65,21 @@ func ExportStaticPages(in ExportStaticPagesInput) error {
 			}
 		}
 
-		srcEntry := core.ManifestEntry{}
-		if in.Manifest != nil {
-			srcEntry = in.Manifest.Entries[entryName]
-		}
-
-		manifestEntry := core.ManifestEntry{
-			Script:       srcEntry.Script,
-			CriticalCSS:  srcEntry.CriticalCSS,
-			CSS:          srcEntry.CSS,
-			CSSFiles:     srcEntry.CSSFiles,
-			Chunks:       srcEntry.Chunks,
-			Mode:         "static",
-			StaticRoutes: make(map[string]string),
+		manifestEntry, exists := exportManifest.Entries[entryName]
+		if !exists {
+			srcEntry := core.ManifestEntry{}
+			if in.Manifest != nil {
+				srcEntry = in.Manifest.Entries[entryName]
+			}
+			manifestEntry = core.ManifestEntry{
+				Script:       srcEntry.Script,
+				CriticalCSS:  srcEntry.CriticalCSS,
+				CSS:          srcEntry.CSS,
+				CSSFiles:     srcEntry.CSSFiles,
+				Chunks:       srcEntry.Chunks,
+				Mode:         "static",
+				StaticRoutes: make(map[string]string),
+			}
 		}
 
 		for _, entry := range entries {
