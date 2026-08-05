@@ -640,7 +640,7 @@ Indirect component paths (`Page("/{$}", homePath)`) and expanded option slices (
 3. Generate client and SSR entry files
 4. Build SSR bundles and client JS/CSS
 5. Generate client-only HTML shells
-6. Compile the embedded Bun runtime when SSR or static export needs it
+6. Compile the embedded Bun runtime when Bun SSR or static export needs it; Sobek builds omit this step
 7. Export static-prerender routes and remove their build-only SSR bundles
 8. Copy `public/` assets and write `manifest.json`
 9. Exit non-zero if any required page or bundle fails
@@ -652,7 +652,7 @@ Production `/dist/` assets are content-hashed and served with `Cache-Control: pu
 For SSR pages, production builds include server bundles:
 
 - Located in `.bifrost/ssr/`
-- Pre-built for Bun runtime target
+- Built for the selected Bun or Sobek runtime
 - Extracted from `embed.FS` at runtime
 - Used instead of source files in production
 
@@ -711,7 +711,20 @@ Each build writes only to its own `dir(main.go)/.bifrost/`. No collision — eve
 
 ### Runtime concurrency
 
-Bifrost v1 runs one Bun renderer process per app. React's synchronous SSR work runs in that process. Prefer static prerender for high-volume pages; add a measured worker pool only if production load requires it.
+Bun remains the default and runs one renderer process per app. React's synchronous SSR work runs in that process.
+
+An experimental independent Sobek build and render backend is available:
+
+```bash
+BIFROST_JS_RUNTIME=sobek BIFROST_SOBEK_WORKERS=4 bifrost build ./main.go
+BIFROST_JS_RUNTIME=sobek BIFROST_SOBEK_WORKERS=4 ./app
+```
+
+Sobek uses esbuild's Go API for React SSR bundles, hydration bundles, code splitting, CSS imports, source maps, and production asset hashes. Tailwind's official JavaScript compiler runs inside Sobek; Bifrost scans the esbuild source graph in Go instead of loading Tailwind's native Node scanner. Bun is not started or required by a Sobek build. JavaScript packages must already exist in `node_modules`; use npm, pnpm, or another package installer if Bun is unavailable.
+
+Sobek removes the production child process and embedded Bun executable. It uses a pool of isolated JavaScript runtimes because one Sobek runtime is not goroutine-safe. The default worker count is `min(GOMAXPROCS, 4)`; set `BIFROST_SOBEK_WORKERS` only after load testing. Each worker loads its own copy of each used SSR bundle, trading memory for throughput.
+
+The manifest records the selected runtime, so a production binary built from Sobek assets selects Sobek when `BIFROST_JS_RUNTIME` is unset. An explicit runtime environment value overrides the manifest and must match the built assets. React Compiler transforms currently run only in Bun builds; Sobek preserves React behavior but omits that optional optimization. Asynchronous JavaScript SSR that leaves a Promise pending is unsupported; load data in Go and pass it as props. Prefer static prerender for high-volume pages.
 
 ### Route patterns
 

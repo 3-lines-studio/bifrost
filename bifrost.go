@@ -35,7 +35,7 @@ type Router interface {
 	Handle(pattern string, handler http.Handler)
 }
 
-// App owns Bifrost routes and the Bun renderer process, when one is needed.
+// App owns Bifrost routes and the configured JavaScript renderer, when one is needed.
 type App struct {
 	inner *internalapp.App
 }
@@ -73,7 +73,7 @@ func (a *App) Handler() http.Handler {
 	return a.inner.Handler()
 }
 
-// Stop stops the Bun renderer and removes temporary files.
+// Stop stops the JavaScript renderer and removes temporary files.
 func (a *App) Stop() error {
 	return a.inner.Stop()
 }

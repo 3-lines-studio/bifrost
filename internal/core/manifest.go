@@ -17,6 +17,7 @@ type ManifestEntry struct {
 }
 
 type Manifest struct {
+	Runtime string                   `json:"runtime,omitempty"`
 	Entries map[string]ManifestEntry `json:"entries"`
 }
 

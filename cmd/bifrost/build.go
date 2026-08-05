@@ -9,9 +9,11 @@ import (
 	"strings"
 
 	"github.com/3-lines-studio/bifrost/internal/adapters/cli"
+	esbuildadapter "github.com/3-lines-studio/bifrost/internal/adapters/esbuild"
 	"github.com/3-lines-studio/bifrost/internal/adapters/fs"
 	"github.com/3-lines-studio/bifrost/internal/adapters/process"
 	"github.com/3-lines-studio/bifrost/internal/adapters/react"
+	sobekrenderer "github.com/3-lines-studio/bifrost/internal/adapters/sobek"
 	"github.com/3-lines-studio/bifrost/internal/core"
 	"github.com/3-lines-studio/bifrost/internal/usecase"
 )
@@ -134,12 +136,22 @@ func runBuildCommand(args []string) int {
 		return 1
 	}
 
-	runtime, err := process.NewRenderer(
-		core.ModeDev,
-		react.RuntimeSource(core.ModeDev),
-		"BIFROST_PROD=1",
-		"BIFROST_DEV=0",
-	)
+	type buildRuntime interface {
+		usecase.Renderer
+		Stop() error
+	}
+	var runtime buildRuntime
+	if strings.EqualFold(os.Getenv("BIFROST_JS_RUNTIME"), "sobek") {
+		builder := esbuildadapter.NewBuilder(core.ModeProd)
+		runtime, err = sobekrenderer.NewRenderer(core.ModeProd, 0, builder)
+	} else {
+		runtime, err = process.NewRenderer(
+			core.ModeDev,
+			react.RuntimeSource(core.ModeDev),
+			"BIFROST_PROD=1",
+			"BIFROST_DEV=0",
+		)
+	}
 	if err != nil {
 		output.PrintHeader("Bifrost Build")
 		output.PrintError("Failed to initialize build engine: %v", err)

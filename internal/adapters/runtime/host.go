@@ -6,16 +6,27 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 
+	esbuildadapter "github.com/3-lines-studio/bifrost/internal/adapters/esbuild"
 	"github.com/3-lines-studio/bifrost/internal/adapters/process"
 	"github.com/3-lines-studio/bifrost/internal/adapters/react"
+	sobekrenderer "github.com/3-lines-studio/bifrost/internal/adapters/sobek"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
+type rendererClient interface {
+	Render(path string, props any) (core.RenderedPage, error)
+	Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error)
+	BuildSSR(entrypoints []string, outdir string) error
+	Stop() error
+}
+
 type Host struct {
-	client     *process.Renderer
+	client     rendererClient
 	assetsFS   embed.FS
 	isDev      bool
 	manifest   *core.Manifest
@@ -79,6 +90,9 @@ func (r *Host) setupRuntimeForExport(exportDir string) error {
 	r.ssrTempDir = ssrTempDir
 	r.ssrCleanup = ssrCleanup
 
+	if r.useSobek() {
+		return r.startSobekRenderer(core.ModeProd, nil, ssrCleanup)
+	}
 	return r.startRendererFromSource(core.ModeProd, react.RuntimeSource(core.ModeProd), ssrCleanup)
 }
 
@@ -94,8 +108,14 @@ func (r *Host) initProdMode() (*Host, error) {
 	r.manifest = man
 
 	if core.HasSSREntries(man) {
-		if err := r.setupEmbeddedRuntime(); err != nil {
-			return nil, err
+		var setupErr error
+		if r.useSobek() {
+			setupErr = r.setupEmbeddedSobekRuntime()
+		} else {
+			setupErr = r.setupEmbeddedRuntime()
+		}
+		if setupErr != nil {
+			return nil, setupErr
 		}
 	}
 
@@ -108,6 +128,16 @@ func loadManifestFromEmbed(assetsFS embed.FS) (*core.Manifest, error) {
 		return nil, fmt.Errorf("manifest.json not found in embedded assets: %w", err)
 	}
 	return core.ParseManifest(data)
+}
+
+func (r *Host) setupEmbeddedSobekRuntime() error {
+	ssrTempDir, ssrCleanup, err := process.ExtractSSRBundles(r.assetsFS, r.manifest)
+	if err != nil {
+		return fmt.Errorf("failed to extract SSR bundles: %w", err)
+	}
+	r.ssrTempDir = ssrTempDir
+	r.ssrCleanup = ssrCleanup
+	return r.startSobekRenderer(core.ModeProd, nil, ssrCleanup)
 }
 
 func (r *Host) setupEmbeddedRuntime() error {
@@ -132,13 +162,21 @@ func (r *Host) setupEmbeddedRuntime() error {
 }
 
 func (r *Host) initDevMode() (*Host, error) {
-	if err := r.startRendererFromSource(core.ModeDev, react.RuntimeSource(core.ModeDev), nil); err != nil {
+	if !r.useSobek() {
+		if err := r.startRendererFromSource(core.ModeDev, react.RuntimeSource(core.ModeDev), nil); err != nil {
+			return nil, err
+		}
+		return r, nil
+	}
+
+	builder := esbuildadapter.NewBuilder(core.ModeDev)
+	if err := r.startSobekRenderer(core.ModeDev, builder, nil); err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
-func (h *Host) Client() *process.Renderer { return h.client }
+func (h *Host) Client() rendererClient { return h.client }
 
 func (h *Host) Manifest() *core.Manifest { return h.manifest }
 
@@ -219,6 +257,38 @@ func (r *Host) startRendererFromExecutable(executablePath string, cleanup func()
 	r.client = client
 	r.ssrCleanup = cleanup
 	return nil
+}
+
+func (r *Host) startSobekRenderer(mode core.Mode, builder sobekrenderer.Builder, cleanup func()) error {
+	client, err := sobekrenderer.NewRenderer(mode, sobekWorkers(), builder)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return fmt.Errorf("failed to start Sobek runtime: %w", err)
+	}
+	r.client = client
+	r.ssrCleanup = cleanup
+	return nil
+}
+
+func (r *Host) useSobek() bool {
+	if configured := strings.TrimSpace(os.Getenv("BIFROST_JS_RUNTIME")); configured != "" {
+		return strings.EqualFold(configured, "sobek")
+	}
+	return r.manifest != nil && strings.EqualFold(r.manifest.Runtime, "sobek")
+}
+
+func sobekWorkers() int {
+	value := os.Getenv("BIFROST_SOBEK_WORKERS")
+	if value == "" {
+		return min(runtime.GOMAXPROCS(0), 4)
+	}
+	workers, err := strconv.Atoi(value)
+	if err != nil || workers < 1 {
+		return min(runtime.GOMAXPROCS(0), 4)
+	}
+	return workers
 }
 
 func combineCleanup(cleanups ...func()) func() {

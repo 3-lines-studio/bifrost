@@ -55,6 +55,17 @@ func TestExtractCriticalCSS_KeepsNestedMediaAndKeyframes(t *testing.T) {
 	}
 }
 
+func TestExtractCriticalCSS_KeepsWholeTopLevelBlocksWithinSizeCap(t *testing.T) {
+	html := `<div class="hero utility">Hi</div>`
+	css := `@layer theme{:root{--color:red}}@layer utilities{.hero{color:var(--color)}.utility{padding:1rem;margin:1rem}}`
+	maxBytes := len(`@layer theme{:root{--color:red}}`)
+
+	critical := ExtractCriticalCSS(html, css, maxBytes)
+	if critical != `@layer theme{:root{--color:red}}` {
+		t.Fatalf("unexpected capped critical CSS: %q", critical)
+	}
+}
+
 func TestExtractCriticalCSS_RespectsSizeCap(t *testing.T) {
 	html := `<body><div class="hero">Hi</div></body>`
 	css := `.hero{padding:1rem;}`

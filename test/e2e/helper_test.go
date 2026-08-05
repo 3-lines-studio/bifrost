@@ -35,6 +35,9 @@ func bunAvailable() bool {
 }
 
 func skipIfNoBun(t *testing.T) {
+	if strings.EqualFold(os.Getenv("BIFROST_JS_RUNTIME"), "sobek") {
+		return
+	}
 	if !bunAvailable() {
 		t.Skip("bun not available, skipping E2E test")
 	}

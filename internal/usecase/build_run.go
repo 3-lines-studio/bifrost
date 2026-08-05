@@ -93,12 +93,16 @@ func (s *BuildService) newBuildRun(input BuildInput) (*buildRun, error) {
 		manifestPath:  filepath.Join(input.AppRoot, ".bifrost", "manifest.json"),
 	}
 
+	runtimeName := "bun"
+	if strings.EqualFold(os.Getenv("BIFROST_JS_RUNTIME"), "sobek") {
+		runtimeName = "sobek"
+	}
 	run := &buildRun{
 		input:           input,
 		paths:           paths,
 		report:          cli.NewBuildReport(s.cli, paths.bifrostDir),
 		pages:           make([]buildPage, len(pageConfigs)),
-		manifest:        &core.Manifest{Entries: make(map[string]core.ManifestEntry, len(pageConfigs))},
+		manifest:        &core.Manifest{Runtime: runtimeName, Entries: make(map[string]core.ManifestEntry, len(pageConfigs))},
 		defaultHTMLLang: defaultHTMLLang,
 		ssrFailed:       make(map[string]struct{}),
 	}
@@ -443,6 +447,9 @@ func (s *BuildService) writeManifest(run *buildRun) error {
 func (s *BuildService) compileRuntime(run *buildRun) error {
 	if !run.needsRuntime && !run.hasStaticPrerender {
 		return nil
+	}
+	if strings.EqualFold(os.Getenv("BIFROST_JS_RUNTIME"), "sobek") {
+		return os.RemoveAll(run.paths.runtimeDir)
 	}
 
 	step := run.report.StartStep("Compiling Bun runtime")

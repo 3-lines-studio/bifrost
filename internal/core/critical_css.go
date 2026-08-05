@@ -54,9 +54,37 @@ func ExtractCriticalCSS(htmlDoc string, stylesheet string, maxBytes int) string 
 	}
 
 	if len(critical) > maxBytes {
-		return ""
+		return fitCriticalCSSBlocks(critical, maxBytes)
 	}
 	return critical
+}
+
+func fitCriticalCSSBlocks(css string, maxBytes int) string {
+	var out strings.Builder
+	for i := 0; i < len(css); {
+		i = skipCSSSpaceAndComments(css, i)
+		if i >= len(css) {
+			break
+		}
+		start := i
+		headerEnd := findTopLevelCSSChar(css, i, '{', ';')
+		if headerEnd == -1 {
+			break
+		}
+		end := headerEnd + 1
+		if css[headerEnd] == '{' {
+			blockEnd := findMatchingCSSBrace(css, headerEnd)
+			if blockEnd == -1 {
+				break
+			}
+			end = blockEnd + 1
+		}
+		if out.Len()+end-start <= maxBytes {
+			out.WriteString(css[start:end])
+		}
+		i = end
+	}
+	return out.String()
 }
 
 func buildCriticalInventory(htmlDoc string) criticalInventory {
