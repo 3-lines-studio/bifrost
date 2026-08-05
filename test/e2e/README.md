@@ -91,7 +91,7 @@ UPDATE_SNAPS=true go test ./test/e2e/... -v
 - **HTTP-based assertions**: Status codes, redirects, content
 - **HTML normalization**: Removes dynamic content (timestamps, IDs) for stable snapshots
 - **Automatic cleanup**: Servers cleaned up after each test
-- **Dual mode testing**: Tests run in both Dev and Production modes using `example.BifrostFS`
+- **Dual mode testing**: Tests run in both Dev and Production modes using the embedded `BifrostFS` (see `embed_test.go`)
 
 ### Key Features
 1. **Dev mode testing**: Tests run in development mode against example pages

@@ -6,15 +6,21 @@
 package main
 
 import (
+	"embed"
 	"fmt"
 	"log"
 	"net/http"
 
 	"github.com/3-lines-studio/bifrost"
-	"github.com/3-lines-studio/bifrost/example"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
+
+// go run ./cmd/full/wrap.go compiles this file alone, so bifrostFS is declared here
+// too (embed.go is not part of a single-file build).
+//
+//go:embed all:.bifrost
+var bifrostFS embed.FS
 
 func main() {
 	// Bifrost routes
@@ -26,7 +32,7 @@ func main() {
 		bifrost.Page("/product", "./pages/product.tsx", bifrost.WithStatic()),
 	}
 
-	app := bifrost.New(example.BifrostFS, bifrostRoutes...)
+	app := bifrost.New(bifrostFS, bifrostRoutes...)
 	defer app.Stop()
 
 	// Create chi router

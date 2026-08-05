@@ -96,6 +96,19 @@ func printBuildUsage() {
 	fmt.Println("  --go-build[=path]       Run go build after asset build (default: ./tmp/app)")
 }
 
+func ensureBifrostDir(fsAdapter fs.FileSystem, dir string) error {
+	if err := fsAdapter.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	gitkeep := filepath.Join(dir, ".gitkeep")
+	if !fsAdapter.FileExists(gitkeep) {
+		if err := fsAdapter.WriteFile(gitkeep, []byte("# This file ensures .bifrost directory exists for go:embed\n"), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func runBuild(args []string) {
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
 		printBuildUsage()
@@ -129,6 +142,14 @@ func runBuild(args []string) {
 
 	fsAdapter := fs.NewOSFileSystem()
 	output := cli.NewOutput()
+
+	bifrostDir := filepath.Join(projectDir, ".bifrost")
+	if err := ensureBifrostDir(fsAdapter, bifrostDir); err != nil {
+		output.PrintHeader("Bifrost Build")
+		output.PrintError("Failed to prepare .bifrost directory: %v", err)
+		os.Exit(1)
+	}
+
 	adapter := getAdapter(fw)
 
 	runtime, err := process.NewRenderer(core.ModeDev, framework.RuntimeSource(core.ModeDev, core.FrameworkReact), "BIFROST_PROD=1")

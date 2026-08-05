@@ -149,13 +149,9 @@ func runDev(args []string) {
 
 	bifrostDir := filepath.Join(appRoot, ".bifrost")
 	fsAdapter := fs.NewOSFileSystem()
-	if err := fsAdapter.MkdirAll(bifrostDir, 0755); err != nil {
-		output.PrintError("Failed to create .bifrost directory: %v", err)
+	if err := ensureBifrostDir(fsAdapter, bifrostDir); err != nil {
+		output.PrintError("Failed to prepare .bifrost directory: %v", err)
 		os.Exit(1)
-	}
-	gitkeep := filepath.Join(bifrostDir, ".gitkeep")
-	if !fsAdapter.FileExists(gitkeep) {
-		_ = fsAdapter.WriteFile(gitkeep, []byte("# This file ensures .bifrost directory exists for go:embed\n"), 0644)
 	}
 
 	tmpDir := filepath.Join(appRoot, "tmp")

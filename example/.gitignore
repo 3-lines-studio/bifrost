@@ -2,3 +2,5 @@ node_modules/
 .bifrost/
 tmp/
 bifrost
+/full
+/cmd/full/full

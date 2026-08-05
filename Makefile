@@ -1,5 +1,5 @@
 check:
-	go run ./cmd/bifrost doctor ./example
+	go run ./cmd/bifrost doctor ./example/cmd/full
 	go build -o /tmp/bifrost ./cmd/bifrost
 	cd example && bun i && /tmp/bifrost build ./cmd/full/main.go
 	mkdir -p test/e2e/.bifrost test/e2e/public
