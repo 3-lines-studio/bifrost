@@ -19,6 +19,8 @@ func TestSSREntryTemplate(t *testing.T) {
 func TestClientEntryTemplates(t *testing.T) {
 	if tmpl := ClientEntryTemplate(core.ModeSSR); !strings.Contains(tmpl, "hydrateRoot") {
 		t.Fatal("hydration template does not contain hydrateRoot")
+	} else if strings.Contains(tmpl, "requestIdleCallback") || strings.Contains(tmpl, "setTimeout") {
+		t.Fatal("hydration template delays hydration")
 	}
 	if tmpl := ClientEntryTemplate(core.ModeClientOnly); !strings.Contains(tmpl, "createRoot") {
 		t.Fatal("client-only template does not contain createRoot")

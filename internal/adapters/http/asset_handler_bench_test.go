@@ -69,11 +69,3 @@ func BenchmarkPublicHandler_ServeFromFS(b *testing.B) {
 		handler.ServeHTTP(w, req)
 	}
 }
-
-func BenchmarkSafeEmbedPath(b *testing.B) {
-	paths := []string{"/pages/home.html", "/pages/routes/blog/hello/index.html", "/../../../etc/passwd"}
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		safeEmbedPath(paths[i%len(paths)])
-	}
-}

@@ -90,9 +90,13 @@ func ensureBifrostDir(fsAdapter fs.FileSystem, dir string) error {
 }
 
 func runBuild(args []string) {
+	os.Exit(runBuildCommand(args))
+}
+
+func runBuildCommand(args []string) int {
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
 		printBuildUsage()
-		os.Exit(0)
+		return 0
 	}
 
 	mainFile, goBuildOutput, _ := parseFlags(args)
@@ -101,7 +105,7 @@ func runBuild(args []string) {
 		printBuildUsage()
 		output := cli.NewOutput()
 		output.PrintError("Missing main.go file argument")
-		os.Exit(1)
+		return 1
 	}
 
 	originalCwd, err := os.Getwd()
@@ -109,7 +113,7 @@ func runBuild(args []string) {
 		output := cli.NewOutput()
 		output.PrintHeader("Bifrost Build")
 		output.PrintError("Failed to get current working directory: %v", err)
-		os.Exit(1)
+		return 1
 	}
 
 	mainFileAbs := mainFile
@@ -127,18 +131,23 @@ func runBuild(args []string) {
 	if err := ensureBifrostDir(fsAdapter, bifrostDir); err != nil {
 		output.PrintHeader("Bifrost Build")
 		output.PrintError("Failed to prepare .bifrost directory: %v", err)
-		os.Exit(1)
+		return 1
 	}
 
-	runtime, err := process.NewRenderer(core.ModeDev, react.RuntimeSource(core.ModeDev), "BIFROST_PROD=1")
+	runtime, err := process.NewRenderer(
+		core.ModeDev,
+		react.RuntimeSource(core.ModeDev),
+		"BIFROST_PROD=1",
+		"BIFROST_DEV=0",
+	)
 	if err != nil {
 		output.PrintHeader("Bifrost Build")
 		output.PrintError("Failed to initialize build engine: %v", err)
-		os.Exit(1)
+		return 1
 	}
 	defer func() { _ = runtime.Stop() }()
 
-	buildService := usecase.NewBuildService(runtime, fsAdapter, output)
+	buildService := usecase.NewBuildService(runtime, output)
 
 	input := usecase.BuildInput{
 		MainFile:   mainFileAbs,
@@ -149,10 +158,10 @@ func runBuild(args []string) {
 	result := buildService.BuildProject(context.Background(), input)
 	if result.Error != nil {
 		output.PrintError("%v", result.Error)
-		os.Exit(1)
+		return 1
 	}
 	if !result.Success {
-		os.Exit(1)
+		return 1
 	}
 
 	if goBuildOutput != "" {
@@ -163,7 +172,7 @@ func runBuild(args []string) {
 		}
 		if err := os.MkdirAll(filepath.Dir(goBuildOutputAbs), 0755); err != nil {
 			output.PrintError("Failed to create output directory: %v", err)
-			os.Exit(1)
+			return 1
 		}
 		goBuild := exec.Command("go", "build", "-o", goBuildOutputAbs, filepath.Dir(mainFileAbs))
 		goBuild.Dir = goModRoot
@@ -171,9 +180,10 @@ func runBuild(args []string) {
 		goBuild.Stderr = os.Stderr
 		if err := goBuild.Run(); err != nil {
 			output.PrintError("Go build failed: %v", err)
-			os.Exit(1)
+			return 1
 		}
 		output.PrintSuccess("Go binary built: %s", goBuildOutputAbs)
 	}
 
+	return 0
 }

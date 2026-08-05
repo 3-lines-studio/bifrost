@@ -267,7 +267,7 @@ func normalizeHTML(html string) string {
 	// Stack trace byte sizes vary between runs
 	html = regexp.MustCompile(`\(\d+ bytes\)`).ReplaceAllString(html, "([N] bytes)")
 
-	return html
+	return strings.TrimSpace(html)
 }
 
 func assertHTTPStatus(t *testing.T, resp *http.Response, expected int) {
@@ -299,6 +299,13 @@ func assertRedirect(t *testing.T, url string, expectedLocation string, expectedS
 	location := resp.Header.Get("Location")
 	if location != expectedLocation {
 		t.Errorf("expected redirect to %s, got %s", expectedLocation, location)
+	}
+}
+
+func assertClientOnlyShell(t *testing.T, html string) {
+	t.Helper()
+	if !strings.Contains(html, `<div id="app"></div>`) {
+		t.Error("expected an empty client-only app shell")
 	}
 }
 

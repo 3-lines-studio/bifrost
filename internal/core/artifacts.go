@@ -9,8 +9,6 @@ type PageArtifacts struct {
 	CSS         string
 	CSSFiles    []string
 	Chunks      []string
-	IsStatic    bool
-	SSRPath     string
 }
 
 // ResolvePageArtifacts returns asset metadata for entryName.
@@ -25,8 +23,6 @@ func ResolvePageArtifacts(manifest *Manifest, entryName string) PageArtifacts {
 				CSS:         entry.CSS,
 				CSSFiles:    entry.CSSFiles,
 				Chunks:      entry.Chunks,
-				IsStatic:    entry.Static,
-				SSRPath:     entry.SSR,
 			}
 		}
 	}

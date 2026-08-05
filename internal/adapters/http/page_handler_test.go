@@ -151,14 +151,26 @@ type testRedirectErr struct {
 }
 
 func TestServeError_InvalidRedirectStatusReturns500(t *testing.T) {
-	h := &PageHandler{}
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/private", nil)
+	for _, status := range []int{99, http.StatusMultipleChoices, http.StatusNotModified, http.StatusUseProxy, 306, 399} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			h := &PageHandler{}
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/private", nil)
 
-	h.serveError(rec, req, &testRedirectErr{url: "/login", code: 99})
+			h.serveError(rec, req, &testRedirectErr{url: "/login", code: status})
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+			}
+		})
+	}
+}
+
+func TestRedirectStatusAllowsHTTPRedirectCodes(t *testing.T) {
+	for _, status := range []int{301, 302, 303, 307, 308} {
+		if !isRedirectStatus(status) {
+			t.Errorf("status %d was rejected", status)
+		}
 	}
 }
 

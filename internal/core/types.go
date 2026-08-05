@@ -8,6 +8,7 @@ import (
 type PropsLoader func(*http.Request) (any, error)
 
 type RedirectError interface {
+	error
 	RedirectURL() string
 	RedirectStatusCode() int
 }
@@ -72,13 +73,21 @@ type PageConfig struct {
 	HTMLLang         string
 	HTMLClass        string
 	modeOptions      uint8
+	optionFlags      uint8
 }
+
+const (
+	optionLoader uint8 = 1 << iota
+	optionStatic
+	optionStaticData
+)
 
 type PageOption func(*PageConfig)
 
 func WithLoader(loader PropsLoader) PageOption {
 	return func(c *PageConfig) {
 		c.PropsLoader = loader
+		c.optionFlags |= optionLoader
 	}
 }
 
@@ -93,6 +102,7 @@ func WithStatic() PageOption {
 	return func(c *PageConfig) {
 		c.Mode = ModeStaticPrerender
 		c.modeOptions |= 2
+		c.optionFlags |= optionStatic
 	}
 }
 
@@ -101,6 +111,7 @@ func WithStaticData(loader StaticDataLoader) PageOption {
 		c.Mode = ModeStaticPrerender
 		c.StaticDataLoader = loader
 		c.modeOptions |= 2
+		c.optionFlags |= optionStaticData
 	}
 }
 
@@ -136,11 +147,6 @@ const (
 	ModeProd
 	ModeExport
 )
-
-type Renderer interface {
-	Render(componentPath string, props any) (RenderedPage, error)
-	Build(entrypoints []string, outdir string) error
-}
 
 type Config struct {
 	DefaultHTMLLang string

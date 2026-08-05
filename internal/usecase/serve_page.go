@@ -37,7 +37,6 @@ type ServePageOutput struct {
 
 type PageService struct {
 	renderer   Renderer
-	fs         FileSystem
 	buildGroup singleflightGroup
 }
 
@@ -50,11 +49,8 @@ type pageRequestState struct {
 	shell      *core.HTMLDocumentShell
 }
 
-func NewPageService(renderer Renderer, fs FileSystem) *PageService {
-	return &PageService{
-		renderer: renderer,
-		fs:       fs,
-	}
+func NewPageService(renderer Renderer) *PageService {
+	return &PageService{renderer: renderer}
 }
 
 func (s *PageService) ServePage(ctx context.Context, input ServePageInput) ServePageOutput {
@@ -148,7 +144,7 @@ func (s *PageService) executeRequest(ctx context.Context, state pageRequestState
 func (s *PageService) renderForMode(ctx context.Context, state pageRequestState) ServePageOutput {
 	switch state.input.Config.Mode {
 	case core.ModeClientOnly:
-		html, err := s.renderClientOnlyShell(ctx, state)
+		html, err := s.renderClientOnlyShell(state)
 		return ServePageOutput{
 			Action: core.ActionRenderClientOnlyShell,
 			HTML:   html,

@@ -43,9 +43,7 @@ func TestMixedMode_AllThree_Dev(t *testing.T) {
 	// Test client page serves empty shell
 	resp3, html3 := server.get(t, "/admin")
 	assertHTTPStatus(t, resp3, 200)
-	if !strings.Contains(html3, "Login") {
-		t.Error("expected client page to contain 'Login'")
-	}
+	assertClientOnlyShell(t, html3)
 
 	matchSnapshot(t, "mixed_all_three_dashboard_dev", html1)
 	matchSnapshot(t, "mixed_all_three_about_dev", html2)
@@ -163,9 +161,7 @@ func TestMixedMode_StaticAndClient_Dev(t *testing.T) {
 
 	resp2, html2 := server.get(t, "/login")
 	assertHTTPStatus(t, resp2, 200)
-	if !strings.Contains(html2, "Login") {
-		t.Error("expected client page to contain 'Login'")
-	}
+	assertClientOnlyShell(t, html2)
 
 	matchSnapshot(t, "mixed_static_and_client_about_dev", html1)
 	matchSnapshot(t, "mixed_static_and_client_login_dev", html2)
@@ -220,9 +216,7 @@ func TestMixedMode_SSRAndClient_Dev(t *testing.T) {
 
 	resp2, html2 := server.get(t, "/login")
 	assertHTTPStatus(t, resp2, 200)
-	if !strings.Contains(html2, "Login") {
-		t.Error("expected client page to contain 'Login'")
-	}
+	assertClientOnlyShell(t, html2)
 
 	matchSnapshot(t, "mixed_ssr_and_client_app_dev", html1)
 	matchSnapshot(t, "mixed_ssr_and_client_login_dev", html2)
@@ -250,9 +244,7 @@ func TestMixedMode_SSRAndClient_Prod(t *testing.T) {
 
 	resp2, html2 := server.get(t, "/login")
 	assertHTTPStatus(t, resp2, 200)
-	if !strings.Contains(html2, "Login") {
-		t.Error("expected client page to contain 'Login'")
-	}
+	assertClientOnlyShell(t, html2)
 
 	matchSnapshot(t, "mixed_ssr_and_client_app_prod", html1)
 	matchSnapshot(t, "mixed_ssr_and_client_login_prod", html2)

@@ -211,6 +211,19 @@ func logRequestError(req *http.Request, err error) {
 	)
 }
 
+func isRedirectStatus(status int) bool {
+	switch status {
+	case http.StatusMovedPermanently,
+		http.StatusFound,
+		http.StatusSeeOther,
+		http.StatusTemporaryRedirect,
+		http.StatusPermanentRedirect:
+		return true
+	default:
+		return false
+	}
+}
+
 func (h *PageHandler) serveError(w http.ResponseWriter, req *http.Request, err error) {
 	var redirectErr core.RedirectError
 	if errors.As(err, &redirectErr) {
@@ -218,7 +231,7 @@ func (h *PageHandler) serveError(w http.ResponseWriter, req *http.Request, err e
 		if status == 0 {
 			status = http.StatusFound
 		}
-		if status >= 300 && status <= 399 {
+		if isRedirectStatus(status) {
 			http.Redirect(w, req, redirectErr.RedirectURL(), status)
 			return
 		}

@@ -2,7 +2,7 @@ package core
 
 import "testing"
 
-func TestResolvePageArtifacts_EquivalentToGetAssets(t *testing.T) {
+func TestResolvePageArtifactsFromManifest(t *testing.T) {
 	t.Parallel()
 	man := &Manifest{
 		Entries: map[string]ManifestEntry{
@@ -10,16 +10,13 @@ func TestResolvePageArtifacts_EquivalentToGetAssets(t *testing.T) {
 				Script:      "/dist/pages-home-entry-abc123.js",
 				CSS:         "/dist/pages-home-entry-abc123.css",
 				Chunks:      []string{"/dist/chunk-xyz.js"},
-				SSR:         "/ssr/pages-home-entry-ssr.js",
 				CriticalCSS: "body{color:red}",
 			},
 		},
 	}
-	entry := "pages-home-entry"
-	a := ResolvePageArtifacts(man, entry)
-	b := GetAssets(man, entry)
-	if a.Script != b.Script || a.CSS != b.CSS || len(a.Chunks) != len(b.Chunks) {
-		t.Fatalf("ResolvePageArtifacts vs GetAssets mismatch: %+v vs %+v", a, b)
+	a := ResolvePageArtifacts(man, "pages-home-entry")
+	if a.Script != "/dist/pages-home-entry-abc123.js" || a.CSS != "/dist/pages-home-entry-abc123.css" || len(a.Chunks) != 1 {
+		t.Fatalf("unexpected artifacts: %+v", a)
 	}
 }
 

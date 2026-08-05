@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/3-lines-studio/bifrost/internal/adapters/cli"
 	"github.com/3-lines-studio/bifrost/internal/adapters/react"
@@ -399,7 +400,7 @@ func (s *BuildService) generateClientOnlyHTML(run *buildRun) {
 
 		err := s.writeClientOnlyHTML(
 			htmlPath,
-			s.extractTitleFromComponent(page.absComponentPath),
+			"",
 			entry.Script,
 			entry.CriticalCSS,
 			core.StylesheetHrefs(entry.CSS, entry.CSSFiles),
@@ -466,6 +467,11 @@ func (s *BuildService) exportStaticPrerender(_ context.Context, run *buildRun) e
 		run.report.EndStep(step, false, "")
 		return fmt.Errorf("export mode failed: %w", err)
 	}
+	if err := removeStaticSSRBundles(run); err != nil {
+		run.report.AddError("StaticPrerender", "Failed to remove build-only SSR bundles", []string{err.Error()})
+		run.report.EndStep(step, false, "")
+		return err
+	}
 	run.report.EndStep(step, true, "")
 
 	if !run.needsRuntime {
@@ -484,6 +490,41 @@ func (s *BuildService) exportStaticPrerender(_ context.Context, run *buildRun) e
 	return nil
 }
 
+func removeStaticSSRBundles(run *buildRun) error {
+	for _, page := range run.pages {
+		if page.config.Mode != core.ModeStaticPrerender {
+			continue
+		}
+		entry := run.manifest.Entries[page.entryName]
+		if entry.SSR != "" {
+			rel := strings.TrimPrefix(filepath.ToSlash(entry.SSR), "/")
+			if !strings.HasPrefix(rel, "ssr/") {
+				return fmt.Errorf("static entry %q has invalid SSR path %q", page.entryName, entry.SSR)
+			}
+			if err := os.Remove(filepath.Join(run.paths.bifrostDir, filepath.FromSlash(rel))); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove static SSR bundle %q: %w", entry.SSR, err)
+			}
+		}
+		matches, err := filepath.Glob(filepath.Join(run.paths.ssrDir, page.entryName+"-ssr.*"))
+		if err != nil {
+			return fmt.Errorf("find static SSR artifacts for %q: %w", page.entryName, err)
+		}
+		for _, match := range matches {
+			if err := os.Remove(match); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove static SSR artifact %q: %w", match, err)
+			}
+		}
+		entry.SSR = ""
+		run.manifest.Entries[page.entryName] = entry
+	}
+	if !run.needsRuntime {
+		if err := os.RemoveAll(run.paths.ssrDir); err != nil {
+			return fmt.Errorf("remove static SSR directory: %w", err)
+		}
+	}
+	return nil
+}
+
 func (s *BuildService) cleanupEntryFiles(run *buildRun) {
 	step := run.report.StartStep("Cleaning up entry files")
 	for _, page := range run.pages {
@@ -492,6 +533,8 @@ func (s *BuildService) cleanupEntryFiles(run *buildRun) {
 			_ = os.Remove(page.ssrEntryPath(run.paths.entriesDir))
 		}
 	}
+	_ = os.Remove(run.paths.entriesDir)
+	_ = os.Remove(run.paths.ssrDir)
 	run.report.EndStep(step, true, "")
 }
 

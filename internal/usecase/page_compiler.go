@@ -90,8 +90,10 @@ func CompileDevPageOnDemand(renderer Renderer, cwd string, entryName string, con
 	if _, err := renderer.Build([]string{entryFile}, outdir, []string{entryName}); err != nil {
 		return fmt.Errorf("failed to build client entry: %w", err)
 	}
+	if config.Mode == core.ModeClientOnly {
+		return nil
+	}
 
-	// Dev always builds an SSR bundle so client-only routes can optionally render Head via SSR.
 	if err := os.MkdirAll(ssrDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create SSR directory: %w", err)
 	}

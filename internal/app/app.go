@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"github.com/3-lines-studio/bifrost/internal/adapters/env"
-	adaptersfs "github.com/3-lines-studio/bifrost/internal/adapters/fs"
 	adaptershttp "github.com/3-lines-studio/bifrost/internal/adapters/http"
 	"github.com/3-lines-studio/bifrost/internal/adapters/runtime"
 	"github.com/3-lines-studio/bifrost/internal/core"
@@ -58,7 +57,7 @@ func newApp(assetsFS embed.FS, routes []core.Route, config *core.Config) (*App, 
 		return nil, err
 	}
 
-	if env.IsExportMarkerPresent() || mode == core.ModeExport {
+	if mode == core.ModeExport {
 		return app, nil
 	}
 
@@ -80,10 +79,14 @@ func newApp(assetsFS embed.FS, routes []core.Route, config *core.Config) (*App, 
 
 func (a *App) addRoutes(routes []core.Route) error {
 	modes := make(map[string]core.PageMode, len(a.pageConfigs)+len(routes))
+	clientDocumentAttrs := make(map[string][2]string)
 	patterns := make(map[string]struct{}, len(a.routes)+len(routes))
 	entryComponents := make(map[string]string, len(a.routes)+len(routes))
 	for componentPath, config := range a.pageConfigs {
 		modes[componentPath] = config.Mode
+		if config.Mode == core.ModeClientOnly {
+			clientDocumentAttrs[componentPath] = [2]string{config.HTMLLang, config.HTMLClass}
+		}
 	}
 	for _, route := range a.routes {
 		patterns[route.Pattern] = struct{}{}
@@ -121,6 +124,16 @@ func (a *App) addRoutes(routes []core.Route) error {
 				previous.BuildLabel(),
 				pc.Mode.BuildLabel(),
 			)
+		}
+		if pc.Mode == core.ModeClientOnly {
+			attrs := [2]string{pc.HTMLLang, pc.HTMLClass}
+			if previous, ok := clientDocumentAttrs[route.ComponentPath]; ok && previous != attrs {
+				return fmt.Errorf(
+					"bifrost: client-only component %q cannot use different HTML attributes across routes",
+					route.ComponentPath,
+				)
+			}
+			clientDocumentAttrs[route.ComponentPath] = attrs
 		}
 		modes[route.ComponentPath] = pc.Mode
 		storedRoutes[i] = route
@@ -181,14 +194,6 @@ func (a *App) runExportMode() {
 }
 
 func (a *App) Wrap(api Router) http.Handler {
-	if env.IsExportMarkerPresent() {
-		if err := usecase.WriteStaticBuildExportToStdout(a.routes); err != nil {
-			fmt.Fprintf(os.Stderr, "export failed: %v\n", err)
-			os.Exit(1)
-		}
-		os.Exit(0)
-	}
-
 	if env.DetectAppMode() == core.ModeExport {
 		a.runExportMode()
 	}
@@ -204,8 +209,7 @@ func (a *App) Wrap(api Router) http.Handler {
 		defaultLang = a.config.DefaultHTMLLang
 	}
 
-	fsAdapter := adaptersfs.NewEmbedFileSystem(a.assetsFS)
-	pageService := usecase.NewPageService(a.host.Client(), fsAdapter)
+	pageService := usecase.NewPageService(a.host.Client())
 
 	for i, route := range a.routes {
 		config := a.routeConfigs[i]

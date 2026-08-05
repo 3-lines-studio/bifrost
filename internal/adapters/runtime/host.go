@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -141,8 +142,6 @@ func (h *Host) Client() *process.Renderer { return h.client }
 
 func (h *Host) Manifest() *core.Manifest { return h.manifest }
 
-func (h *Host) SSRTempDir() string { return h.ssrTempDir }
-
 func (h *Host) ResolveSSRBundlePath(manifestSSRPath string) string {
 	if manifestSSRPath == "" {
 		return ""
@@ -152,8 +151,6 @@ func (h *Host) ResolveSSRBundlePath(manifestSSRPath string) string {
 	}
 	return process.ResolveStagedSSRBundlePath(h.ssrTempDir, manifestSSRPath)
 }
-
-func (h *Host) IsDev() bool { return h.isDev }
 
 func (h *Host) Stop() error {
 	h.stopOnce.Do(func() {
@@ -177,7 +174,18 @@ func copySSRBundlesFromDisk(exportDir string, manifest *core.Manifest) (string, 
 }
 
 func (r *Host) startRendererFromSource(mode core.Mode, source string, cleanup func()) error {
-	client, err := process.NewRenderer(mode, source)
+	var extraEnv []string
+	if r.ssrTempDir != "" {
+		cleanupDirs, err := json.Marshal([]string{r.ssrTempDir})
+		if err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return fmt.Errorf("failed to encode runtime cleanup paths: %w", err)
+		}
+		extraEnv = append(extraEnv, "BIFROST_CLEANUP_DIRS="+string(cleanupDirs))
+	}
+	client, err := process.NewRenderer(mode, source, extraEnv...)
 	if err != nil {
 		if cleanup != nil {
 			cleanup()
@@ -190,7 +198,18 @@ func (r *Host) startRendererFromSource(mode core.Mode, source string, cleanup fu
 }
 
 func (r *Host) startRendererFromExecutable(executablePath string, cleanup func()) error {
-	client, err := process.NewRendererFromExecutable(executablePath, nil)
+	cleanupDirs, err := json.Marshal([]string{filepath.Dir(executablePath), r.ssrTempDir})
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return fmt.Errorf("failed to encode runtime cleanup paths: %w", err)
+	}
+	client, err := process.NewRendererFromExecutable(
+		executablePath,
+		nil,
+		"BIFROST_CLEANUP_DIRS="+string(cleanupDirs),
+	)
 	if err != nil {
 		if cleanup != nil {
 			cleanup()

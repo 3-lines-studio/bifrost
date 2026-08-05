@@ -184,7 +184,7 @@ func TestParseManifest_Invalid(t *testing.T) {
 	}
 }
 
-func TestGetAssets_WithManifest(t *testing.T) {
+func TestResolvePageArtifacts_WithManifest(t *testing.T) {
 	man := &Manifest{
 		Entries: map[string]ManifestEntry{
 			"pages-home-entry": {
@@ -196,7 +196,7 @@ func TestGetAssets_WithManifest(t *testing.T) {
 		},
 	}
 
-	assets := GetAssets(man, "pages-home-entry")
+	assets := ResolvePageArtifacts(man, "pages-home-entry")
 	if assets.Script != "/dist/pages-home-entry-abc123.js" {
 		t.Errorf("unexpected script: %s", assets.Script)
 	}
@@ -208,8 +208,8 @@ func TestGetAssets_WithManifest(t *testing.T) {
 	}
 }
 
-func TestGetAssets_FallbackWithoutManifest(t *testing.T) {
-	assets := GetAssets(nil, "pages-home-entry")
+func TestResolvePageArtifacts_FallbackWithoutManifest(t *testing.T) {
+	assets := ResolvePageArtifacts(nil, "pages-home-entry")
 	if assets.Script != "/dist/pages-home-entry.js" {
 		t.Errorf("unexpected fallback script: %s", assets.Script)
 	}
@@ -231,7 +231,7 @@ func TestStylesheetHrefs_DedupesAndOrders(t *testing.T) {
 	}
 }
 
-func TestGetAssets_WithCSSFiles(t *testing.T) {
+func TestResolvePageArtifacts_WithCSSFiles(t *testing.T) {
 	man := &Manifest{
 		Entries: map[string]ManifestEntry{
 			"pages-docs-entry": {
@@ -241,7 +241,7 @@ func TestGetAssets_WithCSSFiles(t *testing.T) {
 			},
 		},
 	}
-	assets := GetAssets(man, "pages-docs-entry")
+	assets := ResolvePageArtifacts(man, "pages-docs-entry")
 	hrefs := StylesheetHrefs(assets.CSS, assets.CSSFiles)
 	if len(hrefs) != 2 || hrefs[0] != "/dist/shared.css" || hrefs[1] != "/dist/extra.css" {
 		t.Fatalf("unexpected hrefs: %v", hrefs)

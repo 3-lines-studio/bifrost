@@ -93,6 +93,70 @@ func TestExportStaticPagesReturnsLoaderErrors(t *testing.T) {
 	}
 }
 
+func TestExportStaticPagesRejectsPathOutsideRoute(t *testing.T) {
+	const component = "./pages/blog.tsx"
+	err := ExportStaticPages(ExportStaticPagesInput{
+		OutputDir: t.TempDir(),
+		Routes: []core.Route{core.Page("/blog/{slug...}", component, core.WithStaticData(func(context.Context) ([]core.StaticPathData, error) {
+			return []core.StaticPathData{{Path: "/docs/wrong"}}, nil
+		}))},
+		Manifest: &core.Manifest{Entries: map[string]core.ManifestEntry{
+			core.EntryNameForPath(component): {Script: "/dist/blog.js"},
+		}},
+		SSBundlePath: func(string) string { return "/tmp/blog-ssr.js" },
+		Renderer:     &fakeRenderer{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match its route pattern") {
+		t.Fatalf("error = %v, want route mismatch", err)
+	}
+}
+
+func TestExportStaticPagesRejectsCrossComponentOutputCollision(t *testing.T) {
+	const first = "./pages/first.tsx"
+	const second = "./pages/second.tsx"
+	loader := func(context.Context) ([]core.StaticPathData, error) {
+		return []core.StaticPathData{{Path: "/shared/x"}}, nil
+	}
+	err := ExportStaticPages(ExportStaticPagesInput{
+		OutputDir: t.TempDir(),
+		Routes: []core.Route{
+			core.Page("/shared/{slug}", first, core.WithStaticData(loader)),
+			core.Page("/shared/{rest...}", second, core.WithStaticData(loader)),
+		},
+		Manifest: &core.Manifest{Entries: map[string]core.ManifestEntry{
+			core.EntryNameForPath(first):  {Script: "/dist/first.js"},
+			core.EntryNameForPath(second): {Script: "/dist/second.js"},
+		}},
+		SSBundlePath: func(string) string { return "/tmp/page-ssr.js" },
+		Renderer:     &fakeRenderer{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "already generated") {
+		t.Fatalf("error = %v, want output collision", err)
+	}
+}
+
+func TestStaticPathMatchesRoute(t *testing.T) {
+	tests := []struct {
+		pattern string
+		path    string
+		want    bool
+	}{
+		{pattern: "/{$}", path: "/", want: true},
+		{pattern: "/{$}", path: "/other", want: false},
+		{pattern: "/about", path: "/about", want: true},
+		{pattern: "/about", path: "/about/team", want: false},
+		{pattern: "/blog/{slug}", path: "/blog/hello", want: true},
+		{pattern: "/blog/{slug}", path: "/docs/hello", want: false},
+		{pattern: "/blog/{slug...}", path: "/blog/2026/hello", want: true},
+		{pattern: "/docs/", path: "/docs/guide/start", want: true},
+	}
+	for _, tt := range tests {
+		if got := staticPathMatchesRoute(tt.pattern, tt.path); got != tt.want {
+			t.Errorf("staticPathMatchesRoute(%q, %q) = %v, want %v", tt.pattern, tt.path, got, tt.want)
+		}
+	}
+}
+
 func TestNormalizeStaticExportPathRejectsUnsafeOrDynamicPaths(t *testing.T) {
 	for _, raw := range []string{"", "../outside", "/a/../outside", `\\outside`, "/page?x=1", "/page#part", "/blog/{slug}"} {
 		t.Run(raw, func(t *testing.T) {

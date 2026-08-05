@@ -9,24 +9,12 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-func (s *PageService) renderClientOnlyShell(ctx context.Context, state pageRequestState) (string, error) {
+func (s *PageService) renderClientOnlyShell(state pageRequestState) (string, error) {
 	input := state.input
 	shell, err := s.resolveShell(state)
 	if err != nil {
 		return "", err
 	}
-
-	if input.IsDev && s.renderer != nil {
-		ssrPath := filepath.Join(".bifrost/ssr", input.EntryName+"-ssr.js")
-		if _, err := os.Stat(ssrPath); err == nil {
-			page, err := renderWithContext(ctx, s.renderer, ssrPath, map[string]any{})
-			if err == nil {
-				lang, htmlClass, _ := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
-				return shell.Render(page.Body, nil, page.Head, lang, htmlClass)
-			}
-		}
-	}
-
 	lang, htmlClass, _ := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
 	return shell.Render("", nil, "", lang, htmlClass)
 }

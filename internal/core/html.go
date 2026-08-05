@@ -179,18 +179,6 @@ func (s HTMLDocumentShell) WriteSuffix(w io.Writer, propsJSON []byte) error {
 		return err
 	}
 
-	for _, chunk := range s.chunks {
-		if _, err := io.WriteString(w, `    <script src="`); err != nil {
-			return err
-		}
-		if _, err := io.WriteString(w, chunk); err != nil {
-			return err
-		}
-		if _, err := io.WriteString(w, "\" type=\"module\" defer></script>\n"); err != nil {
-			return err
-		}
-	}
-
 	if _, err := io.WriteString(w, "    <script src=\""); err != nil {
 		return err
 	}

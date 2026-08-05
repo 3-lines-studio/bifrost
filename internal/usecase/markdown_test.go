@@ -49,7 +49,7 @@ func TestRenderSSR_MarkdownOutputSkipsShellWrapping(t *testing.T) {
 			}, nil
 		},
 	}
-	service := NewPageService(renderer, nil)
+	service := NewPageService(renderer)
 
 	input := ServePageInput{
 		Config: core.PageConfig{
@@ -98,7 +98,7 @@ func TestServePage_MarkdownOnlyAllowedInSSR(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			service := NewPageService(&fakeRenderer{}, nil)
+			service := NewPageService(&fakeRenderer{})
 			output := service.ServePage(context.Background(), ServePageInput{
 				Config: core.PageConfig{
 					ComponentPath: "./pages/home.tsx",
@@ -127,7 +127,7 @@ func TestRenderForMode_MarkdownSSRDoesNotError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setup shell: %v", err)
 	}
-	service := NewPageService(renderer, nil)
+	service := NewPageService(renderer)
 	state := pageRequestState{
 		input: ServePageInput{
 			Config: core.PageConfig{

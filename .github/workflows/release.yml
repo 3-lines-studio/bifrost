@@ -23,8 +23,18 @@ jobs:
         with:
           version: v2.12.2
 
-      - name: Run all checks
-        run: make check
+      - name: Run release checks
+        run: make release-check
+
+      - name: Run renderer benchmarks
+        run: make bench
 
       - name: Verify module on proxy.golang.org
-        run: GOPROXY=proxy.golang.org go list -m github.com/3-lines-studio/bifrost@${{ github.ref_name }}
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if GOPROXY=proxy.golang.org go list -m github.com/3-lines-studio/bifrost@${{ github.ref_name }}; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1

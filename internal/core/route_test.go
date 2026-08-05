@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"net/http"
 	"testing"
 )
@@ -66,6 +67,11 @@ func TestPageConfigFromRoute_RejectsInvalidRoute(t *testing.T) {
 		{name: "empty component", route: Page("/", "")},
 		{name: "blank component", route: Page("/", "  ")},
 		{name: "nil option", route: Page("/", "./page.tsx", nil)},
+		{name: "nil props loader", route: Page("/", "./page.tsx", WithLoader(nil))},
+		{name: "nil static data loader", route: Page("/", "./page.tsx", WithStaticData(nil))},
+		{name: "loader on client page", route: Page("/", "./page.tsx", WithClient(), WithLoader(func(*http.Request) (any, error) { return nil, nil }))},
+		{name: "loader on static page", route: Page("/", "./page.tsx", WithStatic(), WithLoader(func(*http.Request) (any, error) { return nil, nil }))},
+		{name: "redundant static options", route: Page("/", "./page.tsx", WithStatic(), WithStaticData(func(context.Context) ([]StaticPathData, error) { return nil, nil }))},
 	}
 
 	for _, tt := range tests {

@@ -10,7 +10,6 @@ type ManifestEntry struct {
 	CSS          string            `json:"css,omitempty"`
 	CSSFiles     []string          `json:"cssFiles,omitempty"`
 	Chunks       []string          `json:"chunks,omitempty"`
-	Static       bool              `json:"static,omitempty"`
 	SSR          string            `json:"ssr,omitempty"`
 	Mode         string            `json:"mode,omitempty"`
 	HTML         string            `json:"html,omitempty"`
@@ -19,7 +18,6 @@ type ManifestEntry struct {
 
 type Manifest struct {
 	Entries map[string]ManifestEntry `json:"entries"`
-	Chunks  map[string]string        `json:"chunks,omitempty"`
 }
 
 func ParseManifest(data []byte) (*Manifest, error) {
@@ -37,9 +35,6 @@ type ClientBuildResult struct {
 	CSSFiles    []string `json:"cssFiles,omitempty"`
 	Chunks      []string `json:"chunks,omitempty"`
 }
-
-// Assets is an alias for PageArtifacts (legacy name used across the codebase).
-type Assets = PageArtifacts
 
 func StylesheetHrefs(css string, cssFiles []string) []string {
 	seen := make(map[string]struct{})
@@ -59,11 +54,6 @@ func StylesheetHrefs(css string, cssFiles []string) []string {
 		add(u)
 	}
 	return out
-}
-
-// GetAssets is equivalent to ResolvePageArtifacts. Prefer ResolvePageArtifacts in new code.
-func GetAssets(man *Manifest, entryName string) Assets {
-	return ResolvePageArtifacts(man, entryName)
 }
 
 func HasSSREntries(man *Manifest) bool {

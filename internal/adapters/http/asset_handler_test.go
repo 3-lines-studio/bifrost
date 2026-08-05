@@ -17,6 +17,26 @@ var embeddedAssetFS embed.FS
 //go:embed .bifrost/public/app.js .bifrost/dist/app.js
 var embeddedPublicFS embed.FS
 
+func TestServeFileFromDiskRejectsEscapingSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/link.txt", nil)
+	if err := serveFileFromDisk(rec, req, root, "link.txt", "text/plain"); err == nil {
+		t.Fatal("expected rooted file access to reject an escaping symlink")
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("served data outside root: %q", rec.Body.String())
+	}
+}
+
 func TestCleanPath(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -244,33 +264,6 @@ func TestPublicHandler_EmbeddedFallbackOnMissing(t *testing.T) {
 
 	if w.Code != http.StatusTeapot {
 		t.Errorf("expected 418 fallback, got %d", w.Code)
-	}
-}
-
-func TestSafeEmbedPath(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  string
-		want   string
-		wantOK bool
-	}{
-		{"normal", "/pages/home.html", ".bifrost/pages/home.html", true},
-		{"traversal", "/../../../etc/passwd", "", false},
-		{"dot-dot", "..", "", false},
-		{"empty", "", "", false},
-		{"nested", "/pages/routes/blog/hello/index.html", ".bifrost/pages/routes/blog/hello/index.html", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, ok := safeEmbedPath(tt.input)
-			if ok != tt.wantOK {
-				t.Errorf("safeEmbedPath(%q) ok = %v, want %v", tt.input, ok, tt.wantOK)
-			}
-			if got != tt.want {
-				t.Errorf("safeEmbedPath(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
 	}
 }
 

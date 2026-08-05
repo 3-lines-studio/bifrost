@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
@@ -24,14 +23,6 @@ func cleanPath(raw string) (string, bool) {
 		return "", false
 	}
 	return cleaned, true
-}
-
-func safeEmbedPath(raw string) (string, bool) {
-	rel, ok := cleanPath(raw)
-	if !ok {
-		return "", false
-	}
-	return path.Join(".bifrost", rel), true
 }
 
 func containsDotDot(p string) bool {
@@ -109,18 +100,6 @@ func (h *PublicHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func isPathSafe(p, root string) bool {
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		return false
-	}
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return false
-	}
-	return abs == absRoot || strings.HasPrefix(abs, absRoot+string(filepath.Separator))
-}
-
 func serveBifrostFile(w http.ResponseWriter, req *http.Request, assetsFS embed.FS, cleaned string, fromEmbed bool, contentType string) error {
 	return serveProjectFile(w, req, assetsFS, ".bifrost", cleaned, fromEmbed, contentType)
 }
@@ -129,21 +108,29 @@ func serveProjectFile(w http.ResponseWriter, req *http.Request, assetsFS embed.F
 	if fromEmbed {
 		return serveFileFromEmbed(w, req, assetsFS, path.Join(root, cleaned), contentType)
 	}
-	return serveFileFromDisk(w, req, filepath.Join(root, cleaned), root, contentType)
+	return serveFileFromDisk(w, req, root, cleaned, contentType)
 }
 
-func serveFileFromDisk(w http.ResponseWriter, req *http.Request, fullPath string, root string, contentType string) error {
-	if !isPathSafe(fullPath, root) {
-		return os.ErrNotExist
+func serveFileFromDisk(w http.ResponseWriter, req *http.Request, rootPath string, cleaned string, contentType string) error {
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return err
 	}
+	defer func() { _ = root.Close() }()
 
-	info, err := os.Stat(fullPath)
+	file, err := root.Open(cleaned)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	info, err := file.Stat()
 	if err != nil || info.IsDir() {
 		return os.ErrNotExist
 	}
 
 	w.Header().Set("Content-Type", contentType)
-	http.ServeFile(w, req, fullPath)
+	http.ServeContent(w, req, info.Name(), info.ModTime(), file)
 	return nil
 }
 

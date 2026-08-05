@@ -194,6 +194,61 @@ func main() {
 	}
 }
 
+func TestScanFileForPagesRejectsInvalidOptionContracts(t *testing.T) {
+	tests := []struct {
+		name string
+		opts string
+	}{
+		{name: "loader on client page", opts: `bifrost.WithClient(), bifrost.WithLoader(load)`},
+		{name: "loader on static page", opts: `bifrost.WithStatic(), bifrost.WithLoader(load)`},
+		{name: "nil props loader", opts: `bifrost.WithLoader(nil)`},
+		{name: "nil static data loader", opts: `bifrost.WithStaticData(nil)`},
+		{name: "redundant static options", opts: `bifrost.WithStatic(), bifrost.WithStaticData(staticData)`},
+		{name: "non bifrost option", opts: `other.WithClient()`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := `package main
+import (
+    "context"
+    "net/http"
+    "github.com/3-lines-studio/bifrost"
+    other "example.com/other"
+)
+func load(*http.Request) (any, error) { return nil, nil }
+func staticData(context.Context) ([]bifrost.StaticPathData, error) { return nil, nil }
+func main() { _ = bifrost.Page("/", "./pages/home.tsx", ` + tt.opts + `) }
+`
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "main.go", src, parser.ParseComments)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := (&BuildService{}).scanFileForPages(fset, file); err == nil {
+				t.Fatal("expected invalid options to fail")
+			}
+		})
+	}
+}
+
+func TestScanFileForPagesRejectsDifferentClientAttrsForSharedComponent(t *testing.T) {
+	src := `package main
+import "github.com/3-lines-studio/bifrost"
+func main() {
+    _ = bifrost.Page("/first", "./pages/shared.tsx", bifrost.WithClient(), bifrost.WithHTMLLang("en"))
+    _ = bifrost.Page("/second", "./pages/shared.tsx", bifrost.WithClient(), bifrost.WithHTMLLang("fr"))
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "main.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := (&BuildService{}).scanFileForPages(fset, file); err == nil {
+		t.Fatal("expected client HTML attribute conflict")
+	}
+}
+
 func TestScanFileForPages_DeduplicatesPaths(t *testing.T) {
 	src := `package main
 import "github.com/3-lines-studio/bifrost"

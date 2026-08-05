@@ -17,10 +17,5 @@ function getProps() {
 const container = document.getElementById("app");
 if (container) {
 	const props = getProps();
-	const root = BIFROST_CLIENT_ROOT;
-	if ('requestIdleCallback' in window) {
-		requestIdleCallback(() => hydrateRoot(container, root), { timeout: 2000 });
-	} else {
-		setTimeout(() => hydrateRoot(container, root), 100);
-	}
+	hydrateRoot(container, BIFROST_CLIENT_ROOT);
 }

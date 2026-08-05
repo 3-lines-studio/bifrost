@@ -3,12 +3,16 @@ package process
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
@@ -178,6 +182,61 @@ func TestRendererSocketUsesPrivateTempDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(socketDir); !os.IsNotExist(err) {
 		t.Fatalf("socket directory still exists after Stop: %v", err)
+	}
+}
+
+func TestRendererExitsAndCleansSocketAfterParentExit(t *testing.T) {
+	if os.Getenv("BIFROST_PARENT_EXIT_HELPER") == "1" {
+		renderer, err := NewRenderer(core.ModeProd, RuntimeSource(core.ModeProd), "BIFROST_DEV=0")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		fmt.Printf("BIFROST_HELPER %d %s\n", renderer.cmd.Process.Pid, filepath.Dir(renderer.socket))
+		os.Exit(0)
+	}
+	if _, err := exec.LookPath("bun"); err != nil {
+		t.Skip("bun is not available")
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRendererExitsAndCleansSocketAfterParentExit$")
+	cmd.Env = append(os.Environ(), "BIFROST_PARENT_EXIT_HELPER=1")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helper failed: %v\n%s", err, output)
+	}
+	var childPID int
+	var socketDir string
+	for line := range strings.SplitSeq(string(output), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 3 || fields[0] != "BIFROST_HELPER" {
+			continue
+		}
+		childPID, err = strconv.Atoi(fields[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		socketDir = fields[2]
+	}
+	if childPID == 0 || socketDir == "" {
+		t.Fatalf("missing helper data in output: %s", output)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		process, findErr := os.FindProcess(childPID)
+		if findErr != nil || process.Signal(os.Signal(syscall.Signal(0))) != nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	process, _ := os.FindProcess(childPID)
+	if process != nil && process.Signal(os.Signal(syscall.Signal(0))) == nil {
+		_ = process.Kill()
+		t.Fatalf("renderer child %d survived parent exit", childPID)
+	}
+	if _, err := os.Stat(socketDir); !os.IsNotExist(err) {
+		t.Fatalf("renderer socket directory still exists: %v", err)
 	}
 }
 

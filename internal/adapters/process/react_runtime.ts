@@ -1,9 +1,40 @@
 import nodeFs from "fs";
+import nodeOs from "os";
 import nodePath from "path";
 
 const socket = process.env.BIFROST_SOCKET;
 const isDev =
   process.env.BIFROST_DEV === "1" || process.env.BIFROST_DEV === "true";
+
+let parentExitHandled = false;
+function exitAfterParent(): void {
+  if (parentExitHandled) return;
+  parentExitHandled = true;
+
+  const dirs = [nodePath.dirname(socket ?? "")];
+  try {
+    const configured = JSON.parse(process.env.BIFROST_CLEANUP_DIRS ?? "[]");
+    if (Array.isArray(configured)) dirs.push(...configured);
+  } catch {}
+
+  for (const dir of dirs) {
+    if (typeof dir !== "string") continue;
+    const resolved = nodePath.resolve(dir);
+    const base = nodePath.basename(resolved);
+    if (nodePath.dirname(resolved) !== nodePath.resolve(nodeOs.tmpdir())) continue;
+    if (!/^bifrost-(socket|runtime|ssr)-/.test(base)) continue;
+    try {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
+  }
+  process.exit(0);
+}
+
+const parentPID = process.ppid;
+const parentWatch = setInterval(() => {
+  if (process.ppid !== parentPID) exitAfterParent();
+}, 1000);
+parentWatch.unref();
 
 const tailwindPlugin: Bun.BunPlugin | undefined = BIFROST_TAILWIND_PLUGIN;
 const reactCompilerPlugin: Bun.BunPlugin | undefined = BIFROST_REACT_COMPILER_PLUGIN;

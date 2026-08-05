@@ -84,9 +84,10 @@ func NewRenderer(mode core.Mode, source string, extraEnv ...string) (*Renderer, 
 	})
 }
 
-func NewRendererFromExecutable(executablePath string, cleanup func()) (*Renderer, error) {
+func NewRendererFromExecutable(executablePath string, cleanup func(), extraEnv ...string) (*Renderer, error) {
 	return startRendererProcess(rendererProcessConfig{
 		command: []string{executablePath},
+		env:     extraEnv,
 		cleanup: cleanup,
 	})
 }
@@ -129,7 +130,10 @@ func startRendererProcess(cfg rendererProcessConfig) (*Renderer, error) {
 
 	cmd := exec.Command(cfg.command[0], cfg.command[1:]...)
 	cmd.Dir = cfg.cwd
-	cmd.Env = append(os.Environ(), append([]string{"BIFROST_SOCKET=" + socket}, cfg.env...)...)
+	cmd.Env = append(os.Environ(), append([]string{
+		"BIFROST_SOCKET=" + socket,
+		"BIFROST_CLEANUP_DIRS=[]",
+	}, cfg.env...)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if cfg.source != "" {

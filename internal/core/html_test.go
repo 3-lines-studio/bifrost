@@ -218,11 +218,11 @@ func TestRenderHTMLShell_WithChunks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(html, `src="/dist/chunk-a.js"`) {
-		t.Error("expected chunk-a script in output")
+	if strings.Contains(html, `<script src="/dist/chunk-a.js"`) {
+		t.Error("did not expect chunk-a to execute as a standalone module")
 	}
-	if !strings.Contains(html, `src="/dist/chunk-b.js"`) {
-		t.Error("expected chunk-b script in output")
+	if strings.Contains(html, `<script src="/dist/chunk-b.js"`) {
+		t.Error("did not expect chunk-b to execute as a standalone module")
 	}
 	head, _, ok := strings.Cut(html, "</head>")
 	if !ok {

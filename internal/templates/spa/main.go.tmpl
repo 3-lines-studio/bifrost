@@ -1,9 +1,15 @@
 package main
 
 import (
+	"context"
 	"embed"
+	"errors"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/3-lines-studio/bifrost"
 )
@@ -22,8 +28,24 @@ func main() {
 	defer app.Stop()
 
 	addr := ":8080"
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           app.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("server shutdown: %v", err)
+		}
+	}()
+
 	log.Printf("Server running on http://localhost%s", addr)
-	if err := http.ListenAndServe(addr, app.Handler()); err != nil {
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Printf("server stopped: %v", err)
 	}
 }

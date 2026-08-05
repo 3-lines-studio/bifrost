@@ -40,5 +40,17 @@ func PageConfigFromRoute(route Route) (PageConfig, error) {
 	if config.modeOptions == 3 {
 		return PageConfig{}, fmt.Errorf("bifrost: page %q has conflicting mode options", route.ComponentPath)
 	}
+	if config.optionFlags&optionLoader != 0 && config.PropsLoader == nil {
+		return PageConfig{}, fmt.Errorf("bifrost: page %q has a nil props loader", route.ComponentPath)
+	}
+	if config.optionFlags&optionStaticData != 0 && config.StaticDataLoader == nil {
+		return PageConfig{}, fmt.Errorf("bifrost: page %q has a nil static data loader", route.ComponentPath)
+	}
+	if config.optionFlags&(optionStatic|optionStaticData) == optionStatic|optionStaticData {
+		return PageConfig{}, fmt.Errorf("bifrost: page %q cannot use both WithStatic and WithStaticData", route.ComponentPath)
+	}
+	if config.optionFlags&optionLoader != 0 && config.Mode != ModeSSR {
+		return PageConfig{}, fmt.Errorf("bifrost: page %q can only use WithLoader in SSR mode", route.ComponentPath)
+	}
 	return config, nil
 }

@@ -9,7 +9,7 @@ Server-side rendering for React pages from Go: register routes, embed build outp
 ## Requirements
 
 - Linux or macOS (Bifrost uses Unix sockets; Windows is not supported)
-- [Go](https://go.dev/dl/) 1.26.5 or newer
+- [Go](https://go.dev/dl/) 1.26.0 or newer
 - [Bun](https://bun.sh) on the machine where you develop and where you run production builds; SSR production binaries embed the Bun runtime (static-only apps do not)
 
 ## Install
@@ -48,7 +48,9 @@ Hot reload on `.go` file changes with reverse proxy on `:3000` → `:8080`. Fron
 
 `bifrost build` exits non-zero if a required page or bundle fails. Build-scanned `Page` declarations must use string-literal component paths and direct Bifrost option calls; unsupported indirect forms fail with a clear error.
 
-Production `/dist/` assets are content-hashed and served with a one-year immutable cache policy.
+Production `/dist/` assets are content-hashed and served with a one-year immutable cache policy. Bifrost v1 uses one Bun renderer process per app.
+
+Use `http.Server` with graceful `SIGINT`/`SIGTERM` shutdown so deferred `app.Stop()` cleanup runs. Generated projects include this setup. The Bun child also watches its parent and exits if the Go process stops abruptly.
 
 `go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest` installs a binary named `bifrost`; run `bifrost init`, `bifrost dev`, `bifrost build`, or `bifrost doctor`.
 
@@ -68,7 +70,10 @@ API, page modes (`WithLoader`, `WithClient`, `WithStatic`, …), redirects, and 
 
 ```bash
 make check
+make bench
 ```
+
+See [RELEASING.md](RELEASING.md) for the v1 checklist and performance baseline.
 
 ## License
 

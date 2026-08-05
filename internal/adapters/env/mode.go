@@ -6,8 +6,6 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-const ExportMarkerPath = ".bifrost/.export-mode"
-
 func DetectAppMode() core.Mode {
 	if os.Getenv("BIFROST_EXPORT") == "1" {
 		return core.ModeExport
@@ -16,9 +14,4 @@ func DetectAppMode() core.Mode {
 		return core.ModeDev
 	}
 	return core.ModeProd
-}
-
-func IsExportMarkerPresent() bool {
-	_, err := os.Stat(ExportMarkerPath)
-	return err == nil
 }

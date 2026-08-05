@@ -21,15 +21,13 @@ type BuildError struct {
 
 type BuildService struct {
 	renderer         Renderer
-	fs               FileSystem
 	cli              CLIOutput
 	compileRuntimeFn func(bifrostDir string) error
 }
 
-func NewBuildService(renderer Renderer, fs FileSystem, cli CLIOutput) *BuildService {
+func NewBuildService(renderer Renderer, cli CLIOutput) *BuildService {
 	svc := &BuildService{
 		renderer: renderer,
-		fs:       fs,
 		cli:      cli,
 	}
 	svc.compileRuntimeFn = svc.compileEmbeddedRuntime

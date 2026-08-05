@@ -57,10 +57,16 @@ If a behavior can be implemented in Go with equivalent correctness, it must live
 package main
 
 import (
+    "context"
     "embed"
+    "errors"
     "log"
     "net/http"
-    
+    "os"
+    "os/signal"
+    "syscall"
+    "time"
+
     "github.com/3-lines-studio/bifrost"
 )
 
@@ -71,7 +77,7 @@ func main() {
     // Create Bifrost app
     app, err := bifrost.New(
         bifrostFS,
-        bifrost.Page("/", "./pages/home.tsx", 
+        bifrost.Page("/{$}", "./pages/home.tsx",
             bifrost.WithLoader(func(req *http.Request) (any, error) {
                 return map[string]any{
                     "name": "World",
@@ -84,12 +90,25 @@ func main() {
         log.Fatalf("create app: %v", err)
     }
     defer app.Stop()
-    
-    // Setup API routes
+
     api := http.NewServeMux()
-    
-    // Start server. Return from main so deferred cleanup runs.
-    if err := http.ListenAndServe(":8080", app.Wrap(api)); err != nil {
+    server := &http.Server{
+        Addr:              ":8080",
+        Handler:           app.Wrap(api),
+        ReadHeaderTimeout: 5 * time.Second,
+    }
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+    go func() {
+        <-ctx.Done()
+        shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+        if err := server.Shutdown(shutdownCtx); err != nil {
+            log.Printf("server shutdown: %v", err)
+        }
+    }()
+
+    if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
         log.Printf("server stopped: %v", err)
     }
 }
@@ -155,7 +174,7 @@ Bifrost v1 supports React. Use `.tsx` components with `bifrost.New()`:
 
 ```go
 app, err := bifrost.New(bifrostFS,
-    bifrost.Page("/", "./pages/home.tsx",
+    bifrost.Page("/{$}", "./pages/home.tsx",
         bifrost.WithLoader(func(req *http.Request) (any, error) {
             return map[string]any{"name": "World"}, nil
         }),
@@ -233,6 +252,8 @@ func WithHTMLLang(lang string) PageOption
 func WithHTMLClass(class string) PageOption
 ```
 
+`WithLoader` is valid only for SSR pages. Bifrost rejects loaders on client-only or static pages, nil loaders, and combining `WithStatic` with `WithStaticData`.
+
 **App options** (use `NewWithOptions(assets, []bifrost.ConfigOption{...}, pages...)`):
 
 ```go
@@ -276,7 +297,7 @@ api := chi.NewRouter()
 // ... add API routes
 
 handler := app.Wrap(api)
-http.ListenAndServe(":8080", handler)
+// Use handler with an http.Server that handles graceful signal shutdown.
 ```
 
 **Without API router:**
@@ -288,7 +309,8 @@ func (app *App) Handler() http.Handler
 Returns an http.Handler that serves only Bifrost pages and assets (no custom API routes).
 
 ```go
-http.ListenAndServe(":8080", app.Handler())
+handler := app.Handler()
+// Use handler with an http.Server that handles graceful signal shutdown.
 ```
 
 ## Route Table
@@ -317,14 +339,14 @@ The table prints only when stdout is a terminal. Control it with environment var
 Render React components on each request with dynamic data:
 
 ```go
-bifrost.Page("/user/{id}", "./pages/user.tsx", 
+bifrost.Page("/user/{id}", "./pages/user.tsx",
     bifrost.WithLoader(func(req *http.Request) (any, error) {
         userID := chi.URLParam(req, "id")
         user, err := db.GetUser(userID)
         if err != nil {
             return nil, err
         }
-        
+
         return map[string]any{
             "user": user,
         }, nil
@@ -351,10 +373,12 @@ bifrost.Page("/admin", "./pages/admin.tsx", bifrost.WithClient())
 ```
 
 Characteristics:
-- Empty `<div id="app"></div>` shell HTML
+- Empty `<div id="app"></div>` shell HTML in development and production
 - JavaScript bundles for client-side rendering
-- No Bun runtime needed to serve
-- Component renders entirely on client
+- No Bun runtime or server-rendered `Head` output
+- Component renders entirely on the client
+
+Use SSR or static prerender when a page needs server-rendered metadata or SEO.
 
 **Use cases:**
 - Admin dashboards
@@ -429,7 +453,7 @@ Go passes data to components via the props loader:
 
 ```go
 // Go
-bifrost.Page("/", "./pages/home.tsx", 
+bifrost.Page("/{$}", "./pages/home.tsx",
     bifrost.WithLoader(func(req *http.Request) (any, error) {
         return map[string]any{
             "message": "Hello from Go!",
@@ -461,7 +485,7 @@ type HomeProps struct {
     Count   int    `json:"count"`
 }
 
-bifrost.Page("/", "./pages/home.tsx",
+bifrost.Page("/{$}", "./pages/home.tsx",
     bifrost.WithLoader(func(req *http.Request) (any, error) {
         return HomeProps{
             Message: "Hello from Go!",
@@ -503,12 +527,11 @@ The interface is:
 
 ```go
 type RedirectError interface {
+    error
     RedirectURL() string
     RedirectStatusCode() int
 }
 ```
-
-Implementations should also satisfy `error` (typically via an `Error()` method) because loaders return `(any, error)`.
 
 ### Production Errors
 
@@ -608,7 +631,7 @@ The build scan accepts direct `bifrost.Page()` calls with:
 - a string-literal component path, such as `"./pages/home.tsx"`
 - direct Bifrost option calls, such as `bifrost.WithClient()`
 
-Indirect component paths (`Page("/", homePath)`) and expanded option slices (`opts...`) fail with a clear build error. This prevents the build from silently omitting or misclassifying a page. A component may back several routes, but every route using that component must use the same page mode.
+Indirect component paths (`Page("/{$}", homePath)`) and expanded option slices (`opts...`) fail with a clear build error. This prevents the build from silently omitting or misclassifying a page. A component may back several routes, but every route using that component must use the same page mode. Shared client-only routes must also use the same document language and class because they share one HTML shell.
 
 **Build Pipeline:**
 
@@ -618,7 +641,7 @@ Indirect component paths (`Page("/", homePath)`) and expanded option slices (`op
 4. Build SSR bundles and client JS/CSS
 5. Generate client-only HTML shells
 6. Compile the embedded Bun runtime when SSR or static export needs it
-7. Export static-prerender routes
+7. Export static-prerender routes and remove their build-only SSR bundles
 8. Copy `public/` assets and write `manifest.json`
 9. Exit non-zero if any required page or bundle fails
 
@@ -685,6 +708,14 @@ bifrost build ./cmd/admin/main.go   # → cmd/admin/.bifrost/
 ```
 
 Each build writes only to its own `dir(main.go)/.bifrost/`. No collision — even within a single Go module. `bifrost.Page()` calls in imported packages (e.g. `internal/shared/routes.go`) are discovered automatically via import-graph traversal.
+
+### Runtime concurrency
+
+Bifrost v1 runs one Bun renderer process per app. React's synchronous SSR work runs in that process. Prefer static prerender for high-volume pages; add a measured worker pool only if production load requires it.
+
+### Route patterns
+
+Patterns follow the wrapped router. With the built-in `http.ServeMux`, `"/"` is a subtree route and catches unmatched paths. Use `"/{$}"` for the exact root path. Static export supports literal segments, Go `{name}` and `{name...}` wildcards, Chi-style `:name`, `*`, and trailing-slash subtrees.
 
 ## Best Practices
 

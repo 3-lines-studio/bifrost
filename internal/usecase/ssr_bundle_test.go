@@ -78,6 +78,37 @@ func TestNormalizeSSRBundleErrorsWhenMultipleNestedOutputsExist(t *testing.T) {
 	}
 }
 
+func TestCompileDevPageOnDemandSkipsSSRForClientOnlyPage(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "export function Page(){ return <div>Hello</div> }")
+
+	ssrBuilds := 0
+	renderer := &fakeRenderer{
+		buildFn: func(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+			return map[string]core.ClientBuildResult{entryNames[0]: {Script: "/dist/page.js"}}, nil
+		},
+		buildSSRFn: func(entrypoints []string, outdir string) error {
+			ssrBuilds++
+			return nil
+		},
+	}
+
+	err := CompileDevPageOnDemand(renderer, tmpDir, "pages-home-entry", core.PageConfig{
+		ComponentPath: "./pages/home.tsx",
+		Mode:          core.ModeClientOnly,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ssrBuilds != 0 {
+		t.Fatalf("SSR builds = %d, want 0", ssrBuilds)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, ".bifrost", "ssr")); !os.IsNotExist(err) {
+		t.Fatalf("client-only compile created SSR output: %v", err)
+	}
+}
+
 func TestCompileDevPageOnDemandNormalizesNestedSSRBundle(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()

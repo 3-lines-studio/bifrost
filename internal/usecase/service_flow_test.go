@@ -69,7 +69,7 @@ func TestPageServiceDevSSRBuildsThenRenders(t *testing.T) {
 			return core.RenderedPage{Head: "<title>Home</title>", Body: "<div>Hello</div>"}, nil
 		},
 	}
-	service := NewPageService(renderer, nil)
+	service := NewPageService(renderer)
 
 	restore := chdirForTest(t, tmpDir)
 	defer restore()
@@ -115,7 +115,7 @@ func TestPageServiceStaticPrerenderReturnsNotFoundForMissingPath(t *testing.T) {
 			return nil
 		},
 	}
-	service := NewPageService(renderer, nil)
+	service := NewPageService(renderer)
 
 	restore := chdirForTest(t, tmpDir)
 	defer restore()
@@ -170,7 +170,7 @@ func main() {
 			}, nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{})
+	service := NewBuildService(renderer, &mockCLIOutput{})
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "main.go"),
@@ -230,7 +230,7 @@ func main() {
 			}, nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{})
+	service := NewBuildService(renderer, &mockCLIOutput{})
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "main.go"),
@@ -283,7 +283,7 @@ func main() {
 			}, nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{})
+	service := NewBuildService(renderer, &mockCLIOutput{})
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(appRoot, "main.go"),
@@ -419,7 +419,7 @@ func main() {
 			return nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{})
+	service := NewBuildService(renderer, &mockCLIOutput{})
 	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
@@ -478,7 +478,7 @@ func main() {
 			return nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{})
+	service := NewBuildService(renderer, &mockCLIOutput{})
 	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
@@ -524,7 +524,7 @@ func main() {
 			return nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{})
+	service := NewBuildService(renderer, &mockCLIOutput{})
 	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
@@ -550,8 +550,8 @@ func main() {
 
 func writeGoModWithBifrost(t *testing.T, dir string) {
 	t.Helper()
-	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\n\ngo 1.26.5\n\nrequire github.com/3-lines-studio/bifrost v0.0.0\n\nreplace github.com/3-lines-studio/bifrost => ./bifrost_stub\n")
-	writeTestFile(t, filepath.Join(dir, "bifrost_stub", "go.mod"), "module github.com/3-lines-studio/bifrost\n\ngo 1.26.5\n")
+	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\n\ngo 1.26.0\n\nrequire github.com/3-lines-studio/bifrost v0.0.0\n\nreplace github.com/3-lines-studio/bifrost => ./bifrost_stub\n")
+	writeTestFile(t, filepath.Join(dir, "bifrost_stub", "go.mod"), "module github.com/3-lines-studio/bifrost\n\ngo 1.26.0\n")
 	writeTestFile(t, filepath.Join(dir, "bifrost_stub", "bifrost.go"), `package bifrost
 
 type Route struct{}
@@ -612,7 +612,7 @@ func Register() {
 			return result, nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{})
+	service := NewBuildService(renderer, &mockCLIOutput{})
 	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
@@ -657,7 +657,7 @@ func main() {
 			return result, nil
 		},
 	}
-	service := NewBuildService(renderer, nil, &mockCLIOutput{})
+	service := NewBuildService(renderer, &mockCLIOutput{})
 	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
@@ -692,7 +692,7 @@ func main() {
 	_ = bifrost.Page("/", "./pages/home.tsx", bifrost.WithClient())
 }`)
 
-	service := NewBuildService(&fakeRenderer{}, nil, &mockCLIOutput{})
+	service := NewBuildService(&fakeRenderer{}, &mockCLIOutput{})
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "main.go"),
 		ModuleRoot: tmpDir,

@@ -230,7 +230,12 @@ func runDev(args []string) {
 			output.PrintWarning("App exited (code %d) — saving a .go file will restart", code)
 			mc = nil
 
-		case <-goChanges:
+		case _, ok := <-goChanges:
+			if !ok {
+				goChanges = nil
+				output.PrintWarning("Go file watcher stopped")
+				continue
+			}
 			output.PrintStep("", "Go file changed — rebuilding...")
 			if err := goBuild(goModRoot, mainFileAbs, binPath); err != nil {
 				output.PrintError("Rebuild failed — keeping previous binary running")
@@ -249,7 +254,12 @@ func runDev(args []string) {
 				}
 			}
 
-		case <-feChanges:
+		case _, ok := <-feChanges:
+			if !ok {
+				feChanges = nil
+				output.PrintWarning("Frontend file watcher stopped")
+				continue
+			}
 			output.PrintStep("", "Frontend change — reload browser")
 			proxy.BroadcastReload()
 

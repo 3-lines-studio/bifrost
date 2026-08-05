@@ -1,6 +1,6 @@
 module github.com/3-lines-studio/bifrost/test/e2e
 
-go 1.26.5
+go 1.26.0
 
 require (
 	github.com/3-lines-studio/bifrost v0.0.0

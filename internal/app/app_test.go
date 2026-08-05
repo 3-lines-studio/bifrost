@@ -92,6 +92,20 @@ func TestNewRejectsMixedModesForSharedComponent(t *testing.T) {
 	}
 }
 
+func TestAddRoutesRejectsDifferentClientDocumentAttrsForSharedComponent(t *testing.T) {
+	a := &App{pageConfigs: make(map[string]*core.PageConfig)}
+	err := a.addRoutes([]core.Route{
+		core.Page("/first", "./shared.tsx", core.WithClient(), core.WithHTMLLang("en")),
+		core.Page("/second", "./shared.tsx", core.WithClient(), core.WithHTMLLang("fr")),
+	})
+	if err == nil || !strings.Contains(err.Error(), "different HTML attributes") {
+		t.Fatalf("addRoutes() error = %v, want client attribute conflict", err)
+	}
+	if len(a.routes) != 0 {
+		t.Fatal("failed route batch changed app routes")
+	}
+}
+
 func TestNewRejectsConflictingPageOptions(t *testing.T) {
 	t.Setenv("BIFROST_EXPORT", "1")
 
