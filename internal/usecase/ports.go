@@ -13,6 +13,10 @@ type Renderer interface {
 	BuildSSR(entrypoints []string, outdir string) error
 }
 
+type ssrRegistryBuilder interface {
+	BuildSSRRegistry(entrypoints []string, outdir string) (string, map[string]string, error)
+}
+
 type contextRenderer interface {
 	RenderContext(ctx context.Context, componentPath string, props any) (core.RenderedPage, error)
 }

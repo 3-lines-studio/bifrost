@@ -4,7 +4,7 @@ Server-side rendering for React components in Go.
 
 ## Overview
 
-Bifrost bridges Go backends with React frontends using Bun for SSR. It features a clean architecture with strict separation between development and production modes.
+Bifrost bridges Go backends with React frontends. Sobek is the default in-process JavaScript backend; Bun is an optional higher-throughput backend.
 
 ## Installation
 
@@ -13,12 +13,13 @@ go get github.com/3-lines-studio/bifrost
 go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest
 ```
 
-Requires [Bun](https://bun.sh) to be installed.
+Install JavaScript packages in `node_modules` with npm, pnpm, Bun, or another package manager.
 
-**Runtime Requirements:**
-- **Development**: Always requires Bun
-- **Production with SSR**: Bun runtime is embedded automatically (no system Bun required)
-- **Production static-only**: No Bun runtime included
+**Runtime requirements:**
+- **Default development and builds**: Pure Go with Sobek; Bun is not required
+- **Default production SSR**: Sobek runs inside the Go process
+- **Optional Bun backend**: Bun is required during development and builds; its runtime is embedded in production binaries
+- **Production static-only**: No JavaScript runtime is active after export
 
 ## Architecture
 
@@ -27,8 +28,10 @@ Bifrost is organized into focused internal packages:
 - `internal/core` — Shared types (`PageConfig`, `PropsLoader`, `RedirectError`), manifest and HTML shell, page routing decisions, critical CSS, MIME/path helpers
 - `internal/usecase` — Build and page-serve orchestration (wiring core to adapters)
 - `internal/adapters/http` — Page and asset HTTP handlers
-- `internal/adapters/process` — Bun renderer process and bundle IPC
-- `internal/adapters/runtime` — Renderer host lifecycle and embedded runtime
+- `internal/adapters/process` — Optional Bun renderer process and bundle IPC
+- `internal/adapters/esbuild` — Default esbuild-Go and Tailwind build pipeline
+- `internal/adapters/sobek` — Default in-process JavaScript renderer and worker pool
+- `internal/adapters/runtime` — Backend selection and renderer lifecycle
 - `internal/adapters/fs` — Filesystem and embed abstractions
 - `internal/adapters/react` — React entry templates and runtime source
 - `internal/adapters/cli` — Terminal output and build reports
@@ -36,13 +39,9 @@ Bifrost is organized into focused internal packages:
 
 ### Go vs TypeScript Boundary
 
-TypeScript is intentionally minimal in Bifrost.
+TypeScript is intentionally minimal in Bifrost. The default Sobek backend uses Go for build orchestration, esbuild, Tailwind scanning, runtime pooling, and IPC-free rendering. TypeScript remains only in generated React entries and the optional Bun adapter.
 
-- TypeScript is only for Bun-specific capabilities that Go does not provide directly:
-  - rendering React components inside the Bun runtime
-  - invoking `Bun.build`
-  - serializing raw render/build results back to Go
-- Everything else belongs in Go:
+- Behavior shared by both backends belongs in Go:
   - build orchestration and fallback behavior
   - manifest generation
   - artifact path normalization
@@ -559,7 +558,7 @@ In development mode (`BIFROST_DEV=1`), Bifrost renders rich, structured error pa
 - **Stack traces** — Full JavaScript stack trace in an expandable details section
 - **Sub-errors** — Individual error details from `Bun.build` logs, each with its own file location
 - **Import info** — Specifier and referrer for module resolution failures
-- **Next steps** — Context-specific guidance (e.g. run `bun install`, verify import paths)
+- **Next steps** — Context-specific guidance such as installing JavaScript packages or verifying import paths
 
 **Error flow:**
 
@@ -711,20 +710,25 @@ Each build writes only to its own `dir(main.go)/.bifrost/`. No collision — eve
 
 ### Runtime concurrency
 
-Bun remains the default and runs one renderer process per app. React's synchronous SSR work runs in that process.
-
-An experimental independent Sobek build and render backend is available:
+Sobek is the default and uses an in-process worker pool:
 
 ```bash
-BIFROST_JS_RUNTIME=sobek BIFROST_SOBEK_WORKERS=4 bifrost build ./main.go
-BIFROST_JS_RUNTIME=sobek BIFROST_SOBEK_WORKERS=4 ./app
+bifrost build ./main.go
+BIFROST_SOBEK_WORKERS=4 ./app
 ```
 
-Sobek uses esbuild's Go API for React SSR bundles, hydration bundles, code splitting, CSS imports, source maps, and production asset hashes. Tailwind's official JavaScript compiler runs inside Sobek; Bifrost scans the esbuild source graph in Go instead of loading Tailwind's native Node scanner. Bun is not started or required by a Sobek build. JavaScript packages must already exist in `node_modules`; use npm, pnpm, or another package installer if Bun is unavailable.
+Select Bun explicitly when maximum SSR throughput matters more than binary size and memory use:
+
+```bash
+BIFROST_JS_RUNTIME=bun bifrost build ./main.go
+BIFROST_JS_RUNTIME=bun ./app
+```
+
+Sobek uses esbuild's Go API for React SSR bundles, hydration bundles, code splitting, CSS imports, source maps, and production asset hashes. Production pages share one lazily initialized SSR registry, which deduplicates React and shared modules while keeping import failures isolated to the selected page. Tailwind's official JavaScript compiler runs inside Sobek; Bifrost scans the esbuild source graph in Go instead of loading Tailwind's native Node scanner. Bun is not started or required by a Sobek build. JavaScript packages must already exist in `node_modules`; use npm, pnpm, or another package installer if Bun is unavailable.
 
 Sobek removes the production child process and embedded Bun executable. It uses a pool of isolated JavaScript runtimes because one Sobek runtime is not goroutine-safe. The default worker count is `min(GOMAXPROCS, 4)`; set `BIFROST_SOBEK_WORKERS` only after load testing. Each worker loads its own copy of each used SSR bundle, trading memory for throughput.
 
-The manifest records the selected runtime, so a production binary built from Sobek assets selects Sobek when `BIFROST_JS_RUNTIME` is unset. An explicit runtime environment value overrides the manifest and must match the built assets. React Compiler transforms currently run only in Bun builds; Sobek preserves React behavior but omits that optional optimization. Asynchronous JavaScript SSR that leaves a Promise pending is unsupported; load data in Go and pass it as props. Prefer static prerender for high-volume pages.
+The manifest records the selected runtime, so a production binary built from Sobek assets selects Sobek when `BIFROST_JS_RUNTIME` is unset. An explicit runtime environment value overrides the manifest and must match the built assets. `bifrost build --go-build` applies the measured Sobek PGO profile by default; set `BIFROST_SOBEK_PGO=off` to disable it or set the variable to a profile path to replace it. React Compiler transforms currently run only in Bun builds; Sobek preserves React behavior but omits that optional optimization. Asynchronous JavaScript SSR that leaves a Promise pending is unsupported; load data in Go and pass it as props. Prefer static prerender for high-volume pages.
 
 ### Route patterns
 

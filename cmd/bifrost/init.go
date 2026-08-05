@@ -82,7 +82,7 @@ func runInit(args []string) {
 	fmt.Println()
 	fmt.Printf("  cd %s\n", absProjectDir)
 	fmt.Printf("  go mod tidy\n")
-	fmt.Printf("  bun install\n")
+	fmt.Printf("  npm install --legacy-peer-deps\n")
 	fmt.Printf("  bifrost dev ./main.go\n")
 	fmt.Println()
 }

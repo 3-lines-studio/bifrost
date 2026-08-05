@@ -210,7 +210,7 @@ func buildReactEngineFixture(tb testing.TB, format api.Format) []byte {
 		"react-dom-server-legacy.browser.production.js",
 	)
 	if _, err := os.Stat(legacyRenderer); err != nil {
-		tb.Skipf("React fixture dependencies are unavailable; run 'cd example && bun install': %v", err)
+		tb.Skipf("React fixture dependencies are unavailable; install example packages: %v", err)
 	}
 
 	result := api.Build(api.BuildOptions{

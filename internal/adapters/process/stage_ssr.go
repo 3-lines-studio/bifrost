@@ -29,20 +29,27 @@ func StageSSRBundles(read ReadSSRBundle, manifest *core.Manifest) (tempDir strin
 		_ = os.RemoveAll(tempDir)
 	}
 
+	staged := make(map[string]struct{})
 	for entryName, entry := range manifest.Entries {
 		if entry.SSR == "" {
 			continue
 		}
-		if _, pathErr := cleanSSRBundlePath(entry.SSR); pathErr != nil {
+		clean, pathErr := cleanSSRBundlePath(entry.SSR)
+		if pathErr != nil {
 			cleanup()
 			return "", nil, fmt.Errorf("invalid SSR bundle path for %s: %w", entryName, pathErr)
 		}
-		data, rerr := read(entry.SSR)
+		if _, ok := staged[clean]; ok {
+			continue
+		}
+		staged[clean] = struct{}{}
+		manifestBundlePath := "/" + clean
+		data, rerr := read(manifestBundlePath)
 		if rerr != nil {
 			cleanup()
 			return "", nil, fmt.Errorf("failed to read SSR bundle %s: %w", entry.SSR, rerr)
 		}
-		destPath := ResolveStagedSSRBundlePath(tempDir, entry.SSR)
+		destPath := filepath.Join(tempDir, filepath.FromSlash(clean))
 		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 			cleanup()
 			return "", nil, fmt.Errorf("failed to create SSR dest dir: %w", err)
@@ -63,13 +70,26 @@ func ResolveStagedSSRBundlePath(tempDir string, manifestSSRPath string) string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(tempDir, filepath.FromSlash(clean))
+	resolved := filepath.Join(tempDir, filepath.FromSlash(clean))
+	if fragment := ssrBundleFragment(manifestSSRPath); fragment != "" {
+		resolved += "#" + fragment
+	}
+	return resolved
 }
 
 func cleanSSRBundlePath(manifestSSRPath string) (string, error) {
-	clean := path.Clean(strings.TrimLeft(filepath.ToSlash(manifestSSRPath), "/"))
+	pathPart := strings.SplitN(manifestSSRPath, "#", 2)[0]
+	clean := path.Clean(strings.TrimLeft(filepath.ToSlash(pathPart), "/"))
 	if clean == "." || !strings.HasPrefix(clean, "ssr/") {
 		return "", fmt.Errorf("path %q must stay under /ssr", manifestSSRPath)
 	}
 	return clean, nil
+}
+
+func ssrBundleFragment(manifestSSRPath string) string {
+	parts := strings.SplitN(manifestSSRPath, "#", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	return parts[1]
 }

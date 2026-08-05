@@ -23,11 +23,19 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-const renderTimeout = 30 * time.Second
+const (
+	renderTimeout      = 30 * time.Second
+	prebuiltIIFEMarker = "/* bifrost:sobek-iife */"
+	prebuiltIIFEGlobal = "__BIFROST_SSR__"
+)
 
 type Builder interface {
 	Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error)
 	BuildSSR(entrypoints []string, outdir string) error
+}
+
+type registryBuilder interface {
+	BuildSSRRegistry(entrypoints []string, outdir string) (string, map[string]string, error)
 }
 
 type Renderer struct {
@@ -39,14 +47,25 @@ type Renderer struct {
 }
 
 type worker struct {
-	vm      *js.Runtime
-	parse   js.Callable
-	modules map[string]loadedModule
+	vm        *js.Runtime
+	parse     js.Callable
+	modules   map[string]loadedModule
+	evaluated map[string]evaluatedModule
 }
 
 type loadedModule struct {
 	version [sha256.Size]byte
 	render  js.Callable
+}
+
+type evaluatedModule struct {
+	version [sha256.Size]byte
+	exports *js.Object
+}
+
+type renderTarget struct {
+	path       string
+	exportName string
 }
 
 type compiledModule struct {
@@ -99,9 +118,10 @@ func newWorker() (*worker, error) {
 		return nil, fmt.Errorf("JSON.parse is not callable")
 	}
 	return &worker{
-		vm:      vm,
-		parse:   parse,
-		modules: make(map[string]loadedModule),
+		vm:        vm,
+		parse:     parse,
+		modules:   make(map[string]loadedModule),
+		evaluated: make(map[string]evaluatedModule),
 	}, nil
 }
 
@@ -176,7 +196,10 @@ func (r *Renderer) RenderContext(ctx context.Context, path string, props any) (c
 	if path == "" {
 		return core.RenderedPage{}, fmt.Errorf("missing SSR bundle path")
 	}
-	path = filePath(path)
+	target, err := parseRenderTarget(path)
+	if err != nil {
+		return core.RenderedPage{}, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, renderTimeout)
 	defer cancel()
@@ -189,11 +212,11 @@ func (r *Renderer) RenderContext(ctx context.Context, path string, props any) (c
 	}
 	defer func() { r.workers <- w }()
 
-	module, err := r.modules.load(path, r.mode == core.ModeDev)
+	module, err := r.modules.load(target.path, r.mode == core.ModeDev)
 	if err != nil {
 		return core.RenderedPage{}, err
 	}
-	render, err := w.load(module)
+	render, err := w.load(module, target.exportName)
 	if err != nil {
 		return core.RenderedPage{}, structuredRenderError(err)
 	}
@@ -307,12 +330,20 @@ func structuredRenderError(err error) error {
 	}
 }
 
-func filePath(value string) string {
+func parseRenderTarget(value string) (renderTarget, error) {
 	parsed, err := url.Parse(value)
-	if err == nil && parsed.Scheme == "file" {
-		return parsed.Path
+	if err != nil {
+		return renderTarget{}, fmt.Errorf("parse SSR bundle path: %w", err)
 	}
-	return value
+	path := strings.SplitN(value, "#", 2)[0]
+	if parsed.Scheme == "file" {
+		path = parsed.Path
+	}
+	exportName, err := url.PathUnescape(parsed.Fragment)
+	if err != nil {
+		return renderTarget{}, fmt.Errorf("parse SSR export name: %w", err)
+	}
+	return renderTarget{path: path, exportName: exportName}, nil
 }
 
 func (c *moduleCache) load(path string, reload bool) (compiledModule, error) {
@@ -335,20 +366,25 @@ func (c *moduleCache) load(path string, reload bool) (compiledModule, error) {
 		return module, nil
 	}
 
-	pathHash := sha256.Sum256([]byte(path))
-	globalName := "BifrostSSR_" + hex.EncodeToString(pathHash[:8])
-	transformed := api.Transform(string(source), api.TransformOptions{
-		Format:       api.FormatIIFE,
-		GlobalName:   globalName,
-		Target:       api.ES2015,
-		MinifySyntax: true,
-		Sourcefile:   path,
-		Sourcemap:    api.SourceMapInline,
-	})
-	if len(transformed.Errors) > 0 {
-		return compiledModule{}, fmt.Errorf("transform SSR bundle %q: %s", path, formatBuildMessages(transformed.Errors))
+	globalName := prebuiltIIFEGlobal
+	compiledSource := source
+	if !bytes.HasPrefix(bytes.TrimSpace(source), []byte(prebuiltIIFEMarker)) {
+		pathHash := sha256.Sum256([]byte(path))
+		globalName = "BifrostSSR_" + hex.EncodeToString(pathHash[:8])
+		transformed := api.Transform(string(source), api.TransformOptions{
+			Format:       api.FormatIIFE,
+			GlobalName:   globalName,
+			Target:       api.ES2015,
+			MinifySyntax: true,
+			Sourcefile:   path,
+			Sourcemap:    api.SourceMapInline,
+		})
+		if len(transformed.Errors) > 0 {
+			return compiledModule{}, fmt.Errorf("transform SSR bundle %q: %s", path, formatBuildMessages(transformed.Errors))
+		}
+		compiledSource = transformed.Code
 	}
-	program, err := js.Compile(path, string(transformed.Code), true)
+	program, err := js.Compile(path, string(compiledSource), true)
 	if err != nil {
 		return compiledModule{}, fmt.Errorf("compile SSR bundle %q: %w", path, err)
 	}
@@ -424,22 +460,59 @@ func formatBuildMessages(messages []api.Message) string {
 	return out.String()
 }
 
-func (w *worker) load(module compiledModule) (js.Callable, error) {
-	if loaded, ok := w.modules[module.key]; ok && loaded.version == module.version {
+func (w *worker) load(module compiledModule, exportName string) (js.Callable, error) {
+	targetKey := module.key + "#" + exportName
+	if loaded, ok := w.modules[targetKey]; ok && loaded.version == module.version {
 		return loaded.render, nil
 	}
-	if _, err := w.vm.RunProgram(module.program); err != nil {
-		return nil, fmt.Errorf("evaluate SSR bundle: %w", err)
+
+	evaluated, ok := w.evaluated[module.key]
+	if !ok || evaluated.version != module.version {
+		if _, err := w.vm.RunProgram(module.program); err != nil {
+			return nil, fmt.Errorf("evaluate SSR bundle: %w", err)
+		}
+		exports := w.vm.Get(module.globalName)
+		if js.IsUndefined(exports) || js.IsNull(exports) {
+			return nil, fmt.Errorf("SSR bundle did not define %s", module.globalName)
+		}
+		evaluated = evaluatedModule{version: module.version, exports: exports.ToObject(w.vm)}
+		w.evaluated[module.key] = evaluated
+		for key := range w.modules {
+			if strings.HasPrefix(key, module.key+"#") {
+				delete(w.modules, key)
+			}
+		}
 	}
-	exports := w.vm.Get(module.globalName)
-	if js.IsUndefined(exports) || js.IsNull(exports) {
-		return nil, fmt.Errorf("SSR bundle did not define %s", module.globalName)
+
+	renderValue := evaluated.exports.Get("render")
+	if exportName != "" {
+		loaders := evaluated.exports.Get("loaders")
+		if loaders != nil && !js.IsUndefined(loaders) && !js.IsNull(loaders) {
+			loader, callable := js.AssertFunction(loaders.ToObject(w.vm).Get(exportName))
+			if !callable {
+				return nil, fmt.Errorf("SSR registry did not export loader %q", exportName)
+			}
+			var err error
+			renderValue, err = loader(js.Undefined())
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			renders := evaluated.exports.Get("renders")
+			if renders == nil || js.IsUndefined(renders) || js.IsNull(renders) {
+				return nil, fmt.Errorf("SSR registry did not export loaders or renders")
+			}
+			renderValue = renders.ToObject(w.vm).Get(exportName)
+		}
 	}
-	render, ok := js.AssertFunction(exports.ToObject(w.vm).Get("render"))
+	render, ok := js.AssertFunction(renderValue)
 	if !ok {
+		if exportName != "" {
+			return nil, fmt.Errorf("SSR registry did not export render %q", exportName)
+		}
 		return nil, fmt.Errorf("SSR bundle did not export render")
 	}
-	w.modules[module.key] = loadedModule{version: module.version, render: render}
+	w.modules[targetKey] = loadedModule{version: module.version, render: render}
 	return render, nil
 }
 
@@ -448,6 +521,14 @@ func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []strin
 		return nil, fmt.Errorf("sobek renderer has no build adapter")
 	}
 	return r.builder.Build(entrypoints, outdir, entryNames)
+}
+
+func (r *Renderer) BuildSSRRegistry(entrypoints []string, outdir string) (string, map[string]string, error) {
+	builder, ok := r.builder.(registryBuilder)
+	if !ok {
+		return "", nil, fmt.Errorf("sobek build adapter does not support an SSR registry")
+	}
+	return builder.BuildSSRRegistry(entrypoints, outdir)
 }
 
 func (r *Renderer) BuildSSR(entrypoints []string, outdir string) error {

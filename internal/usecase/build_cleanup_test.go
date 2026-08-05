@@ -49,6 +49,40 @@ func TestRemoveStaticSSRBundlesKeepsRuntimeSSRPages(t *testing.T) {
 	}
 }
 
+func TestRemoveStaticSSRBundlesKeepsSharedRegistryForLivePage(t *testing.T) {
+	root := t.TempDir()
+	ssrDir := filepath.Join(root, "ssr")
+	if err := os.MkdirAll(ssrDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	registry := filepath.Join(ssrDir, "registry.js")
+	if err := os.WriteFile(registry, []byte("registry"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := &buildRun{
+		paths: buildPaths{bifrostDir: root, ssrDir: ssrDir},
+		pages: []buildPage{
+			{entryName: "static-entry", config: core.PageConfig{Mode: core.ModeStaticPrerender}},
+			{entryName: "live-entry", config: core.PageConfig{Mode: core.ModeSSR}},
+		},
+		manifest: &core.Manifest{Entries: map[string]core.ManifestEntry{
+			"static-entry": {Mode: "static", SSR: "/ssr/registry.js#static"},
+			"live-entry":   {Mode: "ssr", SSR: "/ssr/registry.js#live"},
+		}},
+		needsRuntime: true,
+	}
+
+	if err := removeStaticSSRBundles(run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(registry); err != nil {
+		t.Fatalf("shared registry was removed: %v", err)
+	}
+	if got := run.manifest.Entries["static-entry"].SSR; got != "" {
+		t.Fatalf("static manifest SSR path = %q, want empty", got)
+	}
+}
+
 func TestRemoveStaticSSRBundlesRemovesStaticOnlyDirectory(t *testing.T) {
 	root := t.TempDir()
 	ssrDir := filepath.Join(root, "ssr")

@@ -51,10 +51,18 @@ func (s *BuildService) renderCriticalHTML(ctx context.Context, run *buildRun, pa
 		return ""
 	}
 
-	switch page.config.Mode {
-	case core.ModeClientOnly:
+	if page.config.Mode == core.ModeClientOnly {
 		return ""
-	case core.ModeStaticPrerender:
+	}
+	entry, ok := run.manifest.Entries[page.entryName]
+	if !ok || entry.SSR == "" {
+		return ""
+	}
+	renderPath := buildSSRRenderPath(run.paths.bifrostDir, entry.SSR)
+	if renderPath == "" {
+		return ""
+	}
+	if page.config.Mode == core.ModeStaticPrerender {
 		var props any
 		if page.config.StaticDataLoader != nil {
 			entries, err := page.config.StaticDataLoader(ctx)
@@ -63,10 +71,22 @@ func (s *BuildService) renderCriticalHTML(ctx context.Context, run *buildRun, pa
 			}
 			props = entries[0].Props
 		}
-		return s.renderCriticalPage(filepath.Join(run.paths.bifrostDir, "ssr", page.entryName+"-ssr.js"), props)
-	default:
-		return s.renderCriticalPage(filepath.Join(run.paths.bifrostDir, "ssr", page.entryName+"-ssr.js"), map[string]any{})
+		return s.renderCriticalPage(renderPath, props)
 	}
+	return s.renderCriticalPage(renderPath, map[string]any{})
+}
+
+func buildSSRRenderPath(bifrostDir, manifestPath string) string {
+	parts := strings.SplitN(manifestPath, "#", 2)
+	rel := filepath.Clean(filepath.FromSlash(strings.TrimPrefix(parts[0], "/")))
+	if rel == "." || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	path := filepath.Join(bifrostDir, rel)
+	if len(parts) == 2 && parts[1] != "" {
+		path += "#" + parts[1]
+	}
+	return path
 }
 
 func (s *BuildService) renderCriticalPage(renderPath string, props any) string {

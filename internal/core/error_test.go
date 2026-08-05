@@ -44,7 +44,7 @@ func TestErrorTemplate_RendersSubErrorLocationAndSnippet(t *testing.T) {
 			},
 		},
 		CodeSnippet: `import "invalid-import";`,
-		NextSteps:   []string{"Check that import path is valid.", "Try running: bun install"},
+		NextSteps:   []string{"Check that import path is valid.", "Install JavaScript dependencies."},
 	}
 
 	var buf bytes.Buffer

@@ -35,11 +35,8 @@ func bunAvailable() bool {
 }
 
 func skipIfNoBun(t *testing.T) {
-	if strings.EqualFold(os.Getenv("BIFROST_JS_RUNTIME"), "sobek") {
-		return
-	}
-	if !bunAvailable() {
-		t.Skip("bun not available, skipping E2E test")
+	if strings.EqualFold(os.Getenv("BIFROST_JS_RUNTIME"), "bun") && !bunAvailable() {
+		t.Skip("Bun backend selected but Bun is unavailable")
 	}
 }
 
@@ -246,7 +243,17 @@ func normalizeHTML(html string) string {
 
 	html = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?`).ReplaceAllString(html, "[ISO-TIMESTAMP]")
 
-	html = regexp.MustCompile(`"[^"]*[-.][a-z0-9]{6,}\.(js|css|mjs)"`).ReplaceAllString(html, `"[HASHED.$1]"`)
+	html = regexp.MustCompile(`"[^"]*[-.][A-Za-z0-9_-]{6,}\.(js|css|mjs)"`).ReplaceAllString(html, `"[HASHED.$1]"`)
+
+	// Bun and esbuild split the same browser graph into different numbers of
+	// chunks. Keep one marker for each asset role instead of snapshotting an
+	// engine-specific chunk layout.
+	html = regexp.MustCompile(`(?:<link rel="modulepreload" href="\[HASHED\.js\]" />\s*)+`).ReplaceAllString(html, `<link rel="modulepreload" href="[HASHED.js]" /> `)
+	html = regexp.MustCompile(`(?:<script src="\[HASHED\.js\]" type="module"(?: defer)?></script>\s*)+`).ReplaceAllString(html, `<script src="[HASHED.js]" type="module"></script> `)
+
+	// Critical CSS formatting and block ordering are backend-specific. Tailwind
+	// compilation and candidate coverage have focused tests outside snapshots.
+	html = regexp.MustCompile(`(?s)<style data-bifrost-critical>.*?</style>`).ReplaceAllString(html, `<style data-bifrost-critical>[CRITICAL CSS]</style>`)
 
 	html = regexp.MustCompile(`id="[^"]*-[a-f0-9]{6,}"`).ReplaceAllString(html, `id="[ID]"`)
 
@@ -267,10 +274,25 @@ func normalizeHTML(html string) string {
 	// Async stack labels vary between Bun/runtime source shapes.
 	html = strings.ReplaceAll(html, "async handleRender", "handleRender")
 
-	// Stack trace byte sizes vary between runs
+	// Stack trace byte sizes and frames vary by backend.
 	html = regexp.MustCompile(`\(\d+ bytes\)`).ReplaceAllString(html, "([N] bytes)")
+	html = regexp.MustCompile(`(?s)(<summary>Show stack \(\[N\] bytes\)</summary> <pre>).*?(</pre>)`).ReplaceAllString(html, `$1[STACK]$2`)
 
 	return strings.TrimSpace(html)
+}
+
+func TestNormalizeHTMLBackendArtifacts(t *testing.T) {
+	input := `<style data-bifrost-critical>.a { color: red }</style>` +
+		`<link rel="modulepreload" href="/dist/chunk-A1B2C3D4.js" />` +
+		`<link rel="modulepreload" href="/dist/page-Z9Y8X7W6.js" />` +
+		`<script src="/dist/chunk-A1B2C3D4.js" type="module" defer></script>` +
+		`<script src="/dist/page-Z9Y8X7W6.js" type="module"></script>`
+	want := `<style data-bifrost-critical>[CRITICAL CSS]</style>` +
+		`<link rel="modulepreload" href="[HASHED.js]" /> ` +
+		`<script src="[HASHED.js]" type="module"></script>`
+	if got := normalizeHTML(input); got != want {
+		t.Fatalf("normalized HTML = %q, want %q", got, want)
+	}
 }
 
 func assertHTTPStatus(t *testing.T, resp *http.Response, expected int) {

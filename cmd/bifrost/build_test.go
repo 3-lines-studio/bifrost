@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -38,6 +39,53 @@ func TestPrintBuildUsage_DocumentedOrdering(t *testing.T) {
 	if !strings.Contains(out, "Usage: bifrost build <main.go> [flags]") {
 		t.Errorf("usage does not show documented ordering; got:\n%s", out)
 	}
+}
+
+func TestResolveSobekPGO(t *testing.T) {
+	t.Run("default embedded profile", func(t *testing.T) {
+		t.Setenv("BIFROST_SOBEK_PGO", "")
+		path, cleanup, err := resolveSobekPGO(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cleanup()
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Size() == 0 {
+			t.Fatal("embedded PGO profile is empty")
+		}
+	})
+
+	t.Run("disabled", func(t *testing.T) {
+		t.Setenv("BIFROST_SOBEK_PGO", "off")
+		path, cleanup, err := resolveSobekPGO(t.TempDir())
+		defer cleanup()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if path != "" {
+			t.Fatalf("path = %q, want empty", path)
+		}
+	})
+
+	t.Run("configured profile", func(t *testing.T) {
+		root := t.TempDir()
+		path := filepath.Join(root, "custom.pgo")
+		if err := os.WriteFile(path, []byte("profile"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("BIFROST_SOBEK_PGO", "custom.pgo")
+		got, cleanup, err := resolveSobekPGO(root)
+		defer cleanup()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != path {
+			t.Fatalf("path = %q, want %q", got, path)
+		}
+	})
 }
 
 func TestParseFlags_GoBuildDefault(t *testing.T) {

@@ -62,6 +62,15 @@ func (r *Host) initExportMode() (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
+	if man.Runtime == "" {
+		legacyRuntime := filepath.Join(exportDir, "runtime", "bifrost-renderer")
+		if runtime.GOOS == "windows" {
+			legacyRuntime += ".exe"
+		}
+		if _, statErr := os.Stat(legacyRuntime); statErr == nil {
+			man.Runtime = core.JSRuntimeBun
+		}
+	}
 	r.manifest = man
 
 	if core.HasSSRBundles(man) {
@@ -104,6 +113,9 @@ func (r *Host) initProdMode() (*Host, error) {
 	man, err := loadManifestFromEmbed(r.assetsFS)
 	if err != nil {
 		return nil, err
+	}
+	if man.Runtime == "" && process.HasEmbeddedRuntime(r.assetsFS) {
+		man.Runtime = core.JSRuntimeBun
 	}
 	r.manifest = man
 
@@ -273,10 +285,11 @@ func (r *Host) startSobekRenderer(mode core.Mode, builder sobekrenderer.Builder,
 }
 
 func (r *Host) useSobek() bool {
-	if configured := strings.TrimSpace(os.Getenv("BIFROST_JS_RUNTIME")); configured != "" {
-		return strings.EqualFold(configured, "sobek")
+	selected := os.Getenv("BIFROST_JS_RUNTIME")
+	if strings.TrimSpace(selected) == "" && r.manifest != nil {
+		selected = r.manifest.Runtime
 	}
-	return r.manifest != nil && strings.EqualFold(r.manifest.Runtime, "sobek")
+	return core.NormalizeJSRuntime(selected) == core.JSRuntimeSobek
 }
 
 func sobekWorkers() int {

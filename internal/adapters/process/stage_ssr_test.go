@@ -52,6 +52,34 @@ func TestStageSSRBundles(t *testing.T) {
 	}
 }
 
+func TestStageSSRBundlesDedupesRegistryReferencesAndPreservesFragment(t *testing.T) {
+	t.Parallel()
+	reads := 0
+	manifest := &core.Manifest{Entries: map[string]core.ManifestEntry{
+		"home":  {SSR: "/ssr/registry.js#home"},
+		"about": {SSR: "/ssr/registry.js#about"},
+	}}
+	tempDir, cleanup, err := StageSSRBundles(func(path string) ([]byte, error) {
+		reads++
+		if path != "/ssr/registry.js" {
+			t.Fatalf("read path = %q", path)
+		}
+		return []byte("registry"), nil
+	}, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if reads != 1 {
+		t.Fatalf("reads = %d, want 1", reads)
+	}
+	resolved := ResolveStagedSSRBundlePath(tempDir, "/ssr/registry.js#home")
+	want := filepath.Join(tempDir, "ssr", "registry.js") + "#home"
+	if resolved != want {
+		t.Fatalf("resolved = %q, want %q", resolved, want)
+	}
+}
+
 func TestExtractSSRBundlesFromEmbed(t *testing.T) {
 	t.Parallel()
 

@@ -38,6 +38,55 @@ export async function render(props) {
 	}
 }
 
+func TestRendererRendersPrebuiltIIFEBundle(t *testing.T) {
+	bundle := writeBundle(t, prebuiltIIFEMarker+`
+var __BIFROST_SSR__ = (() => ({
+  render(props) {
+    return { head: "<title>" + props.title + "</title>", html: "<main>" + props.name + "</main>" };
+  }
+}))();
+`)
+	renderer, err := NewRenderer(core.ModeProd, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := renderer.Render(bundle, map[string]any{"title": "IIFE", "name": "Ready"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Head != "<title>IIFE</title>" || page.Body != "<main>Ready</main>" {
+		t.Fatalf("unexpected page: %+v", page)
+	}
+}
+
+func TestRendererSelectsRenderFromPrebuiltRegistry(t *testing.T) {
+	bundle := writeBundle(t, prebuiltIIFEMarker+`
+var __BIFROST_SSR__ = (() => ({
+  renders: {
+    home(props) { return { head: "home", html: props.value }; },
+    about(props) { return { head: "about", html: props.value }; },
+  }
+}))();
+`)
+	renderer, err := NewRenderer(core.ModeProd, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	home, err := renderer.Render(bundle+"#home", map[string]any{"value": "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	about, err := renderer.Render(bundle+"#about", map[string]any{"value": "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if home.Head != "home" || home.Body != "first" || about.Head != "about" || about.Body != "second" {
+		t.Fatalf("unexpected registry pages: home=%+v about=%+v", home, about)
+	}
+}
+
 func TestRendererReloadsChangedBundleInDev(t *testing.T) {
 	bundle := writeBundle(t, `export function render() { return { head: "one", html: "one" }; }`)
 	renderer, err := NewRenderer(core.ModeDev, 1, nil)

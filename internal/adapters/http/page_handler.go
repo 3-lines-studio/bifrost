@@ -187,7 +187,7 @@ func computeNextSteps(se *core.StructuredError) []string {
 		if se.Specifier != "" {
 			return []string{
 				fmt.Sprintf("Check that %q is a valid import.", se.Specifier),
-				"Try running: bun install",
+				"Install JavaScript dependencies with npm, pnpm, or Bun.",
 			}
 		}
 		if se.File != "" {

@@ -113,6 +113,74 @@ func (b *Builder) Build(entrypoints []string, outdir string, entryNames []string
 	return mapClientResults(meta, entrypoints, entryNames)
 }
 
+func (b *Builder) BuildSSRRegistry(entrypoints []string, outdir string) (string, map[string]string, error) {
+	if len(entrypoints) == 0 {
+		return "", nil, fmt.Errorf("missing entrypoints")
+	}
+	if outdir == "" {
+		return "", nil, fmt.Errorf("missing outdir")
+	}
+	if err := os.MkdirAll(outdir, 0o755); err != nil {
+		return "", nil, fmt.Errorf("create SSR output directory: %w", err)
+	}
+	production := b.mode != core.ModeDev
+	reactServerPlugin, err := legacyReactServerPlugin(entrypoints[0], production)
+	if err != nil {
+		return "", nil, err
+	}
+
+	var source strings.Builder
+	exports := make(map[string]string, len(entrypoints))
+	for i, entrypoint := range entrypoints {
+		exportName := strings.TrimSuffix(filepath.Base(entrypoint), filepath.Ext(entrypoint))
+		exports[entrypoint] = exportName
+		fmt.Fprintf(&source, "var render%d;\n", i)
+	}
+	source.WriteString("export const loaders = {\n")
+	for i, entrypoint := range entrypoints {
+		fmt.Fprintf(
+			&source,
+			"%q: function() { return render%d || (render%d = require(%q).render); },\n",
+			exports[entrypoint], i, i, entrypoint,
+		)
+	}
+	source.WriteString("};\n")
+
+	sourceMap := api.SourceMapInline
+	if production {
+		sourceMap = api.SourceMapNone
+	}
+	bundlePath := filepath.Join(outdir, "bifrost-ssr-registry.js")
+	result := api.Build(api.BuildOptions{
+		Stdin: &api.StdinOptions{
+			Contents:   source.String(),
+			ResolveDir: filepath.Dir(entrypoints[0]),
+			Sourcefile: "bifrost-ssr-registry.js",
+			Loader:     api.LoaderJS,
+		},
+		Outfile:           bundlePath,
+		Bundle:            true,
+		Write:             true,
+		Platform:          api.PlatformBrowser,
+		Format:            api.FormatIIFE,
+		GlobalName:        "__BIFROST_SSR__",
+		Target:            api.ES2015,
+		Sourcemap:         sourceMap,
+		Conditions:        []string{"browser"},
+		Plugins:           []api.Plugin{ignoreCSSPlugin(), reactServerPlugin},
+		MinifyWhitespace:  production,
+		MinifyIdentifiers: production,
+		MinifySyntax:      production,
+		Define:            map[string]string{"process.env.NODE_ENV": quotedNodeEnv(production)},
+		Banner:            map[string]string{"js": "/* bifrost:sobek-iife */"},
+		LogLevel:          api.LogLevelSilent,
+	})
+	if err := buildError("SSR registry build", result.Errors); err != nil {
+		return "", nil, err
+	}
+	return bundlePath, exports, nil
+}
+
 func (b *Builder) BuildSSR(entrypoints []string, outdir string) error {
 	if len(entrypoints) == 0 {
 		return fmt.Errorf("missing entrypoints")
@@ -124,6 +192,10 @@ func (b *Builder) BuildSSR(entrypoints []string, outdir string) error {
 		return fmt.Errorf("create SSR output directory: %w", err)
 	}
 	production := b.mode != core.ModeDev
+	reactServerPlugin, err := legacyReactServerPlugin(entrypoints[0], production)
+	if err != nil {
+		return err
+	}
 	sourceMap := api.SourceMapInline
 	if production {
 		sourceMap = api.SourceMapNone
@@ -134,12 +206,13 @@ func (b *Builder) BuildSSR(entrypoints []string, outdir string) error {
 		Bundle:            true,
 		Write:             true,
 		Platform:          api.PlatformBrowser,
-		Format:            api.FormatESModule,
+		Format:            api.FormatIIFE,
+		GlobalName:        "__BIFROST_SSR__",
 		Target:            api.ES2015,
 		Splitting:         false,
 		Sourcemap:         sourceMap,
 		Conditions:        []string{"browser"},
-		Plugins:           []api.Plugin{ignoreCSSPlugin()},
+		Plugins:           []api.Plugin{ignoreCSSPlugin(), reactServerPlugin},
 		EntryNames:        "[name]",
 		MinifyWhitespace:  production,
 		MinifyIdentifiers: production,
@@ -147,9 +220,33 @@ func (b *Builder) BuildSSR(entrypoints []string, outdir string) error {
 		Define: map[string]string{
 			"process.env.NODE_ENV": quotedNodeEnv(production),
 		},
+		Banner:   map[string]string{"js": "/* bifrost:sobek-iife */"},
 		LogLevel: api.LogLevelSilent,
 	})
 	return buildError("SSR build", result.Errors)
+}
+
+func legacyReactServerPlugin(entrypoint string, production bool) (api.Plugin, error) {
+	packageRoot := findNodePackage(filepath.Dir(entrypoint), "react-dom")
+	if packageRoot == "" {
+		return api.Plugin{}, fmt.Errorf("node_modules/react-dom was not found for SSR build")
+	}
+	variant := "development"
+	if production {
+		variant = "production"
+	}
+	legacyRenderer := filepath.Join(packageRoot, "cjs", "react-dom-server-legacy.browser."+variant+".js")
+	if _, err := os.Stat(legacyRenderer); err != nil {
+		return api.Plugin{}, fmt.Errorf("find React legacy server renderer: %w", err)
+	}
+	return api.Plugin{
+		Name: "bifrost-react-legacy-server",
+		Setup: func(build api.PluginBuild) {
+			build.OnResolve(api.OnResolveOptions{Filter: `^react-dom/server$`}, func(api.OnResolveArgs) (api.OnResolveResult, error) {
+				return api.OnResolveResult{Path: legacyRenderer}, nil
+			})
+		},
+	}, nil
 }
 
 func ignoreCSSPlugin() api.Plugin {

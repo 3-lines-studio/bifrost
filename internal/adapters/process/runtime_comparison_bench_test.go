@@ -5,17 +5,49 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 
 	sobekrenderer "github.com/3-lines-studio/bifrost/internal/adapters/sobek"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
+func BenchmarkRuntimeRealPageStartupAndFirstRender(b *testing.B) {
+	bundle := realPageBundle(b)
+	props := map[string]any{"name": "Benchmark"}
+	if info, err := os.Stat(bundle); err == nil {
+		b.ReportMetric(float64(info.Size()), "bundle-B")
+	}
+
+	b.Run("Sobek", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			renderer, err := sobekrenderer.NewRenderer(core.ModeProd, 1, nil)
+			if err != nil {
+				b.Fatal(err)
+			}
+			page, err := renderer.Render(bundle, props)
+			if stopErr := renderer.Stop(); err == nil {
+				err = stopErr
+			}
+			if err != nil {
+				b.Fatal(err)
+			}
+			if page.Body == "" || page.Head == "" {
+				b.Fatal("renderer returned an empty page")
+			}
+		}
+	})
+}
+
 func BenchmarkRuntimeRealPageSerial(b *testing.B) {
 	bundle := realPageBundle(b)
 	props := map[string]any{"name": "Benchmark"}
 
 	b.Run("Bun", func(b *testing.B) {
+		if strings.Contains(bundle, "#") {
+			b.Skip("current real-page artifact is a Sobek registry")
+		}
 		renderer := benchmarkBunRuntime(b)
 		assertBenchmarkRender(b, renderer, bundle, props)
 		b.ReportAllocs()
@@ -45,6 +77,9 @@ func BenchmarkRuntimeRealPageParallel(b *testing.B) {
 	props := map[string]any{"name": "Benchmark"}
 
 	b.Run("Bun", func(b *testing.B) {
+		if strings.Contains(bundle, "#") {
+			b.Skip("current real-page artifact is a Sobek registry")
+		}
 		renderer := benchmarkBunRuntime(b)
 		assertBenchmarkRender(b, renderer, bundle, props)
 		b.ReportAllocs()
@@ -59,7 +94,7 @@ func BenchmarkRuntimeRealPageParallel(b *testing.B) {
 		})
 	})
 
-	workerCounts := []int{1, 2, 4, runtime.GOMAXPROCS(0)}
+	workerCounts := []int{1, 2, 4, 6, 8, runtime.GOMAXPROCS(0)}
 	seen := make(map[int]struct{}, len(workerCounts))
 	for _, workers := range workerCounts {
 		if _, ok := seen[workers]; ok {
@@ -110,21 +145,36 @@ func benchmarkSobekRuntime(b *testing.B, workers int) *sobekrenderer.Renderer {
 
 func realPageBundle(tb testing.TB) string {
 	tb.Helper()
+	if configured := os.Getenv("BIFROST_BENCH_BUNDLE"); configured != "" {
+		if _, err := os.Stat(configured); err != nil {
+			tb.Fatalf("configured benchmark bundle is unavailable: %v", err)
+		}
+		return configured
+	}
 	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		tb.Fatal(err)
 	}
-	path := filepath.Join(
-		repoRoot,
-		"example",
-		"cmd",
-		"full",
-		".bifrost",
-		"ssr",
-		"pages-home-entry-ssr.js",
-	)
+	bifrostDir := filepath.Join(repoRoot, "example", "cmd", "full", ".bifrost")
+	manifestData, err := os.ReadFile(filepath.Join(bifrostDir, "manifest.json"))
+	if err == nil {
+		manifest, parseErr := core.ParseManifest(manifestData)
+		if parseErr == nil {
+			if entry, ok := manifest.Entries["pages-home-entry"]; ok && entry.SSR != "" {
+				parts := strings.SplitN(entry.SSR, "#", 2)
+				bundlePath := filepath.Join(bifrostDir, filepath.FromSlash(strings.TrimPrefix(parts[0], "/")))
+				if _, statErr := os.Stat(bundlePath); statErr == nil {
+					if len(parts) == 2 {
+						bundlePath += "#" + parts[1]
+					}
+					return bundlePath
+				}
+			}
+		}
+	}
+	path := filepath.Join(bifrostDir, "ssr", "pages-home-entry-ssr.js")
 	if _, err := os.Stat(path); err != nil {
-		tb.Skipf("real SSR benchmark bundle is unavailable; run 'make check': %v", err)
+		tb.Skipf("real SSR benchmark bundle is unavailable; build the example first: %v", err)
 	}
 	return path
 }

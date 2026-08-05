@@ -10,7 +10,8 @@ Server-side rendering for React pages from Go: register routes, embed build outp
 
 - Linux or macOS (Bifrost uses Unix sockets; Windows is not supported)
 - [Go](https://go.dev/dl/) 1.26.0 or newer
-- [Bun](https://bun.sh) on the machine where you develop and where you run production builds; SSR production binaries embed the Bun runtime (static-only apps do not)
+- JavaScript packages installed in `node_modules` with npm, pnpm, Bun, or another package manager
+- [Bun](https://bun.sh) only when using the optional Bun backend
 
 ## Install
 
@@ -23,6 +24,8 @@ go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest
 
 ```bash
 bifrost init myapp
+cd myapp
+npm install --legacy-peer-deps
 ```
 
 Templates: `minimal` (default), `spa` — e.g. `bifrost init --template spa myapp`.
@@ -33,7 +36,7 @@ Templates: `minimal` (default), `spa` — e.g. `bifrost init --template spa myap
 bifrost dev ./main.go
 ```
 
-Hot reload on `.go` file changes with reverse proxy on `:3000` → `:8080`. Frontend changes (`.tsx`, `.ts`, `.css`) are picked up live via Bun per-request re-import.
+Hot reload on `.go` file changes with reverse proxy on `:3000` → `:8080`. Frontend changes (`.tsx`, `.ts`, `.css`) are rebuilt and reloaded by the default pure-Go Sobek backend.
 
 ## Production build
 
@@ -48,9 +51,14 @@ Hot reload on `.go` file changes with reverse proxy on `:3000` → `:8080`. Fron
 
 `bifrost build` exits non-zero if a required page or bundle fails. Build-scanned `Page` declarations must use string-literal component paths and direct Bifrost option calls; unsupported indirect forms fail with a clear error.
 
-Production `/dist/` assets are content-hashed and served with a one-year immutable cache policy. Bifrost v1 uses one Bun renderer process per app.
+Production `/dist/` assets are content-hashed and served with a one-year immutable cache policy. Sobek is the default JavaScript backend and runs in-process with a bounded worker pool. Select the optional Bun backend for higher SSR throughput:
 
-Use `http.Server` with graceful `SIGINT`/`SIGTERM` shutdown so deferred `app.Stop()` cleanup runs. Generated projects include this setup. The Bun child also watches its parent and exits if the Go process stops abruptly.
+```bash
+BIFROST_JS_RUNTIME=bun bifrost dev ./main.go
+BIFROST_JS_RUNTIME=bun bifrost build ./main.go
+```
+
+Use `http.Server` with graceful `SIGINT`/`SIGTERM` shutdown so deferred `app.Stop()` cleanup runs. Generated projects include this setup.
 
 `go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest` installs a binary named `bifrost`; run `bifrost init`, `bifrost dev`, `bifrost build`, or `bifrost doctor`.
 

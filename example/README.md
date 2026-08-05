@@ -6,40 +6,33 @@ This application exercises SSR, client-only pages, static prerendering, React hy
 
 - Go 1.26.0+
 - JavaScript packages installed in `node_modules`
-- Bun for the Bun backend, or npm/pnpm for package installation when testing Sobek without Bun
+- Bun only for the optional Bun backend
 
-## Bun backend
+## Default Sobek backend
+
+Development:
 
 ```bash
 cd example
 make dev
 ```
 
-Production:
+Production build and start:
 
 ```bash
 cd example
 make start
 ```
 
-## Sobek backend
+The default build records `"runtime": "sobek"` in `.bifrost/manifest.json`, so the production binary does not need `BIFROST_JS_RUNTIME` set. `BIFROST_SOBEK_WORKERS` defaults to `min(GOMAXPROCS, 4)` and can be overridden when starting the app. The build also applies Bifrost's Sobek PGO profile; set `BIFROST_SOBEK_PGO=off` to compare an unprofiled build.
 
-Development:
-
-```bash
-cd example
-make dev-sobek
-```
-
-Production build and start:
+## Optional Bun backend
 
 ```bash
 cd example
-make build-sobek
-./bifrost-sobek
+make dev-bun
+make start-bun
 ```
-
-The Sobek build records `"runtime": "sobek"` in `.bifrost/manifest.json`, so the production binary does not need `BIFROST_JS_RUNTIME` set. `BIFROST_SOBEK_WORKERS` defaults to `min(GOMAXPROCS, 4)` and can be overridden when starting the app.
 
 Open <http://localhost:8080>.
 
@@ -52,7 +45,6 @@ cd ..
 go build -o /tmp/bifrost-sobek ./cmd/bifrost
 cd example
 PATH=/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin \
-  BIFROST_JS_RUNTIME=sobek \
   /tmp/bifrost-sobek build ./cmd/full/main.go --go-build=./bifrost-sobek
 
 PATH=/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin ./bifrost-sobek

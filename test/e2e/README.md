@@ -43,7 +43,8 @@ Tests error handling and redirects:
 
 ### Prerequisites
 - Go 1.26.0+
-- Bun installed and available in PATH
+- JavaScript packages installed in `example/node_modules`
+- Bun only when running the optional Bun backend
 
 ### Run all checks from the repo root (recommended)
 ```bash
@@ -152,7 +153,8 @@ func TestMyPage_Dev(t *testing.T) {
 ## CI/CD Integration
 
 These tests are designed for CI environments:
-- Automatically skip if Bun is not available
+- Run with Sobek by default and do not require Bun
+- Skip only when the Bun backend is selected but Bun is unavailable
 - No browser or display required
 - Fast execution (~10 seconds for all 24 tests)
 - Fail on snapshot mismatches

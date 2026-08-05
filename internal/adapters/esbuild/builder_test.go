@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	sobekrenderer "github.com/3-lines-studio/bifrost/internal/adapters/sobek"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
@@ -48,6 +49,49 @@ func TestBuilderBuildsReactSSRAndClient(t *testing.T) {
 	}
 	if built["page"].Script == "" {
 		t.Fatal("client output has no script")
+	}
+}
+
+func TestBuilderSSRRegistryLazilyIsolatesImportFailures(t *testing.T) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	goodEntry := filepath.Join(root, "good.ts")
+	badEntry := filepath.Join(root, "bad.ts")
+	writeTestFile(t, goodEntry, `export function render(props) { return {head: "good", html: props.value}; }`)
+	writeTestFile(t, badEntry, `throw new Error("broken import"); export function render() { return {head: "", html: "bad"}; }`)
+	if err := os.Symlink(filepath.Join(repoRoot, "node_modules"), filepath.Join(root, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+
+	bundle, exports, err := NewBuilder(core.ModeProd).BuildSSRRegistry([]string{goodEntry, badEntry}, filepath.Join(root, "ssr"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	renderer, err := sobekrenderer.NewRenderer(core.ModeProd, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goodTarget := bundle + "#" + exports[goodEntry]
+	badTarget := bundle + "#" + exports[badEntry]
+	good, err := renderer.Render(goodTarget, map[string]any{"value": "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if good.Head != "good" || good.Body != "first" {
+		t.Fatalf("unexpected good page: %+v", good)
+	}
+	if _, err := renderer.Render(badTarget, nil); err == nil || !strings.Contains(err.Error(), "broken import") {
+		t.Fatalf("bad registry page error = %v", err)
+	}
+	good, err = renderer.Render(goodTarget, map[string]any{"value": "after"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if good.Body != "after" {
+		t.Fatalf("good page did not recover after sibling failure: %+v", good)
 	}
 }
 

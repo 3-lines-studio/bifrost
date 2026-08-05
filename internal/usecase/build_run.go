@@ -93,10 +93,7 @@ func (s *BuildService) newBuildRun(input BuildInput) (*buildRun, error) {
 		manifestPath:  filepath.Join(input.AppRoot, ".bifrost", "manifest.json"),
 	}
 
-	runtimeName := "bun"
-	if strings.EqualFold(os.Getenv("BIFROST_JS_RUNTIME"), "sobek") {
-		runtimeName = "sobek"
-	}
+	runtimeName := core.NormalizeJSRuntime(os.Getenv("BIFROST_JS_RUNTIME"))
 	run := &buildRun{
 		input:           input,
 		paths:           paths,
@@ -228,14 +225,43 @@ func (s *BuildService) buildSSRBundles(run *buildRun) {
 		pages = append(pages, page)
 	}
 
-	if len(paths) > 0 {
+	registryRefs := make(map[string]string, len(paths))
+	registryBundlePath := ""
+	registryBuilt := false
+	if registryBuilder, ok := s.renderer.(ssrRegistryBuilder); ok && len(paths) > 1 {
+		bundlePath, exports, err := registryBuilder.BuildSSRRegistry(paths, run.paths.ssrDir)
+		if err != nil {
+			run.report.AddWarning("SSR registry", "Registry build failed; falling back to page bundles", []string{err.Error()})
+		} else {
+			registryBundlePath = bundlePath
+			registryBuilt = true
+			for i, entryPath := range paths {
+				exportName, exists := exports[entryPath]
+				if !exists || exportName == "" {
+					registryBuilt = false
+					break
+				}
+				registryRefs[names[i]] = "/ssr/" + filepath.Base(bundlePath) + "#" + exportName
+			}
+		}
+	}
+	if !registryBuilt && len(paths) > 0 {
 		if err := s.renderer.BuildSSR(paths, run.paths.ssrDir); err != nil {
 			run.report.AddWarning("SSR build", "Batch SSR build failed; falling back to per-page builds", []string{err.Error()})
 			s.buildSSRBundlesIndividually(run, pages, &errors)
 		}
 	}
 
-	s.validateSSRBundles(run, pages, &errors)
+	if registryBuilt {
+		if _, err := os.Stat(registryBundlePath); err != nil {
+			for _, page := range pages {
+				run.markSSRFailed(page.entryName)
+			}
+			errors = append(errors, BuildError{Message: "SSR registry missing after build", Details: []string{err.Error()}})
+		}
+	} else {
+		s.validateSSRBundles(run, pages, &errors)
+	}
 
 	for _, entryName := range names {
 		if run.ssrFailedFor(entryName) {
@@ -244,7 +270,11 @@ func (s *BuildService) buildSSRBundles(run *buildRun) {
 		run.updateManifestEntry(entryName, func(entry *core.ManifestEntry) {
 			entry.Script = "/dist/" + entryName + ".js"
 			entry.CSS = "/dist/" + entryName + ".css"
-			entry.SSR = "/ssr/" + entryName + "-ssr.js"
+			if registryBuilt {
+				entry.SSR = registryRefs[entryName]
+			} else {
+				entry.SSR = "/ssr/" + entryName + "-ssr.js"
+			}
 			entry.Mode = "ssr"
 		})
 	}
@@ -448,7 +478,7 @@ func (s *BuildService) compileRuntime(run *buildRun) error {
 	if !run.needsRuntime && !run.hasStaticPrerender {
 		return nil
 	}
-	if strings.EqualFold(os.Getenv("BIFROST_JS_RUNTIME"), "sobek") {
+	if run.manifest.Runtime == core.JSRuntimeSobek {
 		return os.RemoveAll(run.paths.runtimeDir)
 	}
 
@@ -498,18 +528,28 @@ func (s *BuildService) exportStaticPrerender(_ context.Context, run *buildRun) e
 }
 
 func removeStaticSSRBundles(run *buildRun) error {
+	bundleReferences := make(map[string]int)
+	for _, entry := range run.manifest.Entries {
+		if entry.SSR != "" {
+			bundleReferences[strings.SplitN(entry.SSR, "#", 2)[0]]++
+		}
+	}
 	for _, page := range run.pages {
 		if page.config.Mode != core.ModeStaticPrerender {
 			continue
 		}
 		entry := run.manifest.Entries[page.entryName]
 		if entry.SSR != "" {
-			rel := strings.TrimPrefix(filepath.ToSlash(entry.SSR), "/")
+			bundlePath := strings.SplitN(entry.SSR, "#", 2)[0]
+			rel := strings.TrimPrefix(filepath.ToSlash(bundlePath), "/")
 			if !strings.HasPrefix(rel, "ssr/") {
 				return fmt.Errorf("static entry %q has invalid SSR path %q", page.entryName, entry.SSR)
 			}
-			if err := os.Remove(filepath.Join(run.paths.bifrostDir, filepath.FromSlash(rel))); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("remove static SSR bundle %q: %w", entry.SSR, err)
+			bundleReferences[bundlePath]--
+			if bundleReferences[bundlePath] == 0 {
+				if err := os.Remove(filepath.Join(run.paths.bifrostDir, filepath.FromSlash(rel))); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("remove static SSR bundle %q: %w", entry.SSR, err)
+				}
 			}
 		}
 		matches, err := filepath.Glob(filepath.Join(run.paths.ssrDir, page.entryName+"-ssr.*"))
