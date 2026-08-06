@@ -8,6 +8,7 @@ require (
 )
 
 require (
+	github.com/3-lines-studio/sobek v0.1.0 // indirect
 	github.com/JohannesKaufmann/dom v0.3.1 // indirect
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2 // indirect
 	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
@@ -15,8 +16,7 @@ require (
 	github.com/gkampitakis/ciinfo v0.3.2 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
-	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
-	github.com/grafana/sobek v0.0.0-20260727154728-7781506a890f // indirect
+	github.com/google/pprof v0.0.0-20260802141513-ef3492d7dac3 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/maruel/natural v1.1.1 // indirect

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/evanw/esbuild/pkg/api"
-	js "github.com/grafana/sobek"
+	js "github.com/3-lines-studio/sobek"
 )
 
 type registryBenchmarkPage struct {

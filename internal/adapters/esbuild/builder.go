@@ -15,7 +15,7 @@ import (
 
 	"github.com/3-lines-studio/bifrost/internal/core"
 	"github.com/evanw/esbuild/pkg/api"
-	"github.com/grafana/sobek"
+	"github.com/3-lines-studio/sobek"
 )
 
 type Builder struct {
