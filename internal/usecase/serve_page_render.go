@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 	"path/filepath"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
@@ -123,7 +124,9 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		}
 	}
 
+	renderStart := time.Now()
 	page, err := renderWithContext(ctx, s.renderer, state.renderPath, syncPropsForReact)
+	renderMs := float64(time.Since(renderStart)) / float64(time.Millisecond)
 	if err != nil {
 		return ServePageOutput{
 			Action: core.ActionRenderSSR,
@@ -144,15 +147,17 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 			Markdown:   md,
 			IsMarkdown: true,
 			Props:      syncPropsForReact,
+			RenderMs:   renderMs,
 		}
 	}
 
 	html, err := s.renderPageHTMLWithArtifacts(state, syncPropsForReact, page, lang, htmlClass)
 	return ServePageOutput{
-		Action: core.ActionRenderSSR,
-		HTML:   html,
-		Props:  syncPropsForReact,
-		Error:  err,
+		Action:   core.ActionRenderSSR,
+		HTML:     html,
+		Props:    syncPropsForReact,
+		RenderMs: renderMs,
+		Error:    err,
 	}
 }
 

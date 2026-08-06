@@ -149,12 +149,12 @@ func (h *PageHandler) dispatchPageOutput(w http.ResponseWriter, req *http.Reques
 		if output.IsMarkdown {
 			h.serveMarkdown(w, output.Markdown)
 		} else {
-			h.serveHTML(w, output.HTML)
+			h.serveHTML(w, output.HTML, output.RenderMs)
 		}
 
 	case core.ActionRenderClientOnlyShell,
 		core.ActionRenderStaticPrerender:
-		h.serveHTML(w, output.HTML)
+		h.serveHTML(w, output.HTML, 0)
 	}
 }
 
@@ -169,7 +169,10 @@ func (h *PageHandler) serveBifrostHTMLFile(w http.ResponseWriter, req *http.Requ
 	}
 }
 
-func (h *PageHandler) serveHTML(w http.ResponseWriter, htmlContent string) {
+func (h *PageHandler) serveHTML(w http.ResponseWriter, htmlContent string, renderMs float64) {
+	if renderMs > 0 {
+		w.Header().Set("X-Bifrost-Render-Ms", strconv.FormatFloat(renderMs, 'f', 1, 64))
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, htmlContent)

@@ -32,6 +32,7 @@ type ServePageOutput struct {
 	RoutePath  string
 	Props      any
 	NeedsSetup bool
+	RenderMs   float64
 	Error      error
 }
 
