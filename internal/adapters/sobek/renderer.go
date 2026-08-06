@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,9 @@ import (
 
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
+
+//go:embed intl.js
+var intlShim string
 
 const (
 	renderTimeout      = 30 * time.Second
@@ -112,6 +116,9 @@ func newWorker() (*worker, error) {
 	if err := installReactWebAPIs(vm); err != nil {
 		return nil, err
 	}
+	if err := installIntl(vm); err != nil {
+		return nil, err
+	}
 	jsonObject := vm.Get("JSON").ToObject(vm)
 	parse, ok := js.AssertFunction(jsonObject.Get("parse"))
 	if !ok {
@@ -181,6 +188,13 @@ func installReactWebAPIs(vm *js.Runtime) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("install MessageChannel: %w", err)
+	}
+	return nil
+}
+
+func installIntl(vm *js.Runtime) error {
+	if _, err := vm.RunString(intlShim); err != nil {
+		return fmt.Errorf("install Intl shim: %w", err)
 	}
 	return nil
 }
