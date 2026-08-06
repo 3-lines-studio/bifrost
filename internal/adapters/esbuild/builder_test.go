@@ -140,6 +140,18 @@ func TestCollectTailwindCandidates(t *testing.T) {
 	}
 }
 
+func TestCollectTailwindCandidatesKeepsArbitraryVariants(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "page.tsx")
+	writeTestFile(t, path, `<button className="[&>svg]:hidden [data-state=open]:bg-accent [aria-invalid=true]:ring-2" />`)
+	got := collectTailwindCandidates(map[string]struct{}{path: {}})
+	for _, want := range []string{"[&>svg]:hidden", "[data-state=open]:bg-accent", "[aria-invalid=true]:ring-2"} {
+		if !contains(got, want) {
+			t.Fatalf("candidate %q missing from %v", want, got)
+		}
+	}
+}
+
 func TestBuilderCompilesTailwindPluginInSobek(t *testing.T) {
 	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {

@@ -828,7 +828,7 @@ func collectTailwindCandidates(inputs map[string]struct{}) []string {
 			}
 			for field := range strings.FieldsSeq(literal[1 : len(literal)-1]) {
 				candidate := strings.Trim(field, "\\\"'`,;(){}")
-				if candidate != "" && !strings.ContainsAny(candidate, "<>={}") {
+				if candidate != "" && !strings.ContainsAny(candidate, "{}") {
 					set[candidate] = struct{}{}
 				}
 			}
