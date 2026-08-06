@@ -24,7 +24,7 @@ cd example
 make start
 ```
 
-The default build records `"runtime": "quickjs"` in `.bifrost/manifest.json`, so the production binary does not need `BIFROST_JS_RUNTIME` set. `BIFROST_QUICKJS_WORKERS` defaults to `min(GOMAXPROCS, 4)` and can be overridden when starting the app. The QuickJS backend requires a C toolchain; set `BIFROST_JS_RUNTIME=sobek` for a pure-Go build (`make build-sobek`, `make start-sobek`).
+The default build records `"runtime": "quickjs"` in `.bifrost/manifest.json`, so the production binary does not need `BIFROST_JS_RUNTIME` set. `BIFROST_QUICKJS_WORKERS` defaults to `min(GOMAXPROCS, 8)` and can be overridden when starting the app. The QuickJS backend requires a C toolchain; set `BIFROST_JS_RUNTIME=sobek` (`make build-sobek`, `make start-sobek`) or `BIFROST_JS_RUNTIME=modernc` (`make build-modernc`, `make start-modernc`) for pure-Go builds.
 
 ## Optional Bun backend
 

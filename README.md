@@ -12,7 +12,7 @@ Server-side rendering for React pages from Go: register routes, embed build outp
 - [Go](https://go.dev/dl/) 1.26.0 or newer
 - JavaScript packages installed in `node_modules` with npm, pnpm, Bun, or another package manager
 - [Bun](https://bun.sh) only when using the optional Bun backend
-- A C toolchain (`gcc`/`clang`) — required by the default QuickJS backend; set `BIFROST_JS_RUNTIME=sobek` for a pure-Go build
+- A C toolchain (`gcc`/`clang`) — required by the default QuickJS backend; set `BIFROST_JS_RUNTIME=sobek` or `BIFROST_JS_RUNTIME=modernc` for a pure-Go build
 
 ## Install
 

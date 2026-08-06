@@ -1,4 +1,4 @@
-package quickjs
+package modernc
 
 import (
 	"encoding/json"
@@ -14,7 +14,7 @@ import (
 // TestParityWithSobekOnExamplePage renders the example home page with both
 // in-process runtimes and requires byte-identical output. It skips when the
 // example artifacts are unavailable or are an SSR registry build (which the
-// quickjs runtime does not produce).
+// modernc runtime does not produce).
 func TestParityWithSobekOnExamplePage(t *testing.T) {
 	bundle, skip := exampleHomeBundle(t)
 	if skip {
@@ -69,13 +69,13 @@ func exampleHomeBundle(tb testing.TB) (string, bool) {
 	if !ok || entry.SSR == "" {
 		return "", true
 	}
+	if strings.Contains(entry.SSR, "#") {
+		return "", true
+	}
 	parts := strings.SplitN(entry.SSR, "#", 2)
 	bundlePath := filepath.Join(bifrostDir, filepath.FromSlash(strings.TrimPrefix(parts[0], "/")))
 	if _, err := os.Stat(bundlePath); err != nil {
 		return "", true
-	}
-	if len(parts) == 2 {
-		return bundlePath + "#" + parts[1], false
 	}
 	return bundlePath, false
 }

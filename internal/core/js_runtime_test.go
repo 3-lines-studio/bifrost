@@ -14,6 +14,8 @@ func TestNormalizeJSRuntime(t *testing.T) {
 		{value: " BUN ", want: JSRuntimeBun},
 		{value: "quickjs", want: JSRuntimeQuickJS},
 		{value: "QUICKJS", want: JSRuntimeQuickJS},
+		{value: "modernc", want: JSRuntimeModernc},
+		{value: "MODERNC", want: JSRuntimeModernc},
 	}
 	for _, test := range tests {
 		if got := NormalizeJSRuntime(test.value); got != test.want {

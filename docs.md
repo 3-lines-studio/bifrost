@@ -30,7 +30,7 @@ Bifrost is organized into focused internal packages:
 - `internal/adapters/http` — Page and asset HTTP handlers
 - `internal/adapters/process` — Optional Bun renderer process and bundle IPC
 - `internal/adapters/esbuild` — Default esbuild-Go and Tailwind build pipeline
-- `internal/adapters/sobek` — Default in-process JavaScript renderer and worker pool
+- `internal/adapters/quickjs` — Default in-process JavaScript renderer (cgo, vendored quickjs-ng) and worker pool
 - `internal/adapters/runtime` — Backend selection and renderer lifecycle
 - `internal/adapters/fs` — Filesystem and embed abstractions
 - `internal/adapters/react` — React entry templates and runtime source
@@ -714,8 +714,10 @@ QuickJS is the default and runs in-process with a bounded worker pool:
 
 ```bash
 bifrost build ./main.go
-BIFROST_QUICKJS_WORKERS=4 ./app
+BIFROST_QUICKJS_WORKERS=8 ./app
 ```
+
+The default worker count is `min(GOMAXPROCS, 8)`; set `BIFROST_QUICKJS_WORKERS` only after load testing. The shared SSR registry keeps per-worker memory flat as the page count grows. Automatic garbage collection is enabled with a 16 MiB threshold by default — quickjs-go disables it (`-1`), which leaks per-render garbage until OOM (measured ~150 MB/s under load). `BIFROST_QUICKJS_GC_THRESHOLD` overrides the threshold in bytes; `-1` restores the library default. `BIFROST_QUICKJS_GC_INTERVAL` switches to manual full-GC cadence (renders per worker); measured against the threshold default it gains nothing at equal memory and doubles peak RSS at useful cadences, so the threshold is the recommended config. The modernc backend uses the same default via `BIFROST_MODERNC_GC_THRESHOLD`.
 
 Select Bun explicitly when maximum SSR throughput matters more than binary size and memory use:
 
@@ -731,7 +733,14 @@ BIFROST_JS_RUNTIME=sobek bifrost build ./main.go
 BIFROST_SOBEK_WORKERS=4 ./app
 ```
 
-QuickJS runs the vendored quickjs-ng C engine through cgo, so builds require a C toolchain and cross-compilation needs one per target. Unlike Sobek it builds per-page ESM SSR bundles instead of a shared lazy registry, which the runtime evaluates as native modules — no runtime bundle transform — so pages load and fail independently. It supports the same Web API shims (console, TextEncoder, MessageChannel, Intl) as Sobek.
+Select the modernc port (modernc.org/quickjs) for a pure-Go runtime with native ESM modules — about 1.5x faster cold start and 1.1x faster warm rendering than Sobek with a fraction of the memory, but it stops scaling around four workers:
+
+```bash
+BIFROST_JS_RUNTIME=modernc bifrost build ./main.go
+BIFROST_MODERNC_WORKERS=4 ./app
+```
+
+QuickJS runs the vendored quickjs-ng C engine through cgo, so builds require a C toolchain and cross-compilation needs one per target. Like Sobek it builds a shared lazy SSR registry bundle, so React evaluates once per worker instead of once per page — a large page count keeps memory flat. It supports the same Web API shims (console, TextEncoder, MessageChannel, Intl) as Sobek.
 
 Sobek uses esbuild's Go API for React SSR bundles, hydration bundles, code splitting, CSS imports, source maps, and production asset hashes. Production pages share one lazily initialized SSR registry, which deduplicates React and shared modules while keeping import failures isolated to the selected page. Tailwind's official JavaScript compiler runs inside Sobek; Bifrost scans the esbuild source graph in Go instead of loading Tailwind's native Node scanner. Bun is not started or required by a Sobek build. JavaScript packages must already exist in `node_modules`; use npm, pnpm, or another package installer if Bun is unavailable.
 

@@ -12,6 +12,7 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/adapters/cli"
 	esbuildadapter "github.com/3-lines-studio/bifrost/internal/adapters/esbuild"
 	"github.com/3-lines-studio/bifrost/internal/adapters/fs"
+	moderncrenderer "github.com/3-lines-studio/bifrost/internal/adapters/modernc"
 	"github.com/3-lines-studio/bifrost/internal/adapters/process"
 	quickjsrenderer "github.com/3-lines-studio/bifrost/internal/adapters/quickjs"
 	"github.com/3-lines-studio/bifrost/internal/adapters/react"
@@ -186,9 +187,13 @@ func runBuildCommand(args []string) int {
 	useInProcessBuild := selectedRuntime != core.JSRuntimeBun
 	if useInProcessBuild {
 		builder := esbuildadapter.NewBuilder(core.ModeProd)
-		if useSobekBuild {
+		switch selectedRuntime {
+		case core.JSRuntimeSobek:
 			runtime, err = sobekrenderer.NewRenderer(core.ModeProd, 0, builder)
-		} else {
+		case core.JSRuntimeModernc:
+			esmBuilder := esbuildadapter.NewBuilder(core.ModeProd, esbuildadapter.WithSSRFormat(api.FormatESModule))
+			runtime, err = moderncrenderer.NewRenderer(core.ModeProd, 0, esmBuilder)
+		default:
 			esmBuilder := esbuildadapter.NewBuilder(core.ModeProd, esbuildadapter.WithSSRFormat(api.FormatESModule))
 			runtime, err = quickjsrenderer.NewRenderer(core.ModeProd, 0, esmBuilder)
 		}

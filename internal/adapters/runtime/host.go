@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	esbuildadapter "github.com/3-lines-studio/bifrost/internal/adapters/esbuild"
+	moderncrenderer "github.com/3-lines-studio/bifrost/internal/adapters/modernc"
 	"github.com/3-lines-studio/bifrost/internal/adapters/process"
 	quickjsrenderer "github.com/3-lines-studio/bifrost/internal/adapters/quickjs"
 	"github.com/3-lines-studio/bifrost/internal/adapters/react"
@@ -184,7 +185,7 @@ func (r *Host) initDevMode() (*Host, error) {
 	}
 
 	builder := esbuildadapter.NewBuilder(core.ModeDev)
-	if r.useQuickJS() {
+	if r.selectedRuntime() == core.JSRuntimeQuickJS || r.selectedRuntime() == core.JSRuntimeModernc {
 		builder = esbuildadapter.NewBuilder(core.ModeDev, esbuildadapter.WithSSRFormat(api.FormatESModule))
 	}
 	if err := r.startInProcessRenderer(core.ModeDev, builder, nil); err != nil {
@@ -279,9 +280,12 @@ func (r *Host) startRendererFromExecutable(executablePath string, cleanup func()
 func (r *Host) startInProcessRenderer(mode core.Mode, builder inProcessBuilder, cleanup func()) error {
 	var client rendererClient
 	var err error
-	if r.useQuickJS() {
+	switch r.selectedRuntime() {
+	case core.JSRuntimeQuickJS:
 		client, err = quickjsrenderer.NewRenderer(mode, quickjsWorkers(), builder)
-	} else {
+	case core.JSRuntimeModernc:
+		client, err = moderncrenderer.NewRenderer(mode, moderncWorkers(), builder)
+	default:
 		client, err = sobekrenderer.NewRenderer(mode, sobekWorkers(), builder)
 	}
 	if err != nil {
@@ -322,14 +326,26 @@ func (r *Host) selectedRuntime() string {
 	return core.NormalizeJSRuntime(selected)
 }
 
-func quickjsWorkers() int {
-	value := os.Getenv("BIFROST_QUICKJS_WORKERS")
+func moderncWorkers() int {
+	value := os.Getenv("BIFROST_MODERNC_WORKERS")
 	if value == "" {
 		return min(runtime.GOMAXPROCS(0), 4)
 	}
 	workers, err := strconv.Atoi(value)
 	if err != nil || workers < 1 {
 		return min(runtime.GOMAXPROCS(0), 4)
+	}
+	return workers
+}
+
+func quickjsWorkers() int {
+	value := os.Getenv("BIFROST_QUICKJS_WORKERS")
+	if value == "" {
+		return min(runtime.GOMAXPROCS(0), 8)
+	}
+	workers, err := strconv.Atoi(value)
+	if err != nil || workers < 1 {
+		return min(runtime.GOMAXPROCS(0), 8)
 	}
 	return workers
 }

@@ -478,7 +478,9 @@ func (s *BuildService) compileRuntime(run *buildRun) error {
 	if !run.needsRuntime && !run.hasStaticPrerender {
 		return nil
 	}
-	if run.manifest.Runtime == core.JSRuntimeSobek || run.manifest.Runtime == core.JSRuntimeQuickJS {
+	if run.manifest.Runtime == core.JSRuntimeSobek ||
+		run.manifest.Runtime == core.JSRuntimeQuickJS ||
+		run.manifest.Runtime == core.JSRuntimeModernc {
 		return os.RemoveAll(run.paths.runtimeDir)
 	}
 

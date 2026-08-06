@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	moderncrenderer "github.com/3-lines-studio/bifrost/internal/adapters/modernc"
 	quickjsrenderer "github.com/3-lines-studio/bifrost/internal/adapters/quickjs"
 	sobekrenderer "github.com/3-lines-studio/bifrost/internal/adapters/sobek"
 	"github.com/3-lines-studio/bifrost/internal/core"
@@ -61,6 +62,28 @@ func BenchmarkRuntimeRealPageStartupAndFirstRender(b *testing.B) {
 			}
 		}
 	})
+	b.Run("Modernc", func(b *testing.B) {
+		if strings.Contains(bundle, "#") {
+			b.Skip("current real-page artifact is a Sobek registry")
+		}
+		b.ReportAllocs()
+		for range b.N {
+			renderer, err := moderncrenderer.NewRenderer(core.ModeProd, 1, nil)
+			if err != nil {
+				b.Fatal(err)
+			}
+			page, err := renderer.Render(bundle, props)
+			if stopErr := renderer.Stop(); err == nil {
+				err = stopErr
+			}
+			if err != nil {
+				b.Fatal(err)
+			}
+			if page.Body == "" || page.Head == "" {
+				b.Fatal("renderer returned an empty page")
+			}
+		}
+	})
 }
 
 func BenchmarkRuntimeRealPageSerial(b *testing.B) {
@@ -98,6 +121,20 @@ func BenchmarkRuntimeRealPageSerial(b *testing.B) {
 			b.Skip("current real-page artifact is a Sobek registry")
 		}
 		renderer := benchmarkQuickJSRuntime(b, 1)
+		assertBenchmarkRender(b, renderer, bundle, props)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			if _, err := renderer.Render(bundle, props); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("Modernc", func(b *testing.B) {
+		if strings.Contains(bundle, "#") {
+			b.Skip("current real-page artifact is a Sobek registry")
+		}
+		renderer := benchmarkModerncRuntime(b, 1)
 		assertBenchmarkRender(b, renderer, bundle, props)
 		b.ReportAllocs()
 		b.ResetTimer()
@@ -169,6 +206,23 @@ func BenchmarkRuntimeRealPageParallel(b *testing.B) {
 				}
 			})
 		})
+		b.Run("ModerncWorkers"+strconv.Itoa(workers), func(b *testing.B) {
+			if strings.Contains(bundle, "#") {
+				b.Skip("current real-page artifact is a Sobek registry")
+			}
+			renderer := benchmarkModerncRuntime(b, workers)
+			assertBenchmarkRender(b, renderer, bundle, props)
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					if _, err := renderer.Render(bundle, props); err != nil {
+						b.Error(err)
+						return
+					}
+				}
+			})
+		})
 	}
 }
 
@@ -180,6 +234,16 @@ type benchmarkPageRenderer interface {
 func benchmarkBunRuntime(b *testing.B) *Renderer {
 	b.Helper()
 	renderer, err := NewRenderer(core.ModeProd, RuntimeSource(core.ModeProd), "BIFROST_DEV=0")
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = renderer.Stop() })
+	return renderer
+}
+
+func benchmarkModerncRuntime(b *testing.B, workers int) *moderncrenderer.Renderer {
+	b.Helper()
+	renderer, err := moderncrenderer.NewRenderer(core.ModeProd, workers, nil)
 	if err != nil {
 		b.Fatal(err)
 	}

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -48,16 +49,24 @@ type Renderer struct {
 }
 
 type worker struct {
-	rt          *qjs.Runtime
-	ctx         *qjs.Context
-	interrupted atomic.Bool
-	modules     map[string]*loadedModule
-	esmFiles    map[string]*esmFile
+	rt             *qjs.Runtime
+	ctx            *qjs.Context
+	interrupted    atomic.Bool
+	evaluated      map[string]*evaluatedModule
+	modules        map[string]*loadedModule
+	esmFiles       map[string]*esmFile
+	gcInterval     int
+	rendersSinceGC int
 }
 
 type esmFile struct {
 	path    string
 	version [sha256.Size]byte
+}
+
+type evaluatedModule struct {
+	version [sha256.Size]byte
+	exports *qjs.Value
 }
 
 type loadedModule struct {
@@ -66,8 +75,10 @@ type loadedModule struct {
 }
 
 func NewRenderer(mode core.Mode, workers int, builder Builder) (*Renderer, error) {
+	// The registry keeps per-worker memory flat, so 8 workers beat 4 on
+	// typical production boxes while still leaving headroom on small ones.
 	if workers <= 0 {
-		workers = min(runtime.GOMAXPROCS(0), 4)
+		workers = min(runtime.GOMAXPROCS(0), 8)
 	}
 	r := &Renderer{
 		mode:        mode,
@@ -93,9 +104,19 @@ func NewRenderer(mode core.Mode, workers int, builder Builder) (*Renderer, error
 }
 
 func newWorker() (*worker, error) {
-	rt := qjs.NewRuntime(qjs.WithModuleImport(true), qjs.WithOwnerGoroutineCheck(false))
+	options := []qjs.Option{qjs.WithModuleImport(true), qjs.WithOwnerGoroutineCheck(false)}
+	threshold, interval := quickjsGCConfig()
+	options = append(options, qjs.WithGCThreshold(threshold))
+	rt := qjs.NewRuntime(options...)
 	ctx := rt.NewContext()
-	w := &worker{rt: rt, ctx: ctx, modules: make(map[string]*loadedModule), esmFiles: make(map[string]*esmFile)}
+	w := &worker{
+		rt:         rt,
+		ctx:        ctx,
+		evaluated:  make(map[string]*evaluatedModule),
+		modules:    make(map[string]*loadedModule),
+		esmFiles:   make(map[string]*esmFile),
+		gcInterval: interval,
+	}
 	rt.SetInterruptHandler(func() int {
 		if w.interrupted.Load() {
 			return 1
@@ -168,8 +189,9 @@ func (r *Renderer) RenderContext(ctx context.Context, path string, props any) (c
 	if path == "" {
 		return core.RenderedPage{}, fmt.Errorf("missing SSR bundle path")
 	}
-	if strings.Contains(path, "#") {
-		return core.RenderedPage{}, fmt.Errorf("SSR registry bundles are not supported by the quickjs runtime")
+	target, err := parseRenderTarget(path)
+	if err != nil {
+		return core.RenderedPage{}, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, r.execTimeout)
@@ -207,7 +229,7 @@ func (r *Renderer) RenderContext(ctx context.Context, path string, props any) (c
 		w.interrupted.Store(false)
 	}
 
-	render, err := w.load(path, r.mode == core.ModeDev)
+	render, err := w.load(target.path, target.exportName, r.mode == core.ModeDev)
 	if err != nil {
 		disarm()
 		return core.RenderedPage{}, structuredRenderError(err)
@@ -240,6 +262,13 @@ func (r *Renderer) RenderContext(ctx context.Context, path string, props any) (c
 	page, err := pageFromResult(ctx, w.ctx, result)
 	if err != nil {
 		return core.RenderedPage{}, structuredRenderError(err)
+	}
+	if w.gcInterval > 0 {
+		w.rendersSinceGC++
+		if w.rendersSinceGC >= w.gcInterval {
+			w.rendersSinceGC = 0
+			w.rt.RunGC()
+		}
 	}
 	return page, nil
 }
@@ -276,9 +305,10 @@ func pageFromResult(goCtx context.Context, ctx *qjs.Context, result *qjs.Value) 
 	return core.RenderedPage{Head: head.String(), Body: html.String()}, nil
 }
 
-func (w *worker) load(path string, reload bool) (*qjs.Value, error) {
+func (w *worker) load(path, exportName string, reload bool) (*qjs.Value, error) {
+	targetKey := path + "#" + exportName
 	if !reload {
-		if module, ok := w.modules[path]; ok {
+		if module, ok := w.modules[targetKey]; ok {
 			return module.render, nil
 		}
 	}
@@ -287,19 +317,109 @@ func (w *worker) load(path string, reload bool) (*qjs.Value, error) {
 		return nil, fmt.Errorf("read SSR bundle %q: %w", path, err)
 	}
 	version := sha256.Sum256(source)
-	if module, ok := w.modules[path]; ok && module.version == version {
+	if module, ok := w.modules[targetKey]; ok && module.version == version {
 		return module.render, nil
 	}
 
-	render, err := w.evaluate(path, source, version)
+	exports, err := w.evaluatedExports(path, source, version)
 	if err != nil {
 		return nil, err
 	}
-	if previous, ok := w.modules[path]; ok {
+	render, err := w.resolveRender(exports, exportName)
+	if err != nil {
+		return nil, err
+	}
+	if previous, ok := w.modules[targetKey]; ok {
 		previous.render.Free()
 	}
-	w.modules[path] = &loadedModule{version: version, render: render}
+	w.modules[targetKey] = &loadedModule{version: version, render: render}
 	return render, nil
+}
+
+func (w *worker) evaluatedExports(path string, source []byte, version [sha256.Size]byte) (*qjs.Value, error) {
+	if evaluated, ok := w.evaluated[path]; ok && evaluated.version == version {
+		return evaluated.exports, nil
+	}
+	exports, err := w.evaluate(path, source, version)
+	if err != nil {
+		return nil, err
+	}
+	if previous, ok := w.evaluated[path]; ok {
+		previous.exports.Free()
+		for key := range w.modules {
+			if strings.HasPrefix(key, path+"#") {
+				w.modules[key].render.Free()
+				delete(w.modules, key)
+			}
+		}
+	}
+	w.evaluated[path] = &evaluatedModule{version: version, exports: exports}
+	return exports, nil
+}
+
+// resolveRender returns the render function for a target. A plain bundle
+// exports render directly; a registry exports loaders (or renders) keyed by
+// the entry export name.
+func (w *worker) resolveRender(exports *qjs.Value, exportName string) (*qjs.Value, error) {
+	render := exports.Get("render")
+	if exportName != "" {
+		render.Free()
+		loaders := exports.Get("loaders")
+		if loaders.IsUndefined() || loaders.IsNull() {
+			loaders.Free()
+			renders := exports.Get("renders")
+			defer renders.Free()
+			if renders.IsUndefined() || renders.IsNull() {
+				return nil, fmt.Errorf("SSR registry did not export loaders or renders")
+			}
+			render = renders.Get(exportName)
+			if !render.IsFunction() {
+				render.Free()
+				return nil, fmt.Errorf("SSR registry did not export render %q", exportName)
+			}
+			return render, nil
+		}
+		loader := loaders.Get(exportName)
+		loaders.Free()
+		if !loader.IsFunction() {
+			loader.Free()
+			return nil, fmt.Errorf("SSR registry did not export loader %q", exportName)
+		}
+		render = w.ctx.Invoke(loader, w.ctx.Globals())
+		loader.Free()
+		if render.IsException() {
+			render.Free()
+			return nil, fmt.Errorf("SSR registry loader %q: %w", exportName, w.ctx.Exception())
+		}
+	}
+	if !render.IsFunction() {
+		render.Free()
+		if exportName != "" {
+			return nil, fmt.Errorf("SSR registry did not export render %q", exportName)
+		}
+		return nil, fmt.Errorf("SSR bundle did not export render")
+	}
+	return render, nil
+}
+
+// parseRenderTarget splits an SSR bundle path into the file and an optional
+// registry export name (path#exportName).
+func parseRenderTarget(value string) (renderTarget, error) {
+	path := value
+	exportName := ""
+	if index := strings.IndexByte(value, '#'); index >= 0 {
+		path = value[:index]
+		exportName = value[index+1:]
+	}
+	if path == "" {
+		return renderTarget{}, fmt.Errorf("missing SSR bundle path")
+	}
+	return renderTarget{path: path, exportName: exportName}, nil
+}
+
+type renderTarget struct {
+	path       string
+	exportName string
 }
 
 // mayContainModuleSyntax mirrors buke's module-source probe. Bundles with
@@ -348,13 +468,51 @@ func (w *worker) evaluate(bundlePath string, source []byte, version [sha256.Size
 		global.Free()
 		return nil, fmt.Errorf("SSR bundle did not define %s", prebuiltIIFEGlobal)
 	}
-	render := global.Get("render")
-	global.Free()
-	if !render.IsFunction() {
-		render.Free()
-		return nil, fmt.Errorf("SSR bundle did not export render")
+	return global, nil
+}
+
+// quickjsGCThreshold returns the per-runtime automatic-GC threshold in
+// bytes. quickjs-go disables automatic GC by default (-1), which leaks the
+// per-render garbage until OOM (measured ~150 MB/s under load), so the
+// adapter defaults to 16 MiB: the sweep showed 1-32 MiB all bound RSS at the
+// working set with equal throughput, while larger thresholds balloon.
+func quickjsGCThreshold() int64 {
+	value := os.Getenv("BIFROST_QUICKJS_GC_THRESHOLD")
+	if value == "" {
+		return 16 << 20
 	}
-	return render, nil
+	threshold, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || threshold == 0 {
+		return 16 << 20
+	}
+	return threshold
+}
+
+// quickjsGCInterval returns the manual full-GC cadence in renders per worker
+// (0 = disabled). When set, the automatic-GC threshold is disabled (-1) and
+// each worker runs a full collection every N renders, so the pauses land at
+// render boundaries instead of mid-render.
+func quickjsGCInterval() int {
+	value := os.Getenv("BIFROST_QUICKJS_GC_INTERVAL")
+	if value == "" {
+		return 0
+	}
+	interval, err := strconv.Atoi(value)
+	if err != nil || interval < 1 {
+		return 0
+	}
+	return interval
+}
+
+// quickjsGCConfig resolves the GC strategy: manual-cadence mode wins over
+// the threshold when BIFROST_QUICKJS_GC_INTERVAL is set.
+func quickjsGCConfig() (int64, int) {
+	threshold := quickjsGCThreshold()
+	interval := quickjsGCInterval()
+	if interval > 0 {
+		return -1, interval
+	}
+	return threshold, 0
 }
 
 // esmFile returns a version-unique sibling file containing the bundle source.
@@ -400,6 +558,22 @@ func (r *Renderer) BuildSSR(entrypoints []string, outdir string) error {
 	return r.builder.BuildSSR(entrypoints, outdir)
 }
 
+// BuildSSRRegistry builds a shared lazy SSR registry bundle. It is the
+// quickjs equivalent of the Sobek registry: all page components bundle into
+// one module per worker, so React evaluates once instead of once per page.
+func (r *Renderer) BuildSSRRegistry(entrypoints []string, outdir string) (string, map[string]string, error) {
+	if r.builder == nil {
+		return "", nil, fmt.Errorf("quickjs renderer has no build adapter")
+	}
+	registryBuilder, ok := r.builder.(interface {
+		BuildSSRRegistry(entrypoints []string, outdir string) (string, map[string]string, error)
+	})
+	if !ok {
+		return "", nil, fmt.Errorf("quickjs build adapter has no registry builder")
+	}
+	return registryBuilder.BuildSSRRegistry(entrypoints, outdir)
+}
+
 func (r *Renderer) Stop() error {
 	if r == nil || r.stopped.Swap(true) {
 		return nil
@@ -420,6 +594,9 @@ func (r *Renderer) Stop() error {
 func (w *worker) close() {
 	for _, module := range w.modules {
 		module.render.Free()
+	}
+	for _, evaluated := range w.evaluated {
+		evaluated.exports.Free()
 	}
 	w.ctx.Close()
 	w.rt.Close()

@@ -1,4 +1,4 @@
-package quickjs
+package modernc
 
 import (
 	"context"
@@ -115,44 +115,6 @@ func TestRendererInterruptsCanceledRenderAndRecovers(t *testing.T) {
 	}
 }
 
-func TestRendererRendersRegistryLoader(t *testing.T) {
-	bundle := writeBundle(t, `
-const renders = {
-  "pages-home-entry": (props) => ({ head: "reg", html: "hello " + props.name }),
-};
-export const loaders = {
-  "pages-home-entry": () => renders["pages-home-entry"],
-};
-`)
-	renderer, err := NewRenderer(core.ModeProd, 1, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = renderer.Stop() }()
-
-	page, err := renderer.Render(bundle+"#pages-home-entry", map[string]any{"name": "World"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if page.Head != "reg" || page.Body != "hello World" {
-		t.Fatalf("unexpected page: %+v", page)
-	}
-}
-
-func TestRendererRegistryMissingLoader(t *testing.T) {
-	bundle := writeBundle(t, `export const loaders = { "other": () => ({}).render };`)
-	renderer, err := NewRenderer(core.ModeProd, 1, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = renderer.Stop() }()
-
-	_, err = renderer.Render(bundle+"#pages-home-entry", nil)
-	if err == nil || !strings.Contains(err.Error(), "loader") {
-		t.Fatalf("error = %v, want missing loader error", err)
-	}
-}
-
 func TestRendererRejectsPendingPromise(t *testing.T) {
 	bundle := writeBundle(t, `export function render() { return new Promise(() => {}); }`)
 	renderer, err := NewRenderer(core.ModeProd, 1, nil)
@@ -160,6 +122,7 @@ func TestRendererRejectsPendingPromise(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = renderer.Stop() }()
+	renderer.execTimeout = 200 * time.Millisecond
 
 	done := make(chan error, 1)
 	go func() {
@@ -168,11 +131,25 @@ func TestRendererRejectsPendingPromise(t *testing.T) {
 	}()
 	select {
 	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), "pending promise") {
-			t.Fatalf("error = %v, want pending promise rejection", err)
+		if err == nil {
+			t.Fatal("pending promise render unexpectedly succeeded")
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("render hung on a pending promise")
+	}
+}
+
+func TestRendererRejectsRegistryPath(t *testing.T) {
+	bundle := writeBundle(t, `export function render() { return { head: "", html: "" }; }`)
+	renderer, err := NewRenderer(core.ModeProd, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = renderer.Stop() }()
+
+	_, err = renderer.Render(bundle+"#pages-home-entry-ssr", nil)
+	if err == nil || !strings.Contains(err.Error(), "registry") {
+		t.Fatalf("error = %v, want registry unsupported", err)
 	}
 }
 
@@ -194,6 +171,30 @@ func TestRendererFailsWhenReloadedBundleDefinesNoGlobal(t *testing.T) {
 	_, err = renderer.Render(bundle, nil)
 	if err == nil || !strings.Contains(err.Error(), "did not define") {
 		t.Fatalf("error = %v, want stale global rejection", err)
+	}
+}
+
+func TestRendererMapsJSExceptionsToStructuredError(t *testing.T) {
+	bundle := writeBundle(t, `export function render() { throw new TypeError("boom"); }`)
+	renderer, err := NewRenderer(core.ModeProd, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = renderer.Stop() }()
+
+	_, err = renderer.Render(bundle, nil)
+	var structured *core.StructuredError
+	if !errors.As(err, &structured) {
+		t.Fatalf("error = %T %v, want *core.StructuredError", err, err)
+	}
+	if structured.ErrorType != "Render Error" {
+		t.Fatalf("error type = %q", structured.ErrorType)
+	}
+	if !strings.Contains(structured.Message, "boom") || !strings.Contains(structured.Message, "Failed to import component:") {
+		t.Fatalf("message = %q", structured.Message)
+	}
+	if structured.Stack == "" {
+		t.Fatal("stack is empty")
 	}
 }
 
@@ -230,30 +231,6 @@ func TestRendererStopWithInFlightRender(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("in-flight render did not terminate after Stop")
-	}
-}
-
-func TestRendererMapsJSExceptionsToStructuredError(t *testing.T) {
-	bundle := writeBundle(t, `export function render() { throw new TypeError("boom"); }`)
-	renderer, err := NewRenderer(core.ModeProd, 1, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = renderer.Stop() }()
-
-	_, err = renderer.Render(bundle, nil)
-	var structured *core.StructuredError
-	if !errors.As(err, &structured) {
-		t.Fatalf("error = %T %v, want *core.StructuredError", err, err)
-	}
-	if structured.ErrorType != "Render Error" {
-		t.Fatalf("error type = %q", structured.ErrorType)
-	}
-	if !strings.Contains(structured.Message, "boom") || !strings.Contains(structured.Message, "Failed to import component:") {
-		t.Fatalf("message = %q", structured.Message)
-	}
-	if structured.Stack == "" {
-		t.Fatal("stack is empty")
 	}
 }
 

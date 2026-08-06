@@ -6,6 +6,7 @@ check:
 	cd example && bun i && BIFROST_JS_RUNTIME=bun /tmp/bifrost build ./cmd/full/main.go
 	cd example && PATH="$$(go env GOROOT)/bin:/usr/bin:/bin" /tmp/bifrost build ./cmd/full/main.go
 	cd example && PATH="$$(go env GOROOT)/bin:/usr/bin:/bin" BIFROST_JS_RUNTIME=quickjs /tmp/bifrost build ./cmd/full/main.go
+	cd example && PATH="$$(go env GOROOT)/bin:/usr/bin:/bin" BIFROST_JS_RUNTIME=modernc /tmp/bifrost build ./cmd/full/main.go
 	mkdir -p test/e2e/.bifrost
 	cp -r example/cmd/full/.bifrost/. test/e2e/.bifrost/
 	env GOCACHE=/tmp/bifrost-go-build-cache GOMODCACHE=/tmp/bifrost-go-mod-cache GOPATH=/tmp/bifrost-go-path GOLANGCI_LINT_CACHE=/tmp/bifrost-golangci-lint-cache golangci-lint run ./...

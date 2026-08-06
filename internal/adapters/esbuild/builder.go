@@ -171,7 +171,11 @@ func (b *Builder) BuildSSRRegistry(entrypoints []string, outdir string) (string,
 		sourceMap = api.SourceMapNone
 	}
 	bundlePath := filepath.Join(outdir, "bifrost-ssr-registry.js")
-	result := api.Build(api.BuildOptions{
+	format := b.ssrFormat
+	if format == 0 {
+		format = api.FormatIIFE
+	}
+	options := api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   source.String(),
 			ResolveDir: filepath.Dir(entrypoints[0]),
@@ -182,8 +186,7 @@ func (b *Builder) BuildSSRRegistry(entrypoints []string, outdir string) (string,
 		Bundle:            true,
 		Write:             true,
 		Platform:          api.PlatformBrowser,
-		Format:            api.FormatIIFE,
-		GlobalName:        "__BIFROST_SSR__",
+		Format:            format,
 		Target:            api.ES2015,
 		Sourcemap:         sourceMap,
 		JSX:               api.JSXAutomatic,
@@ -193,9 +196,13 @@ func (b *Builder) BuildSSRRegistry(entrypoints []string, outdir string) (string,
 		MinifyIdentifiers: production,
 		MinifySyntax:      production,
 		Define:            map[string]string{"process.env.NODE_ENV": quotedNodeEnv(production)},
-		Banner:            map[string]string{"js": "/* bifrost:sobek-iife */"},
 		LogLevel:          api.LogLevelSilent,
-	})
+	}
+	if format == api.FormatIIFE {
+		options.GlobalName = "__BIFROST_SSR__"
+		options.Banner = map[string]string{"js": "/* bifrost:sobek-iife */"}
+	}
+	result := api.Build(options)
 	if err := buildError("SSR registry build", result.Errors); err != nil {
 		return "", nil, err
 	}
