@@ -407,9 +407,9 @@ func (w *worker) resolveRender(exports *qjs.Value, exportName string) (*qjs.Valu
 func parseRenderTarget(value string) (renderTarget, error) {
 	path := value
 	exportName := ""
-	if index := strings.IndexByte(value, '#'); index >= 0 {
-		path = value[:index]
-		exportName = value[index+1:]
+	if before, after, ok := strings.Cut(value, "#"); ok {
+		path = before
+		exportName = after
 	}
 	if path == "" {
 		return renderTarget{}, fmt.Errorf("missing SSR bundle path")
