@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/evanw/esbuild/pkg/api"
 	"github.com/3-lines-studio/sobek"
+	"github.com/evanw/esbuild/pkg/api"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
 )

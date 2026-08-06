@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/evanw/esbuild/pkg/api"
 	js "github.com/3-lines-studio/sobek"
+	"github.com/evanw/esbuild/pkg/api"
 )
 
 type registryBenchmarkPage struct {

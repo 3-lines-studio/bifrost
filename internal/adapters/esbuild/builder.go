@@ -14,8 +14,8 @@ import (
 	"sync"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
-	"github.com/evanw/esbuild/pkg/api"
 	"github.com/3-lines-studio/sobek"
+	"github.com/evanw/esbuild/pkg/api"
 )
 
 type Builder struct {
@@ -87,6 +87,7 @@ func (b *Builder) Build(entrypoints []string, outdir string, entryNames []string
 		Splitting:           true,
 		Metafile:            true,
 		Sourcemap:           sourceMap,
+		JSX:                 api.JSXAutomatic,
 		Conditions:          []string{"browser", "style"},
 		Plugins:             []api.Plugin{annotateTailwindPluginBases()},
 		EntryNames:          entryPattern,
@@ -170,6 +171,7 @@ func (b *Builder) BuildSSRRegistry(entrypoints []string, outdir string) (string,
 		GlobalName:        "__BIFROST_SSR__",
 		Target:            api.ES2015,
 		Sourcemap:         sourceMap,
+		JSX:               api.JSXAutomatic,
 		Conditions:        []string{"browser"},
 		Plugins:           []api.Plugin{ignoreCSSPlugin(), reactServerPlugin},
 		MinifyWhitespace:  production,
@@ -215,6 +217,7 @@ func (b *Builder) BuildSSR(entrypoints []string, outdir string) error {
 		Target:            api.ES2015,
 		Splitting:         false,
 		Sourcemap:         sourceMap,
+		JSX:               api.JSXAutomatic,
 		Conditions:        []string{"browser"},
 		Plugins:           []api.Plugin{ignoreCSSPlugin(), reactServerPlugin},
 		EntryNames:        "[name]",
