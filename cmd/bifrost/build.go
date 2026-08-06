@@ -13,10 +13,12 @@ import (
 	esbuildadapter "github.com/3-lines-studio/bifrost/internal/adapters/esbuild"
 	"github.com/3-lines-studio/bifrost/internal/adapters/fs"
 	"github.com/3-lines-studio/bifrost/internal/adapters/process"
+	quickjsrenderer "github.com/3-lines-studio/bifrost/internal/adapters/quickjs"
 	"github.com/3-lines-studio/bifrost/internal/adapters/react"
 	sobekrenderer "github.com/3-lines-studio/bifrost/internal/adapters/sobek"
 	"github.com/3-lines-studio/bifrost/internal/core"
 	"github.com/3-lines-studio/bifrost/internal/usecase"
+	"github.com/evanw/esbuild/pkg/api"
 )
 
 //go:embed sobek-default.pgo
@@ -179,10 +181,17 @@ func runBuildCommand(args []string) int {
 		Stop() error
 	}
 	var runtime buildRuntime
-	useSobekBuild := core.NormalizeJSRuntime(os.Getenv("BIFROST_JS_RUNTIME")) == core.JSRuntimeSobek
-	if useSobekBuild {
+	selectedRuntime := core.NormalizeJSRuntime(os.Getenv("BIFROST_JS_RUNTIME"))
+	useSobekBuild := selectedRuntime == core.JSRuntimeSobek
+	useInProcessBuild := selectedRuntime != core.JSRuntimeBun
+	if useInProcessBuild {
 		builder := esbuildadapter.NewBuilder(core.ModeProd)
-		runtime, err = sobekrenderer.NewRenderer(core.ModeProd, 0, builder)
+		if useSobekBuild {
+			runtime, err = sobekrenderer.NewRenderer(core.ModeProd, 0, builder)
+		} else {
+			esmBuilder := esbuildadapter.NewBuilder(core.ModeProd, esbuildadapter.WithSSRFormat(api.FormatESModule))
+			runtime, err = quickjsrenderer.NewRenderer(core.ModeProd, 0, esmBuilder)
+		}
 	} else {
 		runtime, err = process.NewRenderer(
 			core.ModeDev,

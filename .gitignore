@@ -15,3 +15,5 @@ go.work
 go.work.sum
 .gocache/
 *.exe
+experiments/
+.release/

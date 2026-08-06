@@ -1,4 +1,4 @@
-.PHONY: doctor dev build start dev-sobek build-sobek start-sobek dev-bun build-bun start-bun
+.PHONY: doctor dev build start dev-sobek build-sobek start-sobek dev-bun build-bun start-bun dev-quickjs build-quickjs start-quickjs
 
 doctor:
 	cd .. && go run ./cmd/bifrost doctor ./example/cmd/full
@@ -28,3 +28,12 @@ build-bun:
 
 start-bun: build-bun
 	BIFROST_JS_RUNTIME=bun ./bifrost-bun
+
+dev-quickjs:
+	cd .. && BIFROST_JS_RUNTIME=quickjs go run ./cmd/bifrost dev ./example/cmd/full/main.go
+
+build-quickjs:
+	cd .. && BIFROST_JS_RUNTIME=quickjs go run ./cmd/bifrost build ./example/cmd/full/main.go --go-build=./bifrost-quickjs
+
+start-quickjs: build-quickjs
+	BIFROST_QUICKJS_WORKERS=4 ./bifrost-quickjs

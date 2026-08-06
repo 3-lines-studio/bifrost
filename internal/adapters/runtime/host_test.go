@@ -10,10 +10,10 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-func TestHostDefaultsToSobek(t *testing.T) {
+func TestHostDefaultsToQuickJS(t *testing.T) {
 	t.Setenv("BIFROST_JS_RUNTIME", "")
-	if !(&Host{}).useSobek() {
-		t.Fatal("expected Sobek as the default runtime")
+	if !(&Host{}).useQuickJS() {
+		t.Fatal("expected QuickJS as the default runtime")
 	}
 }
 

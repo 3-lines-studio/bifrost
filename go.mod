@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/3-lines-studio/sobek v0.1.0
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
+	github.com/buke/quickjs-go v0.7.7
 	github.com/evanw/esbuild v0.28.1
 	github.com/fsnotify/fsnotify v1.10.1
 )

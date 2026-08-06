@@ -19,10 +19,21 @@ import (
 )
 
 type Builder struct {
-	mode core.Mode
+	mode      core.Mode
+	ssrFormat api.Format
 
 	tailwindMu sync.Mutex
 	tailwind   map[string]*tailwindCompiler
+}
+
+// BuilderOption configures a Builder.
+type BuilderOption func(*Builder)
+
+// WithSSRFormat selects the SSR bundle format. The default is IIFE, which
+// the Sobek runtime evaluates directly; ESM output is used by runtimes that
+// support native modules.
+func WithSSRFormat(format api.Format) BuilderOption {
+	return func(b *Builder) { b.ssrFormat = format }
 }
 
 type metafile struct {
@@ -47,8 +58,12 @@ type tailwindCompiler struct {
 	loadModule sobek.Value
 }
 
-func NewBuilder(mode core.Mode) *Builder {
-	return &Builder{mode: mode, tailwind: make(map[string]*tailwindCompiler)}
+func NewBuilder(mode core.Mode, opts ...BuilderOption) *Builder {
+	b := &Builder{mode: mode, tailwind: make(map[string]*tailwindCompiler)}
+	for _, opt := range opts {
+		opt(b)
+	}
+	return b
 }
 
 func (b *Builder) Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
@@ -206,14 +221,17 @@ func (b *Builder) BuildSSR(entrypoints []string, outdir string) error {
 	if production {
 		sourceMap = api.SourceMapNone
 	}
-	result := api.Build(api.BuildOptions{
+	format := b.ssrFormat
+	if format == 0 {
+		format = api.FormatIIFE
+	}
+	options := api.BuildOptions{
 		EntryPoints:       entrypoints,
 		Outdir:            outdir,
 		Bundle:            true,
 		Write:             true,
 		Platform:          api.PlatformBrowser,
-		Format:            api.FormatIIFE,
-		GlobalName:        "__BIFROST_SSR__",
+		Format:            format,
 		Target:            api.ES2015,
 		Splitting:         false,
 		Sourcemap:         sourceMap,
@@ -227,9 +245,13 @@ func (b *Builder) BuildSSR(entrypoints []string, outdir string) error {
 		Define: map[string]string{
 			"process.env.NODE_ENV": quotedNodeEnv(production),
 		},
-		Banner:   map[string]string{"js": "/* bifrost:sobek-iife */"},
 		LogLevel: api.LogLevelSilent,
-	})
+	}
+	if format == api.FormatIIFE {
+		options.GlobalName = "__BIFROST_SSR__"
+		options.Banner = map[string]string{"js": "/* bifrost:sobek-iife */"}
+	}
+	result := api.Build(options)
 	return buildError("SSR build", result.Errors)
 }
 

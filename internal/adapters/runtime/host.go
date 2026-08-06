@@ -13,9 +13,11 @@ import (
 
 	esbuildadapter "github.com/3-lines-studio/bifrost/internal/adapters/esbuild"
 	"github.com/3-lines-studio/bifrost/internal/adapters/process"
+	quickjsrenderer "github.com/3-lines-studio/bifrost/internal/adapters/quickjs"
 	"github.com/3-lines-studio/bifrost/internal/adapters/react"
 	sobekrenderer "github.com/3-lines-studio/bifrost/internal/adapters/sobek"
 	"github.com/3-lines-studio/bifrost/internal/core"
+	"github.com/evanw/esbuild/pkg/api"
 )
 
 type rendererClient interface {
@@ -99,10 +101,10 @@ func (r *Host) setupRuntimeForExport(exportDir string) error {
 	r.ssrTempDir = ssrTempDir
 	r.ssrCleanup = ssrCleanup
 
-	if r.useSobek() {
-		return r.startSobekRenderer(core.ModeProd, nil, ssrCleanup)
+	if r.useBun() {
+		return r.startRendererFromSource(core.ModeProd, react.RuntimeSource(core.ModeProd), ssrCleanup)
 	}
-	return r.startRendererFromSource(core.ModeProd, react.RuntimeSource(core.ModeProd), ssrCleanup)
+	return r.startInProcessRenderer(core.ModeProd, nil, ssrCleanup)
 }
 
 func (r *Host) initProdMode() (*Host, error) {
@@ -121,10 +123,10 @@ func (r *Host) initProdMode() (*Host, error) {
 
 	if core.HasSSREntries(man) {
 		var setupErr error
-		if r.useSobek() {
-			setupErr = r.setupEmbeddedSobekRuntime()
-		} else {
+		if r.useBun() {
 			setupErr = r.setupEmbeddedRuntime()
+		} else {
+			setupErr = r.setupEmbeddedInProcessRuntime()
 		}
 		if setupErr != nil {
 			return nil, setupErr
@@ -142,14 +144,14 @@ func loadManifestFromEmbed(assetsFS embed.FS) (*core.Manifest, error) {
 	return core.ParseManifest(data)
 }
 
-func (r *Host) setupEmbeddedSobekRuntime() error {
+func (r *Host) setupEmbeddedInProcessRuntime() error {
 	ssrTempDir, ssrCleanup, err := process.ExtractSSRBundles(r.assetsFS, r.manifest)
 	if err != nil {
 		return fmt.Errorf("failed to extract SSR bundles: %w", err)
 	}
 	r.ssrTempDir = ssrTempDir
 	r.ssrCleanup = ssrCleanup
-	return r.startSobekRenderer(core.ModeProd, nil, ssrCleanup)
+	return r.startInProcessRenderer(core.ModeProd, nil, ssrCleanup)
 }
 
 func (r *Host) setupEmbeddedRuntime() error {
@@ -174,7 +176,7 @@ func (r *Host) setupEmbeddedRuntime() error {
 }
 
 func (r *Host) initDevMode() (*Host, error) {
-	if !r.useSobek() {
+	if r.useBun() {
 		if err := r.startRendererFromSource(core.ModeDev, react.RuntimeSource(core.ModeDev), nil); err != nil {
 			return nil, err
 		}
@@ -182,7 +184,10 @@ func (r *Host) initDevMode() (*Host, error) {
 	}
 
 	builder := esbuildadapter.NewBuilder(core.ModeDev)
-	if err := r.startSobekRenderer(core.ModeDev, builder, nil); err != nil {
+	if r.useQuickJS() {
+		builder = esbuildadapter.NewBuilder(core.ModeDev, esbuildadapter.WithSSRFormat(api.FormatESModule))
+	}
+	if err := r.startInProcessRenderer(core.ModeDev, builder, nil); err != nil {
 		return nil, err
 	}
 	return r, nil
@@ -271,25 +276,62 @@ func (r *Host) startRendererFromExecutable(executablePath string, cleanup func()
 	return nil
 }
 
-func (r *Host) startSobekRenderer(mode core.Mode, builder sobekrenderer.Builder, cleanup func()) error {
-	client, err := sobekrenderer.NewRenderer(mode, sobekWorkers(), builder)
+func (r *Host) startInProcessRenderer(mode core.Mode, builder inProcessBuilder, cleanup func()) error {
+	var client rendererClient
+	var err error
+	if r.useQuickJS() {
+		client, err = quickjsrenderer.NewRenderer(mode, quickjsWorkers(), builder)
+	} else {
+		client, err = sobekrenderer.NewRenderer(mode, sobekWorkers(), builder)
+	}
 	if err != nil {
 		if cleanup != nil {
 			cleanup()
 		}
-		return fmt.Errorf("failed to start Sobek runtime: %w", err)
+		return fmt.Errorf("failed to start in-process runtime: %w", err)
 	}
 	r.client = client
 	r.ssrCleanup = cleanup
 	return nil
 }
 
+// inProcessBuilder matches the build methods shared by the Sobek and QuickJS
+// adapters. nil means builds are unavailable (production and export modes).
+type inProcessBuilder interface {
+	Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error)
+	BuildSSR(entrypoints []string, outdir string) error
+}
+
+func (r *Host) useBun() bool {
+	return r.selectedRuntime() == core.JSRuntimeBun
+}
+
 func (r *Host) useSobek() bool {
+	return r.selectedRuntime() == core.JSRuntimeSobek
+}
+
+func (r *Host) useQuickJS() bool {
+	return r.selectedRuntime() == core.JSRuntimeQuickJS
+}
+
+func (r *Host) selectedRuntime() string {
 	selected := os.Getenv("BIFROST_JS_RUNTIME")
 	if strings.TrimSpace(selected) == "" && r.manifest != nil {
 		selected = r.manifest.Runtime
 	}
-	return core.NormalizeJSRuntime(selected) == core.JSRuntimeSobek
+	return core.NormalizeJSRuntime(selected)
+}
+
+func quickjsWorkers() int {
+	value := os.Getenv("BIFROST_QUICKJS_WORKERS")
+	if value == "" {
+		return min(runtime.GOMAXPROCS(0), 4)
+	}
+	workers, err := strconv.Atoi(value)
+	if err != nil || workers < 1 {
+		return min(runtime.GOMAXPROCS(0), 4)
+	}
+	return workers
 }
 
 func sobekWorkers() int {

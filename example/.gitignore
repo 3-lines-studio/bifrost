@@ -3,5 +3,7 @@ node_modules/
 tmp/
 bifrost
 bifrost-sobek
+bifrost-bun
+bifrost-quickjs
 /full
 /cmd/full/full

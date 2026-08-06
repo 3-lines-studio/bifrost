@@ -8,6 +8,7 @@ require (
 	github.com/3-lines-studio/sobek v0.1.0 // indirect
 	github.com/JohannesKaufmann/dom v0.3.1 // indirect
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2 // indirect
+	github.com/buke/quickjs-go v0.7.7 // indirect
 	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
 	github.com/evanw/esbuild v0.28.1 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect

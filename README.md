@@ -12,6 +12,7 @@ Server-side rendering for React pages from Go: register routes, embed build outp
 - [Go](https://go.dev/dl/) 1.26.0 or newer
 - JavaScript packages installed in `node_modules` with npm, pnpm, Bun, or another package manager
 - [Bun](https://bun.sh) only when using the optional Bun backend
+- A C toolchain (`gcc`/`clang`) — required by the default QuickJS backend; set `BIFROST_JS_RUNTIME=sobek` for a pure-Go build
 
 ## Install
 
@@ -36,7 +37,7 @@ Templates: `minimal` (default), `spa` — e.g. `bifrost init --template spa myap
 bifrost dev ./main.go
 ```
 
-Hot reload on `.go` file changes with reverse proxy on `:3000` → `:8080`. Frontend changes (`.tsx`, `.ts`, `.css`) are rebuilt and reloaded by the default pure-Go Sobek backend.
+Hot reload on `.go` file changes with reverse proxy on `:3000` → `:8080`. Frontend changes (`.tsx`, `.ts`, `.css`) are rebuilt and reloaded by the default QuickJS backend.
 
 ## Production build
 
@@ -51,11 +52,13 @@ Hot reload on `.go` file changes with reverse proxy on `:3000` → `:8080`. Fron
 
 `bifrost build` exits non-zero if a required page or bundle fails. Build-scanned `Page` declarations must use string-literal component paths and direct Bifrost option calls; unsupported indirect forms fail with a clear error.
 
-Production `/dist/` assets are content-hashed and served with a one-year immutable cache policy. Sobek is the default JavaScript backend and runs in-process with a bounded worker pool. Select the optional Bun backend for higher SSR throughput:
+Production `/dist/` assets are content-hashed and served with a one-year immutable cache policy. QuickJS is the default JavaScript backend and runs in-process with a bounded worker pool. Select the optional Bun backend for higher SSR throughput, or the Sobek backend for a pure-Go build (no cgo, slower rendering):
 
 ```bash
 BIFROST_JS_RUNTIME=bun bifrost dev ./main.go
 BIFROST_JS_RUNTIME=bun bifrost build ./main.go
+BIFROST_JS_RUNTIME=quickjs bifrost dev ./main.go
+BIFROST_JS_RUNTIME=quickjs bifrost build ./main.go
 ```
 
 Use `http.Server` with graceful `SIGINT`/`SIGTERM` shutdown so deferred `app.Stop()` cleanup runs. Generated projects include this setup.

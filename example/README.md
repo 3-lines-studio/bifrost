@@ -8,7 +8,7 @@ This application exercises SSR, client-only pages, static prerendering, React hy
 - JavaScript packages installed in `node_modules`
 - Bun only for the optional Bun backend
 
-## Default Sobek backend
+## Default QuickJS backend
 
 Development:
 
@@ -24,7 +24,7 @@ cd example
 make start
 ```
 
-The default build records `"runtime": "sobek"` in `.bifrost/manifest.json`, so the production binary does not need `BIFROST_JS_RUNTIME` set. `BIFROST_SOBEK_WORKERS` defaults to `min(GOMAXPROCS, 4)` and can be overridden when starting the app. The build also applies Bifrost's Sobek PGO profile; set `BIFROST_SOBEK_PGO=off` to compare an unprofiled build.
+The default build records `"runtime": "quickjs"` in `.bifrost/manifest.json`, so the production binary does not need `BIFROST_JS_RUNTIME` set. `BIFROST_QUICKJS_WORKERS` defaults to `min(GOMAXPROCS, 4)` and can be overridden when starting the app. The QuickJS backend requires a C toolchain; set `BIFROST_JS_RUNTIME=sobek` for a pure-Go build (`make build-sobek`, `make start-sobek`).
 
 ## Optional Bun backend
 

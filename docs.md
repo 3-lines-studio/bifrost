@@ -4,7 +4,7 @@ Server-side rendering for React components in Go.
 
 ## Overview
 
-Bifrost bridges Go backends with React frontends. Sobek is the default in-process JavaScript backend; Bun is an optional higher-throughput backend.
+Bifrost bridges Go backends with React frontends. QuickJS is the default in-process JavaScript backend; Bun is an optional higher-throughput backend and Sobek an optional pure-Go one.
 
 ## Installation
 
@@ -39,7 +39,7 @@ Bifrost is organized into focused internal packages:
 
 ### Go vs TypeScript Boundary
 
-TypeScript is intentionally minimal in Bifrost. The default Sobek backend uses Go for build orchestration, esbuild, Tailwind scanning, runtime pooling, and IPC-free rendering. TypeScript remains only in generated React entries and the optional Bun adapter.
+TypeScript is intentionally minimal in Bifrost. The default QuickJS backend uses Go for build orchestration, esbuild, Tailwind scanning, runtime pooling, and IPC-free rendering. TypeScript remains only in generated React entries and the optional Bun adapter.
 
 - Behavior shared by both backends belongs in Go:
   - build orchestration and fallback behavior
@@ -710,11 +710,11 @@ Each build writes only to its own `dir(main.go)/.bifrost/`. No collision — eve
 
 ### Runtime concurrency
 
-Sobek is the default and uses an in-process worker pool:
+QuickJS is the default and runs in-process with a bounded worker pool:
 
 ```bash
 bifrost build ./main.go
-BIFROST_SOBEK_WORKERS=4 ./app
+BIFROST_QUICKJS_WORKERS=4 ./app
 ```
 
 Select Bun explicitly when maximum SSR throughput matters more than binary size and memory use:
@@ -724,11 +724,20 @@ BIFROST_JS_RUNTIME=bun bifrost build ./main.go
 BIFROST_JS_RUNTIME=bun ./app
 ```
 
+Select Sobek explicitly for a pure-Go build — roughly 2.5–3x slower warm rendering than QuickJS with far more memory and allocation overhead, but no cgo dependency:
+
+```bash
+BIFROST_JS_RUNTIME=sobek bifrost build ./main.go
+BIFROST_SOBEK_WORKERS=4 ./app
+```
+
+QuickJS runs the vendored quickjs-ng C engine through cgo, so builds require a C toolchain and cross-compilation needs one per target. Unlike Sobek it builds per-page ESM SSR bundles instead of a shared lazy registry, which the runtime evaluates as native modules — no runtime bundle transform — so pages load and fail independently. It supports the same Web API shims (console, TextEncoder, MessageChannel, Intl) as Sobek.
+
 Sobek uses esbuild's Go API for React SSR bundles, hydration bundles, code splitting, CSS imports, source maps, and production asset hashes. Production pages share one lazily initialized SSR registry, which deduplicates React and shared modules while keeping import failures isolated to the selected page. Tailwind's official JavaScript compiler runs inside Sobek; Bifrost scans the esbuild source graph in Go instead of loading Tailwind's native Node scanner. Bun is not started or required by a Sobek build. JavaScript packages must already exist in `node_modules`; use npm, pnpm, or another package installer if Bun is unavailable.
 
 Sobek removes the production child process and embedded Bun executable. It uses a pool of isolated JavaScript runtimes because one Sobek runtime is not goroutine-safe. The default worker count is `min(GOMAXPROCS, 4)`; set `BIFROST_SOBEK_WORKERS` only after load testing. Each worker loads its own copy of each used SSR bundle, trading memory for throughput.
 
-The manifest records the selected runtime, so a production binary built from Sobek assets selects Sobek when `BIFROST_JS_RUNTIME` is unset. An explicit runtime environment value overrides the manifest and must match the built assets. `bifrost build --go-build` applies the measured Sobek PGO profile by default; set `BIFROST_SOBEK_PGO=off` to disable it or set the variable to a profile path to replace it. React Compiler transforms currently run only in Bun builds; Sobek preserves React behavior but omits that optional optimization. Asynchronous JavaScript SSR that leaves a Promise pending is unsupported; load data in Go and pass it as props. Prefer static prerender for high-volume pages.
+The manifest records the selected runtime, so a production binary built from Sobek, QuickJS, or Bun assets selects that runtime when `BIFROST_JS_RUNTIME` is unset. An explicit runtime environment value overrides the manifest and must match the built assets. `bifrost build --go-build` applies the measured Sobek PGO profile by default for Sobek builds; set `BIFROST_SOBEK_PGO=off` to disable it or set the variable to a profile path to replace it. React Compiler transforms currently run only in Bun builds; Sobek and QuickJS preserve React behavior but omit that optional optimization. Asynchronous JavaScript SSR that leaves a Promise pending is unsupported; load data in Go and pass it as props. Prefer static prerender for high-volume pages.
 
 ### Route patterns
 
