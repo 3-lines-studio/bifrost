@@ -8,13 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
-	"github.com/3-lines-studio/sobek"
+	qjs "github.com/buke/quickjs-go"
 	"github.com/evanw/esbuild/pkg/api"
 )
 
@@ -22,9 +24,14 @@ type Builder struct {
 	mode      core.Mode
 	ssrFormat api.Format
 
-	tailwindMu sync.Mutex
-	tailwind   map[string]*tailwindCompiler
+	tailwindMu  sync.Mutex
+	tailwind    map[string][]*tailwindCompiler
+	tailwindSrc map[string][]byte
 }
+
+// verboseBuildTiming prints internal phase timings when the CLI build report
+// is in verbose mode.
+var verboseBuildTiming = os.Getenv("BIFROST_BUILD_VERBOSE") == "1"
 
 // BuilderOption configures a Builder.
 type BuilderOption func(*Builder)
@@ -53,13 +60,17 @@ type metafileImport struct {
 }
 
 type tailwindCompiler struct {
-	runtime    *sobek.Runtime
-	compile    sobek.Callable
-	loadModule sobek.Value
+	rt      *qjs.Runtime
+	ctx     *qjs.Context
+	compile *qjs.Value
 }
 
 func NewBuilder(mode core.Mode, opts ...BuilderOption) *Builder {
-	b := &Builder{mode: mode, tailwind: make(map[string]*tailwindCompiler)}
+	b := &Builder{
+		mode:        mode,
+		tailwind:    make(map[string][]*tailwindCompiler),
+		tailwindSrc: make(map[string][]byte),
+	}
 	for _, opt := range opts {
 		opt(b)
 	}
@@ -67,6 +78,7 @@ func NewBuilder(mode core.Mode, opts ...BuilderOption) *Builder {
 }
 
 func (b *Builder) Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+	buildStart := time.Now()
 	if len(entrypoints) == 0 {
 		return nil, fmt.Errorf("missing entrypoints")
 	}
@@ -124,8 +136,14 @@ func (b *Builder) Build(entrypoints []string, outdir string, entryNames []string
 	if err := json.Unmarshal([]byte(result.Metafile), &meta); err != nil {
 		return nil, fmt.Errorf("decode esbuild client metadata: %w", err)
 	}
+	if verboseBuildTiming {
+		fmt.Fprintf(os.Stderr, "[timing] esbuild client: %s\n", time.Since(buildStart))
+	}
 	if err := b.processCSS(entrypoints, result.OutputFiles, meta, production); err != nil {
 		return nil, err
+	}
+	if verboseBuildTiming {
+		fmt.Fprintf(os.Stderr, "[timing] tailwind+css: %s\n", time.Since(buildStart))
 	}
 	if err := writeOutputs(result.OutputFiles); err != nil {
 		return nil, err
@@ -410,40 +428,83 @@ func distURL(path string) string {
 }
 
 func (b *Builder) processCSS(entrypoints []string, outputs []api.OutputFile, meta metafile, minify bool) error {
+	var jobs []int
 	for i := range outputs {
 		if filepath.Ext(outputs[i].Path) != ".css" || !usesTailwind(outputs[i].Contents) {
 			continue
 		}
-		candidates := collectTailwindCandidates(inputsForCSS(meta.Outputs, outputs[i].Path))
-		packageRoot := findNodePackage(filepath.Dir(entrypoints[0]), "tailwindcss")
-		if packageRoot == "" {
-			return fmt.Errorf("tailwind CSS was imported but node_modules/tailwindcss was not found")
+		jobs = append(jobs, i)
+	}
+	if len(jobs) == 0 {
+		return nil
+	}
+	packageRoot := findNodePackage(filepath.Dir(entrypoints[0]), "tailwindcss")
+	if packageRoot == "" {
+		return fmt.Errorf("tailwind CSS was imported but node_modules/tailwindcss was not found")
+	}
+
+	// Tailwind compiles run in a Sobek engine and dominate the client build,
+	// so compile up to four CSS outputs at once, growing the compiler pool on
+	// demand. Four keeps the build's peak memory in check.
+	workers := min(runtime.GOMAXPROCS(0), 4)
+	if value := os.Getenv("BIFROST_TAILWIND_WORKERS"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			workers = parsed
 		}
-		compiled, err := b.compileTailwind(packageRoot, string(outputs[i].Contents), candidates)
+	}
+	if workers > len(jobs) {
+		workers = len(jobs)
+	}
+	jobsCh := make(chan int)
+	results := make(chan error, len(jobs))
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			for i := range jobsCh {
+				results <- b.compileCSSOutput(packageRoot, outputs, meta, i, minify)
+			}
+		})
+	}
+	for _, i := range jobs {
+		jobsCh <- i
+	}
+	close(jobsCh)
+	wg.Wait()
+	close(results)
+	for err := range results {
 		if err != nil {
-			return fmt.Errorf("compile Tailwind output %q: %w", outputs[i].Path, err)
+			return err
 		}
-		if minify {
-			transformed := api.Transform(compiled, api.TransformOptions{
-				Loader:           api.LoaderCSS,
-				MinifyWhitespace: true,
-				LegalComments:    api.LegalCommentsNone,
-				LogLevel:         api.LogLevelSilent,
-			})
-			if err := buildError("CSS minification", transformed.Errors); err != nil {
-				return err
-			}
-			outputs[i].Contents = transformed.Code
-		} else {
-			outputs[i].Contents = []byte(compiled)
+	}
+	return nil
+}
+
+func (b *Builder) compileCSSOutput(packageRoot string, outputs []api.OutputFile, meta metafile, i int, minify bool) error {
+	candidates := collectTailwindCandidates(inputsForCSS(meta.Outputs, outputs[i].Path))
+	compiled, err := b.compileTailwind(packageRoot, string(outputs[i].Contents), candidates)
+	if err != nil {
+		return fmt.Errorf("compile Tailwind output %q: %w", outputs[i].Path, err)
+	}
+	if minify {
+		transformed := api.Transform(compiled, api.TransformOptions{
+			Loader:           api.LoaderCSS,
+			MinifyWhitespace: true,
+			LegalComments:    api.LegalCommentsNone,
+			LogLevel:         api.LogLevelSilent,
+		})
+		if err := buildError("CSS minification", transformed.Errors); err != nil {
+			return err
 		}
-		if minify {
-			oldPath := outputs[i].Path
-			newPath := contentHashedCSSPath(oldPath, outputs[i].Contents)
-			if newPath != oldPath {
-				updateMetafileOutputPath(meta.Outputs, oldPath, newPath)
-				outputs[i].Path = newPath
-			}
+		outputs[i].Contents = transformed.Code
+	} else {
+		outputs[i].Contents = []byte(compiled)
+	}
+	if minify {
+		oldPath := outputs[i].Path
+		newPath := contentHashedCSSPath(oldPath, outputs[i].Contents)
+		if newPath != oldPath {
+			updateMetafileOutputPath(meta.Outputs, oldPath, newPath)
+			outputs[i].Path = newPath
 		}
 	}
 	return nil
@@ -536,48 +597,179 @@ func findNodePackage(start, name string) string {
 }
 
 func (b *Builder) compileTailwind(packageRoot, css string, candidates []string) (string, error) {
-	b.tailwindMu.Lock()
-	defer b.tailwindMu.Unlock()
-	compiler, ok := b.tailwind[packageRoot]
-	if !ok {
-		var err error
-		compiler, err = loadTailwindCompiler(packageRoot)
-		if err != nil {
-			return "", err
-		}
-		b.tailwind[packageRoot] = compiler
+	compiler, err := b.acquireTailwindCompiler(packageRoot)
+	if err != nil {
+		return "", err
 	}
+	defer b.releaseTailwindCompiler(packageRoot, compiler)
 	if err := compiler.loadPlugins(css); err != nil {
 		return "", err
 	}
-	value, err := compiler.compile(
-		sobek.Undefined(),
-		compiler.runtime.ToValue(css),
-		compiler.runtime.ToValue(map[string]any{"loadModule": compiler.loadModule}),
-	)
-	if err != nil {
+	ctx := compiler.ctx
+
+	cssValue := jsLiteral(ctx, css)
+	defer cssValue.Free()
+	if cssValue.IsException() {
+		return "", ctx.Exception()
+	}
+	opts := ctx.NewObject()
+	defer opts.Free()
+	loadModule := ctx.Globals().Get("__BIFROST_TAILWIND_LOAD_MODULE__")
+	opts.Set("loadModule", loadModule)
+
+	compileStart := time.Now()
+	result := ctx.Invoke(compiler.compile, ctx.Globals(), cssValue, opts)
+	if result.IsException() {
+		err := ctx.Exception()
+		result.Free()
 		return "", err
 	}
-	promise, ok := value.Export().(*sobek.Promise)
-	if !ok {
-		return "", fmt.Errorf("tailwind compile returned %T, not a Promise", value.Export())
+	if result.IsPromise() {
+		awaited := ctx.Await(result)
+		if awaited.IsException() {
+			err := ctx.Exception()
+			awaited.Free()
+			result.Free()
+			return "", err
+		}
+		result.Free()
+		result = awaited
 	}
-	if promise.State() != sobek.PromiseStateFulfilled {
-		return "", fmt.Errorf("tailwind compile Promise did not fulfill: %s", promise.Result().String())
-	}
-	compiled := promise.Result().ToObject(compiler.runtime)
-	build, ok := sobek.AssertFunction(compiled.Get("build"))
-	if !ok {
+	defer result.Free()
+	build := result.Get("build")
+	defer build.Free()
+	if !build.IsFunction() {
 		return "", fmt.Errorf("tailwind compile result has no build function")
 	}
-	output, err := build(compiled, compiler.runtime.ToValue(candidates))
-	if err != nil {
+	candidatesValue := jsLiteral(ctx, candidates)
+	defer candidatesValue.Free()
+	if candidatesValue.IsException() {
+		return "", ctx.Exception()
+	}
+	compileDone := time.Now()
+	output := ctx.Invoke(build, result, candidatesValue)
+	if output.IsException() {
+		err := ctx.Exception()
+		output.Free()
 		return "", err
+	}
+	defer output.Free()
+	if verboseBuildTiming {
+		fmt.Fprintf(os.Stderr, "[timing] tailwind compile=%s build=%s candidates=%d\n",
+			compileDone.Sub(compileStart), time.Since(compileDone), len(candidates))
 	}
 	return output.String(), nil
 }
 
-func loadTailwindCompiler(packageRoot string) (*tailwindCompiler, error) {
+// jsLiteral evaluates a JSON literal so it becomes the matching JS value.
+func jsLiteral(ctx *qjs.Context, value any) *qjs.Value {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return ctx.Eval("undefined")
+	}
+	return ctx.Eval(string(encoded))
+}
+
+// acquireTailwindCompiler borrows a compiler from the per-package pool,
+// loading a fresh one when the pool is empty so concurrent CSS outputs can
+// compile in parallel.
+func (b *Builder) acquireTailwindCompiler(packageRoot string) (*tailwindCompiler, error) {
+	b.tailwindMu.Lock()
+	if pool := b.tailwind[packageRoot]; len(pool) > 0 {
+		compiler := pool[len(pool)-1]
+		b.tailwind[packageRoot] = pool[:len(pool)-1]
+		b.tailwindMu.Unlock()
+		return compiler, nil
+	}
+	b.tailwindMu.Unlock()
+	return b.newTailwindCompiler(packageRoot)
+}
+
+func (b *Builder) releaseTailwindCompiler(packageRoot string, compiler *tailwindCompiler) {
+	b.tailwindMu.Lock()
+	b.tailwind[packageRoot] = append(b.tailwind[packageRoot], compiler)
+	b.tailwindMu.Unlock()
+}
+
+// newTailwindCompiler evaluates the bundled Tailwind engine into a fresh
+// QuickJS runtime. The esbuild bundle of the engine is shared across
+// compilers for the same package root.
+func (b *Builder) newTailwindCompiler(packageRoot string) (*tailwindCompiler, error) {
+	b.tailwindMu.Lock()
+	source, ok := b.tailwindSrc[packageRoot]
+	b.tailwindMu.Unlock()
+	if !ok {
+		var err error
+		source, err = bundleTailwindSource(packageRoot)
+		if err != nil {
+			return nil, err
+		}
+		b.tailwindMu.Lock()
+		b.tailwindSrc[packageRoot] = source
+		b.tailwindMu.Unlock()
+	}
+	rt := qjs.NewRuntime(qjs.WithOwnerGoroutineCheck(false))
+	ctx := rt.NewContext()
+	if value := ctx.Eval(string(source)); value.IsException() {
+		err := ctx.Exception()
+		value.Free()
+		ctx.Close()
+		rt.Close()
+		return nil, fmt.Errorf("load Tailwind compiler in QuickJS: %w", err)
+	} else {
+		value.Free()
+	}
+	global := ctx.Globals().Get("__BIFROST_TAILWIND__")
+	defer global.Free()
+	if !global.IsObject() {
+		ctx.Close()
+		rt.Close()
+		return nil, fmt.Errorf("tailwind compiler global was not created")
+	}
+	compile := global.Get("compile")
+	if !compile.IsFunction() {
+		compile.Free()
+		ctx.Close()
+		rt.Close()
+		return nil, fmt.Errorf("tailwind compiler has no compile function")
+	}
+	if value := ctx.Eval(tailwindLoadModuleJS); value.IsException() {
+		err := ctx.Exception()
+		value.Free()
+		compile.Free()
+		ctx.Close()
+		rt.Close()
+		return nil, fmt.Errorf("define Tailwind loadModule in QuickJS: %w", err)
+	} else {
+		value.Free()
+	}
+	if value := ctx.Eval(`if (typeof structuredClone !== "function") {
+		structuredClone = function(value) { return JSON.parse(JSON.stringify(value)); };
+	}`); value.IsException() {
+		err := ctx.Exception()
+		value.Free()
+		compile.Free()
+		ctx.Close()
+		rt.Close()
+		return nil, fmt.Errorf("define Tailwind structuredClone in QuickJS: %w", err)
+	} else {
+		value.Free()
+	}
+	loadModule := ctx.Globals().Get("__BIFROST_TAILWIND_LOAD_MODULE__")
+	if !loadModule.IsFunction() {
+		loadModule.Free()
+		compile.Free()
+		ctx.Close()
+		rt.Close()
+		return nil, fmt.Errorf("tailwind loadModule was not created")
+	}
+	loadModule.Free()
+	return &tailwindCompiler{rt: rt, ctx: ctx, compile: compile}, nil
+}
+
+// bundleTailwindSource bundles the Tailwind engine once per package root;
+// every compiler runtime reuses the same source bytes.
+func bundleTailwindSource(packageRoot string) ([]byte, error) {
 	entry := filepath.Join(packageRoot, "dist", "lib.mjs")
 	result := api.Build(api.BuildOptions{
 		EntryPoints:       []string{entry},
@@ -598,31 +790,7 @@ func loadTailwindCompiler(packageRoot string) (*tailwindCompiler, error) {
 	if len(result.OutputFiles) != 1 {
 		return nil, fmt.Errorf("tailwind compiler bundle returned %d files", len(result.OutputFiles))
 	}
-	runtime := sobek.New()
-	if _, err := runtime.RunString(string(result.OutputFiles[0].Contents)); err != nil {
-		return nil, fmt.Errorf("load Tailwind compiler in Sobek: %w", err)
-	}
-	global := runtime.Get("__BIFROST_TAILWIND__")
-	if sobek.IsUndefined(global) || sobek.IsNull(global) {
-		return nil, fmt.Errorf("tailwind compiler global was not created")
-	}
-	compile, ok := sobek.AssertFunction(global.ToObject(runtime).Get("compile"))
-	if !ok {
-		return nil, fmt.Errorf("tailwind compiler has no compile function")
-	}
-	if _, err := runtime.RunString(tailwindLoadModuleJS); err != nil {
-		return nil, fmt.Errorf("define Tailwind loadModule in Sobek: %w", err)
-	}
-	if _, err := runtime.RunString(`if (typeof structuredClone !== "function") {
-		structuredClone = function(value) { return JSON.parse(JSON.stringify(value)); };
-	}`); err != nil {
-		return nil, fmt.Errorf("define Tailwind structuredClone in Sobek: %w", err)
-	}
-	loadModule := runtime.Get("__BIFROST_TAILWIND_LOAD_MODULE__")
-	if _, ok := sobek.AssertFunction(loadModule); !ok {
-		return nil, fmt.Errorf("tailwind loadModule was not created")
-	}
-	return &tailwindCompiler{runtime: runtime, compile: compile, loadModule: loadModule}, nil
+	return result.OutputFiles[0].Contents, nil
 }
 
 const tailwindLoadModuleJS = `__BIFROST_TAILWIND_LOAD_MODULE__ = function(id, base, kind) {
@@ -730,7 +898,7 @@ func decodeTailwindPluginRef(ref string) (base, id string, err error) {
 }
 
 func (c *tailwindCompiler) loadPlugins(css string) error {
-	registry := c.runtime.NewObject()
+	registry := c.ctx.NewObject()
 	seen := make(map[string]bool)
 	for _, match := range encodedPluginDirectiveRe.FindAllStringSubmatch(css, -1) {
 		ref := match[2]
@@ -746,24 +914,17 @@ func (c *tailwindCompiler) loadPlugins(css string) error {
 		if err != nil {
 			return err
 		}
-		loaded := c.runtime.NewObject()
-		if err := loaded.Set("path", entry); err != nil {
-			return err
-		}
-		if err := loaded.Set("base", filepath.Dir(entry)); err != nil {
-			return err
-		}
-		if err := loaded.Set("module", plugin); err != nil {
-			return err
-		}
-		if err := registry.Set(ref, loaded); err != nil {
-			return err
-		}
+		loaded := c.ctx.NewObject()
+		loaded.Set("path", jsLiteral(c.ctx, entry))
+		loaded.Set("base", jsLiteral(c.ctx, filepath.Dir(entry)))
+		loaded.Set("module", plugin)
+		registry.Set(ref, loaded)
 	}
-	return c.runtime.Set("__BIFROST_TAILWIND_PLUGINS__", registry)
+	c.ctx.Globals().Set("__BIFROST_TAILWIND_PLUGINS__", registry)
+	return nil
 }
 
-func (c *tailwindCompiler) loadPluginModule(id, base string) (sobek.Value, string, error) {
+func (c *tailwindCompiler) loadPluginModule(id, base string) (*qjs.Value, string, error) {
 	sourcefile := "bifrost-tailwind-plugin.js"
 	source := "import * as plugin from " + strconv.Quote(id) + ";" +
 		"globalThis.__BIFROST_TAILWIND_PLUGIN__ = plugin.default ?? plugin;"
@@ -792,14 +953,17 @@ func (c *tailwindCompiler) loadPluginModule(id, base string) (sobek.Value, strin
 	if err != nil {
 		return nil, "", err
 	}
-	if err := c.runtime.Set("__BIFROST_TAILWIND_PLUGIN__", sobek.Undefined()); err != nil {
-		return nil, "", err
+	c.ctx.Globals().Set("__BIFROST_TAILWIND_PLUGIN__", jsLiteral(c.ctx, nil))
+	value := c.ctx.Eval(string(result.OutputFiles[0].Contents))
+	if value.IsException() {
+		err := c.ctx.Exception()
+		value.Free()
+		return nil, "", fmt.Errorf("load Tailwind plugin in QuickJS: %w", err)
 	}
-	if _, err := c.runtime.RunString(string(result.OutputFiles[0].Contents)); err != nil {
-		return nil, "", fmt.Errorf("load Tailwind plugin in Sobek: %w", err)
-	}
-	plugin := c.runtime.Get("__BIFROST_TAILWIND_PLUGIN__")
-	if sobek.IsUndefined(plugin) || sobek.IsNull(plugin) {
+	value.Free()
+	plugin := c.ctx.Globals().Get("__BIFROST_TAILWIND_PLUGIN__")
+	if !plugin.IsObject() {
+		plugin.Free()
 		return nil, "", fmt.Errorf("tailwind plugin %q exported no value", id)
 	}
 	return plugin, entry, nil

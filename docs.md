@@ -646,6 +646,11 @@ Indirect component paths (`Page("/{$}", homePath)`) and expanded option slices (
 
 Production `/dist/` assets are content-hashed and served with `Cache-Control: public, max-age=31536000, immutable`.
 
+**Build tuning:**
+
+- Tailwind CSS compiles run in an in-process QuickJS engine and dominate build time on large apps. The compiler pool compiles up to `min(GOMAXPROCS, 4)` stylesheets in parallel; `BIFROST_TAILWIND_WORKERS` overrides the pool size. Each worker costs memory, so stay at 4 unless load-testing larger builds.
+- `BIFROST_BUILD_VERBOSE=1` prints the per-step build report with durations, and the internal esbuild/Tailwind phase split.
+
 ### SSR Bundles
 
 For SSR pages, production builds include server bundles:

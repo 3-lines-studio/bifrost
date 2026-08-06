@@ -91,6 +91,11 @@ func (r *BuildReport) AddError(page string, message string, details []string) {
 func (r *BuildReport) Render() {
 	duration := time.Since(r.startTime)
 
+	if os.Getenv("BIFROST_BUILD_VERBOSE") == "1" {
+		r.renderVerbose(duration)
+		return
+	}
+
 	if len(r.errors) == 0 && len(r.warnings) == 0 {
 		r.renderMinimal(duration)
 	} else {
@@ -135,7 +140,7 @@ func (r *BuildReport) renderVerbose(duration time.Duration) {
 		if !step.Success {
 			status = r.colors.Red("✗")
 		}
-		fmt.Printf("  %s %s\n", status, step.Name)
+		fmt.Printf("  %s %-38s %s\n", status, step.Name, formatDuration(step.EndTime.Sub(step.StartTime)))
 	}
 
 	if len(r.errors) > 0 {
