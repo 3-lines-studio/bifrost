@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -57,6 +58,7 @@ type worker struct {
 	esmFiles       map[string]*esmFile
 	gcInterval     int
 	rendersSinceGC int
+	jsonParse      *qjs.Value
 }
 
 type esmFile struct {
@@ -128,6 +130,16 @@ func newWorker() (*worker, error) {
 		rt.Close()
 		return nil, err
 	}
+	jsonObject := ctx.Globals().Get("JSON")
+	jsonParse := jsonObject.Get("parse")
+	jsonObject.Free()
+	if !jsonParse.IsFunction() {
+		jsonParse.Free()
+		ctx.Close()
+		rt.Close()
+		return nil, fmt.Errorf("JSON.parse is not available")
+	}
+	w.jsonParse = jsonParse
 	return w, nil
 }
 
@@ -240,7 +252,15 @@ func (r *Renderer) RenderContext(ctx context.Context, path string, props any) (c
 		disarm()
 		return core.RenderedPage{}, err
 	}
-	propsValue := w.ctx.Eval("(" + string(propsJSON) + ")")
+	// JSON.parse of a single string beats evaluating the object literal: the
+	// literal goes through the JS lexer/parser token by token, while the C
+	// JSON parser consumes the payload in one pass. Measured ~10x on
+	// multi-megabyte props.
+	propsValue, err := w.parsePropsJSON(propsJSON)
+	if err != nil {
+		disarm()
+		return core.RenderedPage{}, err
+	}
 	if propsValue.IsException() {
 		disarm()
 		return core.RenderedPage{}, structuredRenderError(w.ctx.Exception())
@@ -360,6 +380,16 @@ func (w *worker) evaluatedExports(path string, source []byte, version [sha256.Si
 // resolveRender returns the render function for a target. A plain bundle
 // exports render directly; a registry exports loaders (or renders) keyed by
 // the entry export name.
+// parsePropsJSON builds the props object via JSON.parse of a single string.
+// Evaluating the object literal directly is ~10x slower on multi-megabyte
+// payloads because the JS lexer/parser processes every token, while the C
+// JSON parser consumes the payload in one pass.
+func (w *worker) parsePropsJSON(propsJSON []byte) (*qjs.Value, error) {
+	payload := w.ctx.NewString(string(propsJSON))
+	defer payload.Free()
+	return w.ctx.Invoke(w.jsonParse, w.ctx.Globals(), payload), nil
+}
+
 func (w *worker) resolveRender(exports *qjs.Value, exportName string) (*qjs.Value, error) {
 	render := exports.Get("render")
 	if exportName != "" {
@@ -544,6 +574,44 @@ func (w *worker) esmFile(bundlePath string, source []byte, version [sha256.Size]
 	return path, nil
 }
 
+// Prime evaluates each SSR bundle on every worker so the first real request
+// does not pay the cold-start eval. It resolves no render export, so it is
+// safe for registry bundles.
+func (r *Renderer) Prime(bundlePaths []string) error {
+	for _, path := range bundlePaths {
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("prime SSR bundle %q: %w", path, err)
+		}
+		version := sha256.Sum256(source)
+		if err := r.primeBundle(path, source, version); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Renderer) primeBundle(path string, source []byte, version [sha256.Size]byte) error {
+	errs := make(chan error, len(r.workers))
+	var wg sync.WaitGroup
+	for range len(r.workers) {
+		wg.Go(func() {
+			worker := <-r.workers
+			_, err := worker.evaluatedExports(path, source, version)
+			r.workers <- worker
+			errs <- err
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			return fmt.Errorf("prime SSR bundle %q: %w", path, err)
+		}
+	}
+	return nil
+}
+
 func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
 	if r.builder == nil {
 		return nil, fmt.Errorf("quickjs renderer has no build adapter")
@@ -598,6 +666,7 @@ func (w *worker) close() {
 	for _, evaluated := range w.evaluated {
 		evaluated.exports.Free()
 	}
+	w.jsonParse.Free()
 	w.ctx.Close()
 	w.rt.Close()
 }

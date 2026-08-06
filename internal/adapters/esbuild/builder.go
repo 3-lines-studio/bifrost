@@ -457,11 +457,13 @@ func (b *Builder) processCSS(entrypoints []string, outputs []api.OutputFile, met
 	}
 	jobsCh := make(chan int)
 	results := make(chan error, len(jobs))
+	var renames []cssRename
+	var renamesMu sync.Mutex
 	var wg sync.WaitGroup
 	for range workers {
 		wg.Go(func() {
 			for i := range jobsCh {
-				results <- b.compileCSSOutput(packageRoot, outputs, meta, i, minify)
+				results <- b.compileCSSOutput(packageRoot, outputs, meta, i, minify, &renames, &renamesMu)
 			}
 		})
 	}
@@ -476,10 +478,15 @@ func (b *Builder) processCSS(entrypoints []string, outputs []api.OutputFile, met
 			return err
 		}
 	}
+	// The metafile map is not goroutine-safe, so apply content-hash renames
+	// only after every parallel compile has finished.
+	for _, rename := range renames {
+		updateMetafileOutputPath(meta.Outputs, rename.oldPath, rename.newPath)
+	}
 	return nil
 }
 
-func (b *Builder) compileCSSOutput(packageRoot string, outputs []api.OutputFile, meta metafile, i int, minify bool) error {
+func (b *Builder) compileCSSOutput(packageRoot string, outputs []api.OutputFile, meta metafile, i int, minify bool, renames *[]cssRename, renamesMu *sync.Mutex) error {
 	candidates := collectTailwindCandidates(inputsForCSS(meta.Outputs, outputs[i].Path))
 	compiled, err := b.compileTailwind(packageRoot, string(outputs[i].Contents), candidates)
 	if err != nil {
@@ -503,11 +510,18 @@ func (b *Builder) compileCSSOutput(packageRoot string, outputs []api.OutputFile,
 		oldPath := outputs[i].Path
 		newPath := contentHashedCSSPath(oldPath, outputs[i].Contents)
 		if newPath != oldPath {
-			updateMetafileOutputPath(meta.Outputs, oldPath, newPath)
+			renamesMu.Lock()
+			*renames = append(*renames, cssRename{oldPath: oldPath, newPath: newPath})
+			renamesMu.Unlock()
 			outputs[i].Path = newPath
 		}
 	}
 	return nil
+}
+
+type cssRename struct {
+	oldPath string
+	newPath string
 }
 
 func contentHashedCSSPath(path string, content []byte) string {

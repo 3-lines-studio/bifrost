@@ -495,6 +495,31 @@ func (w *worker) esmFile(bundlePath string, source []byte, version [sha256.Size]
 	return path, nil
 }
 
+// Prime evaluates each SSR bundle on every worker so the first real request
+// does not pay the cold-start eval. Modernc apps use per-page bundles, so
+// loading the bundle's render export warms the worker.
+func (r *Renderer) Prime(bundlePaths []string) error {
+	for _, path := range bundlePaths {
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("prime SSR bundle %q: %w", path, err)
+		}
+		version := sha256.Sum256(source)
+		for range len(r.workers) {
+			w := <-r.workers
+			render, err := w.evaluate(path, source, version)
+			if err == nil {
+				render.Free()
+			}
+			r.workers <- w
+			if err != nil {
+				return fmt.Errorf("prime SSR bundle %q: %w", path, err)
+			}
+		}
+	}
+	return nil
+}
+
 func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
 	if r.builder == nil {
 		return nil, fmt.Errorf("modernc renderer has no build adapter")

@@ -152,7 +152,49 @@ func (r *Host) setupEmbeddedInProcessRuntime() error {
 	}
 	r.ssrTempDir = ssrTempDir
 	r.ssrCleanup = ssrCleanup
-	return r.startInProcessRenderer(core.ModeProd, nil, ssrCleanup)
+	if err := r.startInProcessRenderer(core.ModeProd, nil, ssrCleanup); err != nil {
+		return err
+	}
+	return r.primeWorkers()
+}
+
+// primeWorkers evaluates every SSR bundle on every worker so the first real
+// request does not pay the cold-start eval (~160 ms per worker on large
+// apps). Failures are warnings: the app still serves, the workers just stay
+// cold.
+func (r *Host) primeWorkers() error {
+	primer, ok := r.client.(interface {
+		Prime(bundlePaths []string) error
+	})
+	if !ok {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var paths []string
+	for _, entry := range r.manifest.Entries {
+		if entry.SSR == "" {
+			continue
+		}
+		resolved := r.ResolveSSRBundlePath(entry.SSR)
+		if bundlePath, _, found := strings.Cut(resolved, "#"); found {
+			resolved = bundlePath
+		}
+		if resolved == "" {
+			continue
+		}
+		if _, ok := seen[resolved]; ok {
+			continue
+		}
+		seen[resolved] = struct{}{}
+		paths = append(paths, resolved)
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	// Non-fatal: the app still serves, the workers just stay cold and warm
+	// on first use.
+	_ = primer.Prime(paths)
+	return nil
 }
 
 func (r *Host) setupEmbeddedRuntime() error {

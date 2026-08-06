@@ -8,6 +8,7 @@ require (
 	github.com/buke/quickjs-go v0.7.7
 	github.com/evanw/esbuild v0.28.1
 	github.com/fsnotify/fsnotify v1.10.1
+	modernc.org/quickjs v0.23.0
 )
 
 require (
@@ -27,5 +28,4 @@ require (
 	modernc.org/libquickjs v0.13.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/quickjs v0.23.0 // indirect
 )

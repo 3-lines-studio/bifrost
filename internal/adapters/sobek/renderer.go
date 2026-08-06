@@ -474,29 +474,36 @@ func formatBuildMessages(messages []api.Message) string {
 	return out.String()
 }
 
+func (w *worker) prime(module compiledModule) error {
+	if evaluated, ok := w.evaluated[module.key]; ok && evaluated.version == module.version {
+		return nil
+	}
+	if _, err := w.vm.RunProgram(module.program); err != nil {
+		return fmt.Errorf("evaluate SSR bundle: %w", err)
+	}
+	exports := w.vm.Get(module.globalName)
+	if js.IsUndefined(exports) || js.IsNull(exports) {
+		return fmt.Errorf("SSR bundle did not define %s", module.globalName)
+	}
+	w.evaluated[module.key] = evaluatedModule{version: module.version, exports: exports.ToObject(w.vm)}
+	for key := range w.modules {
+		if strings.HasPrefix(key, module.key+"#") {
+			delete(w.modules, key)
+		}
+	}
+	return nil
+}
+
 func (w *worker) load(module compiledModule, exportName string) (js.Callable, error) {
 	targetKey := module.key + "#" + exportName
 	if loaded, ok := w.modules[targetKey]; ok && loaded.version == module.version {
 		return loaded.render, nil
 	}
 
-	evaluated, ok := w.evaluated[module.key]
-	if !ok || evaluated.version != module.version {
-		if _, err := w.vm.RunProgram(module.program); err != nil {
-			return nil, fmt.Errorf("evaluate SSR bundle: %w", err)
-		}
-		exports := w.vm.Get(module.globalName)
-		if js.IsUndefined(exports) || js.IsNull(exports) {
-			return nil, fmt.Errorf("SSR bundle did not define %s", module.globalName)
-		}
-		evaluated = evaluatedModule{version: module.version, exports: exports.ToObject(w.vm)}
-		w.evaluated[module.key] = evaluated
-		for key := range w.modules {
-			if strings.HasPrefix(key, module.key+"#") {
-				delete(w.modules, key)
-			}
-		}
+	if err := w.prime(module); err != nil {
+		return nil, err
 	}
+	evaluated := w.evaluated[module.key]
 
 	renderValue := evaluated.exports.Get("render")
 	if exportName != "" {
@@ -528,6 +535,26 @@ func (w *worker) load(module compiledModule, exportName string) (js.Callable, er
 	}
 	w.modules[targetKey] = loadedModule{version: module.version, render: render}
 	return render, nil
+}
+
+// Prime evaluates each SSR bundle on every worker so the first real request
+// does not pay the cold-start eval.
+func (r *Renderer) Prime(bundlePaths []string) error {
+	for _, path := range bundlePaths {
+		module, err := r.modules.load(path, false)
+		if err != nil {
+			return fmt.Errorf("prime SSR bundle %q: %w", path, err)
+		}
+		for range len(r.workers) {
+			w := <-r.workers
+			err := w.prime(module)
+			r.workers <- w
+			if err != nil {
+				return fmt.Errorf("prime SSR bundle %q: %w", path, err)
+			}
+		}
+	}
+	return nil
 }
 
 func (r *Renderer) Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
