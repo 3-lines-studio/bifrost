@@ -2,12 +2,14 @@ package esbuild
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -40,8 +42,9 @@ type metafileImport struct {
 }
 
 type tailwindCompiler struct {
-	runtime *sobek.Runtime
-	compile sobek.Callable
+	runtime    *sobek.Runtime
+	compile    sobek.Callable
+	loadModule sobek.Value
 }
 
 func NewBuilder(mode core.Mode) *Builder {
@@ -85,6 +88,7 @@ func (b *Builder) Build(entrypoints []string, outdir string, entryNames []string
 		Metafile:            true,
 		Sourcemap:           sourceMap,
 		Conditions:          []string{"browser", "style"},
+		Plugins:             []api.Plugin{annotateTailwindPluginBases()},
 		EntryNames:          entryPattern,
 		ChunkNames:          "chunk-[name]-[hash]",
 		AssetNames:          "asset-[name]-[hash]",
@@ -477,7 +481,8 @@ func usesTailwind(css []byte) bool {
 	return strings.Contains(text, "@tailwind") ||
 		strings.Contains(text, "@theme") ||
 		strings.Contains(text, "@custom-variant") ||
-		strings.Contains(text, "@utility")
+		strings.Contains(text, "@utility") ||
+		strings.Contains(text, "@plugin")
 }
 
 func findNodePackage(start, name string) string {
@@ -510,7 +515,14 @@ func (b *Builder) compileTailwind(packageRoot, css string, candidates []string) 
 		}
 		b.tailwind[packageRoot] = compiler
 	}
-	value, err := compiler.compile(sobek.Undefined(), compiler.runtime.ToValue(css))
+	if err := compiler.loadPlugins(css); err != nil {
+		return "", err
+	}
+	value, err := compiler.compile(
+		sobek.Undefined(),
+		compiler.runtime.ToValue(css),
+		compiler.runtime.ToValue(map[string]any{"loadModule": compiler.loadModule}),
+	)
 	if err != nil {
 		return "", err
 	}
@@ -566,7 +578,227 @@ func loadTailwindCompiler(packageRoot string) (*tailwindCompiler, error) {
 	if !ok {
 		return nil, fmt.Errorf("tailwind compiler has no compile function")
 	}
-	return &tailwindCompiler{runtime: runtime, compile: compile}, nil
+	if _, err := runtime.RunString(tailwindLoadModuleJS); err != nil {
+		return nil, fmt.Errorf("define Tailwind loadModule in Sobek: %w", err)
+	}
+	if _, err := runtime.RunString(`if (typeof structuredClone !== "function") {
+		structuredClone = function(value) { return JSON.parse(JSON.stringify(value)); };
+	}`); err != nil {
+		return nil, fmt.Errorf("define Tailwind structuredClone in Sobek: %w", err)
+	}
+	loadModule := runtime.Get("__BIFROST_TAILWIND_LOAD_MODULE__")
+	if _, ok := sobek.AssertFunction(loadModule); !ok {
+		return nil, fmt.Errorf("tailwind loadModule was not created")
+	}
+	return &tailwindCompiler{runtime: runtime, compile: compile, loadModule: loadModule}, nil
+}
+
+const tailwindLoadModuleJS = `__BIFROST_TAILWIND_LOAD_MODULE__ = function(id, base, kind) {
+    var entry = __BIFROST_TAILWIND_PLUGINS__[id];
+    if (entry === undefined) {
+        throw new Error("bifrost: tailwind @plugin " + id + " not found in build");
+    }
+    return entry;
+};`
+
+const tailwindPluginRefPrefix = "bifrost-plugin:"
+
+var (
+	pluginDirectiveRe        = regexp.MustCompile(`@plugin\s*(["'])([^"']+)(["'])`)
+	encodedPluginDirectiveRe = regexp.MustCompile(`@plugin\s*(["'])(bifrost-plugin:[A-Za-z0-9_-]+)(["'])`)
+)
+
+func annotateTailwindPluginBases() api.Plugin {
+	return api.Plugin{
+		Name: "bifrost-tailwind-plugin-bases",
+		Setup: func(build api.PluginBuild) {
+			build.OnLoad(api.OnLoadOptions{Filter: `\.css$`}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				data, err := os.ReadFile(args.Path)
+				if err != nil {
+					return api.OnLoadResult{}, err
+				}
+				contents := rewriteTailwindPluginRefs(string(data), filepath.Dir(args.Path))
+				return api.OnLoadResult{
+					Contents:   &contents,
+					Loader:     api.LoaderCSS,
+					ResolveDir: filepath.Dir(args.Path),
+				}, nil
+			})
+		},
+	}
+}
+
+func rewriteTailwindPluginRefs(css, base string) string {
+	var out strings.Builder
+	for i := 0; i < len(css); {
+		if strings.HasPrefix(css[i:], "/*") {
+			end := strings.Index(css[i+2:], "*/")
+			if end < 0 {
+				out.WriteString(css[i:])
+				break
+			}
+			end += i + 4
+			out.WriteString(css[i:end])
+			i = end
+			continue
+		}
+		if css[i] == '"' || css[i] == '\'' {
+			quote := css[i]
+			start := i
+			i++
+			for i < len(css) {
+				if css[i] == '\\' && i+1 < len(css) {
+					i += 2
+					continue
+				}
+				i++
+				if css[i-1] == quote {
+					break
+				}
+			}
+			out.WriteString(css[start:i])
+			continue
+		}
+		if strings.HasPrefix(css[i:], "@plugin") {
+			match := pluginDirectiveRe.FindStringSubmatchIndex(css[i:])
+			if match != nil && match[0] == 0 && css[i+match[2]:i+match[3]] == css[i+match[6]:i+match[7]] {
+				id := css[i+match[4] : i+match[5]]
+				ref := encodeTailwindPluginRef(base, id)
+				out.WriteString(css[i : i+match[4]])
+				out.WriteString(ref)
+				out.WriteString(css[i+match[5] : i+match[1]])
+				i += match[1]
+				continue
+			}
+		}
+		out.WriteByte(css[i])
+		i++
+	}
+	return out.String()
+}
+
+func encodeTailwindPluginRef(base, id string) string {
+	value := filepath.Clean(base) + "\x00" + id
+	return tailwindPluginRefPrefix + base64.RawURLEncoding.EncodeToString([]byte(value))
+}
+
+func decodeTailwindPluginRef(ref string) (base, id string, err error) {
+	if !strings.HasPrefix(ref, tailwindPluginRefPrefix) {
+		return "", "", fmt.Errorf("tailwind plugin %q has no source base", ref)
+	}
+	value, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(ref, tailwindPluginRefPrefix))
+	if err != nil {
+		return "", "", fmt.Errorf("decode tailwind plugin reference: %w", err)
+	}
+	base, id, ok := strings.Cut(string(value), "\x00")
+	if !ok || base == "" || id == "" {
+		return "", "", fmt.Errorf("invalid tailwind plugin reference %q", ref)
+	}
+	return base, id, nil
+}
+
+func (c *tailwindCompiler) loadPlugins(css string) error {
+	registry := c.runtime.NewObject()
+	seen := make(map[string]bool)
+	for _, match := range encodedPluginDirectiveRe.FindAllStringSubmatch(css, -1) {
+		ref := match[2]
+		if seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		base, id, err := decodeTailwindPluginRef(ref)
+		if err != nil {
+			return err
+		}
+		plugin, entry, err := c.loadPluginModule(id, base)
+		if err != nil {
+			return err
+		}
+		loaded := c.runtime.NewObject()
+		if err := loaded.Set("path", entry); err != nil {
+			return err
+		}
+		if err := loaded.Set("base", filepath.Dir(entry)); err != nil {
+			return err
+		}
+		if err := loaded.Set("module", plugin); err != nil {
+			return err
+		}
+		if err := registry.Set(ref, loaded); err != nil {
+			return err
+		}
+	}
+	return c.runtime.Set("__BIFROST_TAILWIND_PLUGINS__", registry)
+}
+
+func (c *tailwindCompiler) loadPluginModule(id, base string) (sobek.Value, string, error) {
+	sourcefile := "bifrost-tailwind-plugin.js"
+	source := "import * as plugin from " + strconv.Quote(id) + ";" +
+		"globalThis.__BIFROST_TAILWIND_PLUGIN__ = plugin.default ?? plugin;"
+	result := api.Build(api.BuildOptions{
+		AbsWorkingDir:     base,
+		Stdin:             &api.StdinOptions{Contents: source, ResolveDir: base, Sourcefile: sourcefile, Loader: api.LoaderJS},
+		Bundle:            true,
+		Write:             false,
+		Platform:          api.PlatformBrowser,
+		MainFields:        []string{"browser", "module", "main"},
+		Format:            api.FormatIIFE,
+		Target:            api.ES2015,
+		Metafile:          true,
+		MinifyWhitespace:  true,
+		MinifyIdentifiers: true,
+		MinifySyntax:      true,
+		LogLevel:          api.LogLevelSilent,
+	})
+	if err := buildError("Tailwind plugin bundle", result.Errors); err != nil {
+		return nil, "", err
+	}
+	if len(result.OutputFiles) != 1 {
+		return nil, "", fmt.Errorf("tailwind plugin bundle returned %d files", len(result.OutputFiles))
+	}
+	entry, err := tailwindPluginEntry(result.Metafile, sourcefile, base, id)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := c.runtime.Set("__BIFROST_TAILWIND_PLUGIN__", sobek.Undefined()); err != nil {
+		return nil, "", err
+	}
+	if _, err := c.runtime.RunString(string(result.OutputFiles[0].Contents)); err != nil {
+		return nil, "", fmt.Errorf("load Tailwind plugin in Sobek: %w", err)
+	}
+	plugin := c.runtime.Get("__BIFROST_TAILWIND_PLUGIN__")
+	if sobek.IsUndefined(plugin) || sobek.IsNull(plugin) {
+		return nil, "", fmt.Errorf("tailwind plugin %q exported no value", id)
+	}
+	return plugin, entry, nil
+}
+
+func tailwindPluginEntry(metafileJSON, sourcefile, base, id string) (string, error) {
+	var meta struct {
+		Inputs map[string]struct {
+			Imports []struct {
+				Path     string `json:"path"`
+				Original string `json:"original"`
+			} `json:"imports"`
+		} `json:"inputs"`
+	}
+	if err := json.Unmarshal([]byte(metafileJSON), &meta); err != nil {
+		return "", fmt.Errorf("decode Tailwind plugin metadata: %w", err)
+	}
+	for path, input := range meta.Inputs {
+		if filepath.Base(path) != sourcefile {
+			continue
+		}
+		for _, imported := range input.Imports {
+			if imported.Original == id {
+				if filepath.IsAbs(imported.Path) {
+					return filepath.Clean(imported.Path), nil
+				}
+				return filepath.Clean(filepath.Join(base, filepath.FromSlash(imported.Path))), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("tailwind plugin %q has no resolved entry", id)
 }
 
 var quotedSource = regexp.MustCompile("(?s)\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*'|`(?:\\\\.|[^`\\\\])*`")
