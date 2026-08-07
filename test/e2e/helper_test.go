@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -29,17 +28,6 @@ func init() {
 	exampleDir, _ = filepath.Abs(filepath.Join(repoRoot, "example"))
 }
 
-func bunAvailable() bool {
-	_, err := exec.LookPath("bun")
-	return err == nil
-}
-
-func skipIfNoBun(t *testing.T) {
-	if strings.EqualFold(os.Getenv("BIFROST_JS_RUNTIME"), "bun") && !bunAvailable() {
-		t.Skip("Bun backend selected but Bun is unavailable")
-	}
-}
-
 type testServer struct {
 	app     *bifrost.App
 	port    int
@@ -49,7 +37,6 @@ type testServer struct {
 }
 
 func newTestServer(t *testing.T, routes []bifrost.Route, devMode bool) *testServer {
-	skipIfNoBun(t)
 
 	origDir, _ := os.Getwd()
 
@@ -91,7 +78,6 @@ type testServerWithWrap struct {
 }
 
 func newTestServerWithWrap(t *testing.T, routes []bifrost.Route, devMode bool) *testServerWithWrap {
-	skipIfNoBun(t)
 
 	origDir, _ := os.Getwd()
 
@@ -245,7 +231,7 @@ func normalizeHTML(html string) string {
 
 	html = regexp.MustCompile(`"[^"]*[-.][A-Za-z0-9_-]{6,}\.(js|css|mjs)"`).ReplaceAllString(html, `"[HASHED.$1]"`)
 
-	// Bun and esbuild split the same browser graph into different numbers of
+	// esbuild can split the same browser graph into different numbers of
 	// chunks. Keep one marker for each asset role instead of snapshotting an
 	// engine-specific chunk layout.
 	html = regexp.MustCompile(`(?:<link rel="modulepreload" href="\[HASHED\.js\]" />\s*)+`).ReplaceAllString(html, `<link rel="modulepreload" href="[HASHED.js]" /> `)
@@ -271,7 +257,7 @@ func normalizeHTML(html string) string {
 	// Normalize any absolute path (e.g. /home/user/project/src/...)
 	html = regexp.MustCompile(`/(?:home|Users|tmp)/[^\s<>"'&;]+\.[a-z]+`).ReplaceAllString(html, "/[FILE_PATH]")
 
-	// Async stack labels vary between Bun/runtime source shapes.
+	// Async stack labels vary with bundle source shapes.
 	html = strings.ReplaceAll(html, "async handleRender", "handleRender")
 
 	// Stack trace byte sizes and frames vary by backend.

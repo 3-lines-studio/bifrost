@@ -28,7 +28,7 @@ var intlShim string
 
 const (
 	defaultExecTimeout = 30 * time.Second
-	prebuiltIIFEMarker = "/* bifrost:sobek-iife */"
+	prebuiltIIFEMarker = "/* bifrost:iife */"
 	prebuiltIIFEGlobal = "__BIFROST_SSR__"
 )
 
@@ -626,9 +626,9 @@ func (r *Renderer) BuildSSR(entrypoints []string, outdir string) error {
 	return r.builder.BuildSSR(entrypoints, outdir)
 }
 
-// BuildSSRRegistry builds a shared lazy SSR registry bundle. It is the
-// quickjs equivalent of the Sobek registry: all page components bundle into
-// one module per worker, so React evaluates once instead of once per page.
+// BuildSSRRegistry builds a shared lazy SSR registry bundle: all page
+// components bundle into one module per worker, so React evaluates once
+// instead of once per page.
 func (r *Renderer) BuildSSRRegistry(entrypoints []string, outdir string) (string, map[string]string, error) {
 	if r.builder == nil {
 		return "", nil, fmt.Errorf("quickjs renderer has no build adapter")

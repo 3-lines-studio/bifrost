@@ -4,7 +4,7 @@ Server-side rendering for React components in Go.
 
 ## Overview
 
-Bifrost bridges Go backends with React frontends. QuickJS is the default in-process JavaScript backend; Bun is an optional higher-throughput backend and Sobek an optional pure-Go one.
+Bifrost bridges Go backends with React frontends. QuickJS is the in-process JavaScript backend (cgo, vendored quickjs-ng); there is no other runtime.
 
 ## Installation
 
@@ -16,9 +16,8 @@ go install github.com/3-lines-studio/bifrost/cmd/bifrost@latest
 Install JavaScript packages in `node_modules` with npm, pnpm, Bun, or another package manager.
 
 **Runtime requirements:**
-- **Default development and builds**: Pure Go with Sobek; Bun is not required
-- **Default production SSR**: Sobek runs inside the Go process
-- **Optional Bun backend**: Bun is required during development and builds; its runtime is embedded in production binaries
+- **Development and builds**: QuickJS in-process renderer; requires a C toolchain
+- **Production SSR**: QuickJS runs inside the Go process; no child process
 - **Production static-only**: No JavaScript runtime is active after export
 
 ## Architecture
@@ -28,18 +27,17 @@ Bifrost is organized into focused internal packages:
 - `internal/core` — Shared types (`PageConfig`, `PropsLoader`, `RedirectError`), manifest and HTML shell, page routing decisions, critical CSS, MIME/path helpers
 - `internal/usecase` — Build and page-serve orchestration (wiring core to adapters)
 - `internal/adapters/http` — Page and asset HTTP handlers
-- `internal/adapters/process` — Optional Bun renderer process and bundle IPC
-- `internal/adapters/esbuild` — Default esbuild-Go and Tailwind build pipeline
-- `internal/adapters/quickjs` — Default in-process JavaScript renderer (cgo, vendored quickjs-ng) and worker pool
-- `internal/adapters/runtime` — Backend selection and renderer lifecycle
+- `internal/adapters/esbuild` — esbuild-Go and Tailwind build pipeline
+- `internal/adapters/quickjs` — In-process JavaScript renderer (cgo, vendored quickjs-ng) and worker pool
+- `internal/adapters/runtime` — Renderer lifecycle and SSR bundle staging
 - `internal/adapters/fs` — Filesystem and embed abstractions
-- `internal/adapters/react` — React entry templates and runtime source
+- `internal/adapters/react` — React entry templates
 - `internal/adapters/cli` — Terminal output and build reports
 - Root `bifrost` package — Public `App` API (`New`, `Page`, `Wrap`, …)
 
 ### Go vs TypeScript Boundary
 
-TypeScript is intentionally minimal in Bifrost. The default QuickJS backend uses Go for build orchestration, esbuild, Tailwind scanning, runtime pooling, and IPC-free rendering. TypeScript remains only in generated React entries and the optional Bun adapter.
+TypeScript is intentionally minimal in Bifrost. QuickJS uses Go for build orchestration, esbuild, Tailwind scanning, runtime pooling, and rendering. TypeScript remains only in generated React entries.
 
 - Behavior shared by both backends belongs in Go:
   - build orchestration and fallback behavior
@@ -128,7 +126,7 @@ Bifrost determines mode by checking the `BIFROST_DEV` environment variable:
 bifrost dev ./main.go
 ```
 
-`bifrost dev` sets `BIFROST_DEV=1`, builds and restarts on `.go` changes, reverse-proxies `:<port>` → `:8080`, and relies on Bun's per-request module re-import for frontend hot reload.
+`bifrost dev` sets `BIFROST_DEV=1`, builds and restarts on `.go` changes, reverse-proxies `:<port>` → `:8080`, and rebuilds changed bundles and reloads the browser on frontend changes.
 
 ### Production Mode
 
@@ -149,22 +147,20 @@ Requirements:
 - `embed.FS` is **mandatory** — `New` returns an error if it is missing
 - `.bifrost/manifest.json` must exist in embedded assets
 - SSR bundles extracted from `.bifrost/ssr/` in embed.FS (SSR pages only)
-- Embedded Bun runtime included only for SSR pages
 - Source component files are **never** used
 
 **Static-only apps** (WithClient or WithStatic only):
-- No Bun runtime embedded
+- No SSR bundles embedded
 - Smaller binary size
 - Cannot serve SSR pages
 
 **SSR apps** (with at least one SSR page):
-- Bun runtime automatically embedded
-- Required for server-side rendering
+- SSR bundles embedded in `.bifrost/ssr/`
+- Rendered in-process by QuickJS
 
 `New` returns an error on:
 - Missing `embed.FS` in production
 - Missing or invalid `manifest.json` in embedded assets
-- Missing Bun or embedded runtime when SSR needs it
 - Conflicting page modes for one shared component
 
 ## React Support
@@ -355,9 +351,9 @@ bifrost.Page("/user/{id}", "./pages/user.tsx",
 
 #### SSR Performance
 
-React SSR uses `renderToString`. Bifrost buffers the rendered page before writing the HTTP response so render failures can return a clean HTTP 500. Request cancellation propagates to the Go-to-Bun HTTP request.
+React SSR uses `renderToString`. Bifrost buffers the rendered page before writing the HTTP response so render failures can return a clean HTTP 500. Request cancellation propagates to the render request.
 
-For routes where latency, throughput, or Largest Contentful Paint matters most, prefer static prerender (`WithStatic`). Those routes serve prebuilt HTML without invoking Bun per request.
+For routes where latency, throughput, or Largest Contentful Paint matters most, prefer static prerender (`WithStatic`). Those routes serve prebuilt HTML without rendering per request.
 
 ### Static Pages
 
@@ -374,7 +370,7 @@ bifrost.Page("/admin", "./pages/admin.tsx", bifrost.WithClient())
 Characteristics:
 - Empty `<div id="app"></div>` shell HTML in development and production
 - JavaScript bundles for client-side rendering
-- No Bun runtime or server-rendered `Head` output
+- No server-rendered `Head` output
 - Component renders entirely on the client
 
 Use SSR or static prerender when a page needs server-rendered metadata or SEO.
@@ -395,7 +391,7 @@ bifrost.Page("/about", "./pages/about.tsx", bifrost.WithStatic())
 Characteristics:
 - Full HTML with rendered body at build time
 - JavaScript bundles for client hydration
-- No Bun runtime needed to serve
+- Served as prebuilt HTML without invoking the renderer
 - Better initial load performance and SEO
 - Component hydrates on client for interactivity
 
@@ -540,11 +536,10 @@ Bifrost returns initialization errors from `New` in production:
 - Missing or invalid `manifest.json`
 - Missing, stale, or mode-mismatched page entries
 - Missing client scripts, client HTML shells, or SSR bundles
-- Missing embedded Bun runtime for SSR pages
 
 Handle the error before starting the HTTP server. This keeps setup failures out of request handling.
 
-**Note:** Runtime-related errors only occur when the app has SSR pages. Static-only apps don't include or require the Bun runtime.
+**Note:** Runtime-related errors only occur when the app has SSR pages. Static-only apps don't include SSR bundles.
 
 ### Development Error Pages
 
@@ -553,19 +548,18 @@ In development mode (`BIFROST_DEV=1`), Bifrost renders rich, structured error pa
 **Features:**
 
 - **Error type badges** — Visual classification into Build Error, Render Error, or Import Error
-- **File location** — Precise `file:line:column` when Bun provides position data
+- **File location** — Precise `file:line:column` when the engine provides position data
 - **Code snippets** — The offending line of source code, highlighted inline
 - **Stack traces** — Full JavaScript stack trace in an expandable details section
-- **Sub-errors** — Individual error details from `Bun.build` logs, each with its own file location
+- **Sub-errors** — Individual error details from esbuild logs, each with its own file location
 - **Import info** — Specifier and referrer for module resolution failures
 - **Next steps** — Context-specific guidance such as installing JavaScript packages or verifying import paths
 
 **Error flow:**
 
-1. Bun returns errors as JSON with nested `position`, `specifier`, and `referrer` fields
-2. Go deserializes into `*core.StructuredError` via `bunErrorJSON` types
-3. `errors.As` extracts the structured error at any depth in the error chain
-4. The dev error template renders the structured data
+1. The renderer maps engine exceptions into `*core.StructuredError` values with message and stack
+2. `errors.As` extracts the structured error at any depth in the error chain
+3. The dev error template renders the structured data
 
 **Fallback behavior:**
 
@@ -639,10 +633,9 @@ Indirect component paths (`Page("/{$}", homePath)`) and expanded option slices (
 3. Generate client and SSR entry files
 4. Build SSR bundles and client JS/CSS
 5. Generate client-only HTML shells
-6. Compile the embedded Bun runtime when Bun SSR or static export needs it; Sobek builds omit this step
-7. Export static-prerender routes and remove their build-only SSR bundles
-8. Copy `public/` assets and write `manifest.json`
-9. Exit non-zero if any required page or bundle fails
+6. Export static-prerender routes and remove their build-only SSR bundles
+7. Copy `public/` assets and write `manifest.json`
+8. Exit non-zero if any required page or bundle fails
 
 Production `/dist/` assets are content-hashed and served with `Cache-Control: public, max-age=31536000, immutable`.
 
@@ -656,7 +649,7 @@ Production `/dist/` assets are content-hashed and served with `Cache-Control: pu
 For SSR pages, production builds include server bundles:
 
 - Located in `.bifrost/ssr/`
-- Built for the selected Bun or Sobek runtime
+- Built for the QuickJS runtime
 - Extracted from `embed.FS` at runtime
 - Used instead of source files in production
 
@@ -715,43 +708,18 @@ Each build writes only to its own `dir(main.go)/.bifrost/`. No collision — eve
 
 ### Runtime concurrency
 
-QuickJS is the default and runs in-process with a bounded worker pool:
+QuickJS runs in-process with a bounded worker pool:
 
 ```bash
 bifrost build ./main.go
 BIFROST_QUICKJS_WORKERS=8 ./app
 ```
 
-The default worker count is `min(GOMAXPROCS, 8)`; set `BIFROST_QUICKJS_WORKERS` only after load testing. The shared SSR registry keeps per-worker memory flat as the page count grows. On startup the host evaluates each SSR bundle on every worker (priming), so the first request does not pay the per-worker cold-start eval — without it, a fresh 8-worker server pays ~160 ms per worker on first use. Automatic garbage collection is enabled with a 16 MiB threshold by default — quickjs-go disables it (`-1`), which leaks per-render garbage until OOM (measured ~150 MB/s under load). `BIFROST_QUICKJS_GC_THRESHOLD` overrides the threshold in bytes; `-1` restores the library default. `BIFROST_QUICKJS_GC_INTERVAL` switches to manual full-GC cadence (renders per worker); measured against the threshold default it gains nothing at equal memory and doubles peak RSS at useful cadences, so the threshold is the recommended config. The modernc backend uses the same default via `BIFROST_MODERNC_GC_THRESHOLD`.
+The default worker count is `min(GOMAXPROCS, 8)`; set `BIFROST_QUICKJS_WORKERS` only after load testing. The shared lazy SSR registry bundles all page components once per worker, so React evaluates once per worker instead of once per page and a large page count keeps memory flat, while import failures stay isolated to the selected page. On startup the host evaluates each SSR bundle on every worker (priming), so the first request does not pay the per-worker cold-start eval — without it, a fresh 8-worker server pays ~160 ms per worker on first use. Automatic garbage collection is enabled with a 16 MiB threshold by default — quickjs-go disables it (`-1`), which leaks per-render garbage until OOM (measured ~150 MB/s under load). `BIFROST_QUICKJS_GC_THRESHOLD` overrides the threshold in bytes; `-1` restores the library default. `BIFROST_QUICKJS_GC_INTERVAL` switches to manual full-GC cadence (renders per worker); measured against the threshold default it gains nothing at equal memory and doubles peak RSS at useful cadences, so the threshold is the recommended config.
 
-Select Bun explicitly when maximum SSR throughput matters more than binary size and memory use:
+QuickJS runs the vendored quickjs-ng C engine through cgo, so builds require a C toolchain and cross-compilation needs one per target. It supports the Web API shims (console, TextEncoder, MessageChannel, Intl).
 
-```bash
-BIFROST_JS_RUNTIME=bun bifrost build ./main.go
-BIFROST_JS_RUNTIME=bun ./app
-```
-
-Select Sobek explicitly for a pure-Go build — roughly 2.5–3x slower warm rendering than QuickJS with far more memory and allocation overhead, but no cgo dependency:
-
-```bash
-BIFROST_JS_RUNTIME=sobek bifrost build ./main.go
-BIFROST_SOBEK_WORKERS=4 ./app
-```
-
-Select the modernc port (modernc.org/quickjs) for a pure-Go runtime with native ESM modules — about 1.5x faster cold start and 1.1x faster warm rendering than Sobek with a fraction of the memory, but it stops scaling around four workers:
-
-```bash
-BIFROST_JS_RUNTIME=modernc bifrost build ./main.go
-BIFROST_MODERNC_WORKERS=4 ./app
-```
-
-QuickJS runs the vendored quickjs-ng C engine through cgo, so builds require a C toolchain and cross-compilation needs one per target. Like Sobek it builds a shared lazy SSR registry bundle, so React evaluates once per worker instead of once per page — a large page count keeps memory flat. It supports the same Web API shims (console, TextEncoder, MessageChannel, Intl) as Sobek.
-
-Sobek uses esbuild's Go API for React SSR bundles, hydration bundles, code splitting, CSS imports, source maps, and production asset hashes. Production pages share one lazily initialized SSR registry, which deduplicates React and shared modules while keeping import failures isolated to the selected page. Tailwind's official JavaScript compiler runs inside Sobek; Bifrost scans the esbuild source graph in Go instead of loading Tailwind's native Node scanner. Bun is not started or required by a Sobek build. JavaScript packages must already exist in `node_modules`; use npm, pnpm, or another package installer if Bun is unavailable.
-
-Sobek removes the production child process and embedded Bun executable. It uses a pool of isolated JavaScript runtimes because one Sobek runtime is not goroutine-safe. The default worker count is `min(GOMAXPROCS, 4)`; set `BIFROST_SOBEK_WORKERS` only after load testing. Each worker loads its own copy of each used SSR bundle, trading memory for throughput.
-
-The manifest records the selected runtime, so a production binary built from Sobek, QuickJS, or Bun assets selects that runtime when `BIFROST_JS_RUNTIME` is unset. An explicit runtime environment value overrides the manifest and must match the built assets. `bifrost build --go-build` applies the measured Sobek PGO profile by default for Sobek builds; set `BIFROST_SOBEK_PGO=off` to disable it or set the variable to a profile path to replace it. React Compiler transforms currently run only in Bun builds; Sobek and QuickJS preserve React behavior but omit that optional optimization. Asynchronous JavaScript SSR that leaves a Promise pending is unsupported; load data in Go and pass it as props. Prefer static prerender for high-volume pages.
+The build records `"runtime": "quickjs"` in the manifest. Asynchronous JavaScript SSR that leaves a Promise pending is unsupported; load data in Go and pass it as props. Prefer static prerender for high-volume pages.
 
 ### Route patterns
 
@@ -765,7 +733,7 @@ Patterns follow the wrapped router. With the built-in `http.ServeMux`, `"/"` is 
 4. **Strict production**: Always embed `.bifrost` and run `bifrost build ./main.go`
 5. **Handle errors in props loaders**: Return proper errors or redirects
 6. **Keep props minimal**: Pass only necessary data to components
-7. **Keep TypeScript minimal**: Treat TS as a thin Bun adapter; keep policy, validation, and artifact logic in Go
+7. **Keep TypeScript minimal**: Treat TS as a thin React adapter; keep policy, validation, and artifact logic in Go
 
 ## Extension Points
 
@@ -774,7 +742,7 @@ The architecture supports future extensions:
 - **New page modes**: extend `PageMode` in [`internal/core`](internal/core/types.go)
 - **New page options**: implement the `PageOption` function type in `internal/core`
 - **Build pipeline**: extend [`internal/usecase`](internal/usecase/build_project.go) and related build steps
-- **Renderer / Bun host**: extend [`internal/adapters/runtime`](internal/adapters/runtime/host.go) and [`internal/adapters/process`](internal/adapters/process/)
+- **Renderer host**: extend [`internal/adapters/runtime`](internal/adapters/runtime/host.go)
 
 ## Complete Example
 

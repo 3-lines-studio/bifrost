@@ -1,14 +1,14 @@
 # Bifrost
 
-> Bifrost is a Go library for server-side rendering React components using Bun. It bridges Go backends with React frontends via Unix socket communication.
+> Bifrost is a Go library for server-side rendering React components with QuickJS. It bridges Go backends with React frontends, rendering in-process with no external JS runtime.
 
-Bifrost enables Go HTTP servers to render React components on the server with a small API. React SSR uses `renderToString` and buffers the completed page before writing the HTTP response. Static pages are pre-rendered at build time into HTML with client-side React hydration (MPA-style), requiring no Bun runtime to serve. Development hot reload is handled by `bifrost dev` with built-in reverse proxy. Production deployment uses embedded assets for single binary distribution.
+Bifrost enables Go HTTP servers to render React components on the server with a small API. React SSR uses `renderToString` and buffers the completed page before writing the HTTP response. Static pages are pre-rendered at build time into HTML with client-side React hydration (MPA-style). Development hot reload is handled by `bifrost dev` with built-in reverse proxy. Production deployment uses embedded assets for single binary distribution.
 
 ## Features
 
 - Server-side rendering of React components
 - Props loading from Go to React
-- MPA-style static pages with pre-rendered HTML + client hydration (no runtime Bun)
+- MPA-style static pages with pre-rendered HTML + client hydration
 - Hot reload via `bifrost dev` (build+proxy+watcher)
 - Single binary deployment with embedded assets
 - Strict production builds: any required page or bundle failure exits non-zero
@@ -29,8 +29,8 @@ Bifrost enables Go HTTP servers to render React components on the server with a 
 - [App wiring](internal/app/app.go): public `App` construction, `Wrap`, `Handler`
 - [Build orchestration](internal/usecase/build_project.go): production build pipeline
 - [Serve / render](internal/usecase/serve_page.go): request-time page serving
-- [Bun host](internal/adapters/runtime/host.go): renderer process lifecycle
-- [Renderer IPC](internal/adapters/process/renderer.go): Bun renderer integration
+- [QuickJS renderer](internal/adapters/quickjs/renderer.go): in-process JavaScript rendering and worker pool
+- [Runtime host](internal/adapters/runtime/host.go): renderer lifecycle and SSR bundle staging
 - [HTTP handlers](internal/adapters/http/page_handler.go), [asset_handler.go](internal/adapters/http/asset_handler.go): pages and static assets
 - [Filesystem adapters](internal/adapters/fs/os_fs.go): OS filesystem support for CLI operations
 - [CLI output](internal/adapters/cli/output.go): terminal helpers
@@ -67,5 +67,3 @@ api := chi.NewRouter()
 handler := app.Wrap(api)
 // Serve handler with http.Server and graceful SIGINT/SIGTERM shutdown so app.Stop runs.
 ```
-
-

@@ -26,13 +26,3 @@ func TestClientEntryTemplates(t *testing.T) {
 		t.Fatal("client-only template does not contain createRoot")
 	}
 }
-
-func TestRuntimeSource(t *testing.T) {
-	dev := RuntimeSource(core.ModeDev)
-	if !strings.Contains(dev, "Bun.serve") || !strings.Contains(dev, "react-compiler") {
-		t.Fatal("development runtime is missing React support")
-	}
-	if prod := RuntimeSource(core.ModeProd); strings.Contains(prod, "bun-plugin-tailwind") {
-		t.Fatal("production runtime contains the development Tailwind plugin")
-	}
-}

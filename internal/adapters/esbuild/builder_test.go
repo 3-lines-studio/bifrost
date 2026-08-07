@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	sobekrenderer "github.com/3-lines-studio/bifrost/internal/adapters/sobek"
+	quickjsrenderer "github.com/3-lines-studio/bifrost/internal/adapters/quickjs"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
@@ -70,7 +70,7 @@ func TestBuilderSSRRegistryLazilyIsolatesImportFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	renderer, err := sobekrenderer.NewRenderer(core.ModeProd, 1, nil)
+	renderer, err := quickjsrenderer.NewRenderer(core.ModeProd, 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestBuilderSSRRegistryLazilyIsolatesImportFailures(t *testing.T) {
 	}
 }
 
-func TestBuilderCompilesTailwindInSobek(t *testing.T) {
+func TestBuilderCompilesTailwind(t *testing.T) {
 	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func TestCollectTailwindCandidatesKeepsArbitraryVariants(t *testing.T) {
 	}
 }
 
-func TestBuilderCompilesTailwindPluginInSobek(t *testing.T) {
+func TestBuilderCompilesTailwindPlugin(t *testing.T) {
 	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)

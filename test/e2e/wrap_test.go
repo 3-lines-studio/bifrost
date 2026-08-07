@@ -8,7 +8,6 @@ import (
 )
 
 func TestWrapWithServeMux_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(*http.Request) (any, error) {
@@ -36,7 +35,6 @@ func TestWrapWithServeMux_Dev(t *testing.T) {
 }
 
 func TestWrapWithServeMux_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(*http.Request) (any, error) {
@@ -64,7 +62,6 @@ func TestWrapWithServeMux_Prod(t *testing.T) {
 }
 
 func TestWrapServesPublicAsset_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/{$}", "./pages/home.tsx"),

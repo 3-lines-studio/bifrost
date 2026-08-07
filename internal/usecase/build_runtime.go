@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/3-lines-studio/bifrost/internal/adapters/react"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
@@ -70,45 +69,5 @@ func (s *BuildService) runExportMode(moduleRoot, appRoot, bifrostDir string, man
 
 	_ = os.Remove(exportManifestPath)
 
-	return nil
-}
-
-func (s *BuildService) compileEmbeddedRuntime(bifrostDir string) error {
-	runtimeDir := filepath.Join(bifrostDir, "runtime")
-	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
-		return fmt.Errorf("failed to create runtime dir: %w", err)
-	}
-
-	tempSourcePath := filepath.Join(runtimeDir, "renderer.ts")
-	sourceContent := react.RuntimeSource(core.ModeProd)
-
-	if err := os.WriteFile(tempSourcePath, []byte(sourceContent), 0644); err != nil {
-		return fmt.Errorf("failed to write temp source: %w", err)
-	}
-
-	outfile := filepath.Join(runtimeDir, "bifrost-renderer")
-	if os.Getenv("GOOS") == "windows" || (os.Getenv("GOOS") == "" && os.PathSeparator == '\\') {
-		outfile += ".exe"
-	}
-
-	cmd := exec.Command(
-		"bun",
-		"build",
-		"--compile",
-		"--outfile",
-		outfile,
-		"--no-compile-autoload-dotenv",
-		"--no-compile-autoload-bunfig",
-		tempSourcePath,
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		_ = os.Remove(tempSourcePath)
-		return fmt.Errorf("bun compile failed: %w", err)
-	}
-
-	_ = os.Remove(tempSourcePath)
 	return nil
 }

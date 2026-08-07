@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -27,17 +26,6 @@ func setSSRTempDir(t *testing.T, host *runtime.Host, tempDir string) {
 	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().SetString(tempDir)
 }
 
-func bunAvailable() bool {
-	_, err := exec.LookPath("bun")
-	return err == nil
-}
-
-func skipIfNoBun(t *testing.T) {
-	if !bunAvailable() {
-		t.Skip("bun not available, skipping integration test")
-	}
-}
-
 func mustNew(t *testing.T, routes ...core.Route) *App {
 	t.Helper()
 	a, err := New(testFS, routes...)
@@ -48,7 +36,6 @@ func mustNew(t *testing.T, routes ...core.Route) *App {
 }
 
 func TestNewCreatesApp(t *testing.T) {
-	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
 	a := mustNew(t)
@@ -174,7 +161,6 @@ func TestHandleRejectsMissingProductionManifestEntry(t *testing.T) {
 }
 
 func TestHandleBeforeWrap(t *testing.T) {
-	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
 	a := mustNew(t)
@@ -197,7 +183,6 @@ func TestHandleBeforeWrap(t *testing.T) {
 }
 
 func TestHandleAfterWrapReturnsError(t *testing.T) {
-	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
 	a := mustNew(t, core.Page("/", "./test.tsx"))
@@ -289,7 +274,6 @@ func TestGetSSBundlePathUsesExtractedSSRBundleInProduction(t *testing.T) {
 }
 
 func TestAppWrapWithServeMux(t *testing.T) {
-	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
 	a := mustNew(t, core.Page("/", "./example/components/hello.tsx"))
@@ -313,7 +297,6 @@ func TestAppWrapWithServeMux(t *testing.T) {
 }
 
 func TestAppHandlerNoRouter(t *testing.T) {
-	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
 	a := mustNew(t, core.Page("/", "./test.tsx"))
@@ -347,7 +330,6 @@ func TestAppWrap(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			skipIfNoBun(t)
 			a := mustNew(t, core.Page("/", "./test.tsx"))
 			defer func() { _ = a.Stop() }()
 
@@ -362,7 +344,6 @@ func TestAppWrap(t *testing.T) {
 }
 
 func TestAppWrapNilPanics(t *testing.T) {
-	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
 	a := mustNew(t, core.Page("/", "./test.tsx"))
@@ -379,7 +360,6 @@ func TestAppWrapNilPanics(t *testing.T) {
 
 func TestPageModeTypes(t *testing.T) {
 	t.Run("SSR page has correct mode", func(t *testing.T) {
-		skipIfNoBun(t)
 		t.Setenv("BIFROST_DEV", "1")
 
 		a := mustNew(t, core.Page("/test", "./test.tsx", core.WithLoader(func(*http.Request) (any, error) {
@@ -397,7 +377,6 @@ func TestPageModeTypes(t *testing.T) {
 	})
 
 	t.Run("Client page has correct mode", func(t *testing.T) {
-		skipIfNoBun(t)
 		t.Setenv("BIFROST_DEV", "1")
 
 		a := mustNew(t, core.Page("/test", "./test.tsx", core.WithClient()))
@@ -413,7 +392,6 @@ func TestPageModeTypes(t *testing.T) {
 	})
 
 	t.Run("Static page has correct mode", func(t *testing.T) {
-		skipIfNoBun(t)
 		t.Setenv("BIFROST_DEV", "1")
 
 		a := mustNew(t, core.Page("/test", "./test.tsx", core.WithStatic()))
@@ -430,7 +408,6 @@ func TestPageModeTypes(t *testing.T) {
 }
 
 func TestWithStaticData(t *testing.T) {
-	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
 	loader := func(ctx context.Context) ([]core.StaticPathData, error) {
@@ -457,7 +434,6 @@ func TestWithStaticData(t *testing.T) {
 }
 
 func TestDevModeWithStaticData(t *testing.T) {
-	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
 	loader := func(ctx context.Context) ([]core.StaticPathData, error) {
@@ -495,7 +471,6 @@ func TestDevModeWithStaticData(t *testing.T) {
 }
 
 func TestWrapPrintsRouteTableWhenForced(t *testing.T) {
-	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 	t.Setenv("BIFROST_ROUTE_TABLE", "1")
 
@@ -537,7 +512,6 @@ func TestWrapPrintsRouteTableWhenForced(t *testing.T) {
 }
 
 func TestWrapSuppressesRouteTableWhenDisabled(t *testing.T) {
-	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 	t.Setenv("BIFROST_NO_ROUTE_TABLE", "1")
 
@@ -569,7 +543,6 @@ func TestWrapSuppressesRouteTableWhenDisabled(t *testing.T) {
 }
 
 func TestDevModeSetupBeforeStaticDataLoader(t *testing.T) {
-	skipIfNoBun(t)
 	t.Setenv("BIFROST_DEV", "1")
 
 	loader := func(ctx context.Context) ([]core.StaticPathData, error) {

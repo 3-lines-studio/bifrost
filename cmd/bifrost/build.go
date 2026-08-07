@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,18 +11,11 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/adapters/cli"
 	esbuildadapter "github.com/3-lines-studio/bifrost/internal/adapters/esbuild"
 	"github.com/3-lines-studio/bifrost/internal/adapters/fs"
-	moderncrenderer "github.com/3-lines-studio/bifrost/internal/adapters/modernc"
-	"github.com/3-lines-studio/bifrost/internal/adapters/process"
 	quickjsrenderer "github.com/3-lines-studio/bifrost/internal/adapters/quickjs"
-	"github.com/3-lines-studio/bifrost/internal/adapters/react"
-	sobekrenderer "github.com/3-lines-studio/bifrost/internal/adapters/sobek"
 	"github.com/3-lines-studio/bifrost/internal/core"
 	"github.com/3-lines-studio/bifrost/internal/usecase"
 	"github.com/evanw/esbuild/pkg/api"
 )
-
-//go:embed sobek-default.pgo
-var sobekDefaultPGO []byte
 
 func findGoModRoot(startDir string) string {
 	dir := startDir
@@ -98,40 +90,6 @@ func ensureBifrostDir(fsAdapter fs.FileSystem, dir string) error {
 	return nil
 }
 
-func resolveSobekPGO(cwd string) (string, func(), error) {
-	configured := strings.TrimSpace(os.Getenv("BIFROST_SOBEK_PGO"))
-	if strings.EqualFold(configured, "off") || configured == "0" {
-		return "", func() {}, nil
-	}
-	if configured != "" && configured != "1" && !strings.EqualFold(configured, "default") {
-		path := configured
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(cwd, path)
-		}
-		if _, err := os.Stat(path); err != nil {
-			return "", func() {}, fmt.Errorf("configured profile %q: %w", path, err)
-		}
-		return path, func() {}, nil
-	}
-
-	profile, err := os.CreateTemp("", "bifrost-sobek-*.pgo")
-	if err != nil {
-		return "", func() {}, err
-	}
-	path := profile.Name()
-	cleanup := func() { _ = os.Remove(path) }
-	if _, err := profile.Write(sobekDefaultPGO); err != nil {
-		_ = profile.Close()
-		cleanup()
-		return "", func() {}, err
-	}
-	if err := profile.Close(); err != nil {
-		cleanup()
-		return "", func() {}, err
-	}
-	return path, cleanup, nil
-}
-
 func runBuild(args []string) {
 	os.Exit(runBuildCommand(args))
 }
@@ -182,29 +140,8 @@ func runBuildCommand(args []string) int {
 		Stop() error
 	}
 	var runtime buildRuntime
-	selectedRuntime := core.NormalizeJSRuntime(os.Getenv("BIFROST_JS_RUNTIME"))
-	useSobekBuild := selectedRuntime == core.JSRuntimeSobek
-	useInProcessBuild := selectedRuntime != core.JSRuntimeBun
-	if useInProcessBuild {
-		builder := esbuildadapter.NewBuilder(core.ModeProd)
-		switch selectedRuntime {
-		case core.JSRuntimeSobek:
-			runtime, err = sobekrenderer.NewRenderer(core.ModeProd, 0, builder)
-		case core.JSRuntimeModernc:
-			esmBuilder := esbuildadapter.NewBuilder(core.ModeProd, esbuildadapter.WithSSRFormat(api.FormatESModule))
-			runtime, err = moderncrenderer.NewRenderer(core.ModeProd, 0, esmBuilder)
-		default:
-			esmBuilder := esbuildadapter.NewBuilder(core.ModeProd, esbuildadapter.WithSSRFormat(api.FormatESModule))
-			runtime, err = quickjsrenderer.NewRenderer(core.ModeProd, 0, esmBuilder)
-		}
-	} else {
-		runtime, err = process.NewRenderer(
-			core.ModeDev,
-			react.RuntimeSource(core.ModeDev),
-			"BIFROST_PROD=1",
-			"BIFROST_DEV=0",
-		)
-	}
+	esmBuilder := esbuildadapter.NewBuilder(core.ModeProd, esbuildadapter.WithSSRFormat(api.FormatESModule))
+	runtime, err = quickjsrenderer.NewRenderer(core.ModeProd, 0, esmBuilder)
 	if err != nil {
 		output.PrintHeader("Bifrost Build")
 		output.PrintError("Failed to initialize build engine: %v", err)
@@ -239,21 +176,7 @@ func runBuildCommand(args []string) int {
 			output.PrintError("Failed to create output directory: %v", err)
 			return 1
 		}
-		goBuildArgs := []string{"build"}
-		pgoCleanup := func() {}
-		if useSobekBuild {
-			pgoPath, cleanup, pgoErr := resolveSobekPGO(originalCwd)
-			if pgoErr != nil {
-				output.PrintError("Failed to prepare Sobek PGO profile: %v", pgoErr)
-				return 1
-			}
-			pgoCleanup = cleanup
-			if pgoPath != "" {
-				goBuildArgs = append(goBuildArgs, "-pgo="+pgoPath)
-			}
-		}
-		defer pgoCleanup()
-		goBuildArgs = append(goBuildArgs, "-o", goBuildOutputAbs, filepath.Dir(mainFileAbs))
+		goBuildArgs := []string{"build", "-o", goBuildOutputAbs, filepath.Dir(mainFileAbs)}
 		goBuild := exec.Command("go", goBuildArgs...)
 		goBuild.Dir = goModRoot
 		goBuild.Stdout = os.Stdout

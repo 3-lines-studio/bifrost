@@ -36,9 +36,8 @@ var verboseBuildTiming = os.Getenv("BIFROST_BUILD_VERBOSE") == "1"
 // BuilderOption configures a Builder.
 type BuilderOption func(*Builder)
 
-// WithSSRFormat selects the SSR bundle format. The default is IIFE, which
-// the Sobek runtime evaluates directly; ESM output is used by runtimes that
-// support native modules.
+// WithSSRFormat selects the SSR bundle format. The default is IIFE; QuickJS
+// builds use ESM output for native module support.
 func WithSSRFormat(format api.Format) BuilderOption {
 	return func(b *Builder) { b.ssrFormat = format }
 }
@@ -218,7 +217,7 @@ func (b *Builder) BuildSSRRegistry(entrypoints []string, outdir string) (string,
 	}
 	if format == api.FormatIIFE {
 		options.GlobalName = "__BIFROST_SSR__"
-		options.Banner = map[string]string{"js": "/* bifrost:sobek-iife */"}
+		options.Banner = map[string]string{"js": "/* bifrost:iife */"}
 	}
 	result := api.Build(options)
 	if err := buildError("SSR registry build", result.Errors); err != nil {
@@ -274,7 +273,7 @@ func (b *Builder) BuildSSR(entrypoints []string, outdir string) error {
 	}
 	if format == api.FormatIIFE {
 		options.GlobalName = "__BIFROST_SSR__"
-		options.Banner = map[string]string{"js": "/* bifrost:sobek-iife */"}
+		options.Banner = map[string]string{"js": "/* bifrost:iife */"}
 	}
 	result := api.Build(options)
 	return buildError("SSR build", result.Errors)
@@ -443,7 +442,7 @@ func (b *Builder) processCSS(entrypoints []string, outputs []api.OutputFile, met
 		return fmt.Errorf("tailwind CSS was imported but node_modules/tailwindcss was not found")
 	}
 
-	// Tailwind compiles run in a Sobek engine and dominate the client build,
+	// Tailwind compiles run in a QuickJS engine and dominate the client build,
 	// so compile up to four CSS outputs at once, growing the compiler pool on
 	// demand. Four keeps the build's peak memory in check.
 	workers := min(runtime.GOMAXPROCS(0), 4)

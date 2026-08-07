@@ -8,7 +8,6 @@ import (
 )
 
 func TestStaticProductPage_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/product", "./pages/product.tsx", bifrost.WithStatic()),
@@ -24,7 +23,6 @@ func TestStaticProductPage_Dev(t *testing.T) {
 }
 
 func TestStaticProductPage_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/product", "./pages/product.tsx", bifrost.WithStatic()),
@@ -40,7 +38,6 @@ func TestStaticProductPage_Prod(t *testing.T) {
 }
 
 func TestStaticBlogPage_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	blogPosts := []struct {
 		Slug  string
@@ -78,7 +75,6 @@ func TestStaticBlogPage_Dev(t *testing.T) {
 }
 
 func TestStaticBlogPage_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	// In production mode, static pages are served from pre-built HTML files
 	// The data comes from main.go's build, not from the test's inline routes
@@ -108,7 +104,6 @@ func TestStaticBlogPage_Prod(t *testing.T) {
 }
 
 func TestStaticMultipleRoutes_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	docPages := []struct {
 		Path    string

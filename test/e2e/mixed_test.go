@@ -10,7 +10,6 @@ import (
 
 // TestMixedMode_AllThree_Dev tests an app with SSR, Static, and Client pages in dev mode
 func TestMixedMode_AllThree_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		// SSR page - needs runtime
@@ -53,7 +52,6 @@ func TestMixedMode_AllThree_Dev(t *testing.T) {
 // TestMixedMode_AllThree_Prod tests an app with SSR, Static, and Client pages in prod mode
 // Uses example app routes: /dashboard (SSR), /product (Static), /about (Client)
 func TestMixedMode_AllThree_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	// Use example app's actual routes
 	routes := []bifrost.Route{
@@ -88,7 +86,6 @@ func TestMixedMode_AllThree_Prod(t *testing.T) {
 
 // TestMixedMode_SSRAndStatic_Dev tests SSR + Static pages (no client) in dev mode
 func TestMixedMode_SSRAndStatic_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
@@ -115,7 +112,6 @@ func TestMixedMode_SSRAndStatic_Dev(t *testing.T) {
 
 // TestMixedMode_SSRAndStatic_Prod tests SSR + Static pages (no client) in prod mode
 func TestMixedMode_SSRAndStatic_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
@@ -143,7 +139,6 @@ func TestMixedMode_SSRAndStatic_Prod(t *testing.T) {
 // TestMixedMode_StaticAndClient_Dev tests Static + Client pages (no SSR) in dev mode
 // This is the CRITICAL test - verifies website pattern works without runtime
 func TestMixedMode_StaticAndClient_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/about", "./pages/about.tsx", bifrost.WithStatic()),
@@ -171,7 +166,6 @@ func TestMixedMode_StaticAndClient_Dev(t *testing.T) {
 // Uses example app routes: /product (Static), /about (Client)
 // This is the CRITICAL test - verifies website pattern works without runtime
 func TestMixedMode_StaticAndClient_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	// Use example app's actual routes
 	routes := []bifrost.Route{
@@ -196,7 +190,6 @@ func TestMixedMode_StaticAndClient_Prod(t *testing.T) {
 
 // TestMixedMode_SSRAndClient_Dev tests SSR + Client pages (no static) in dev mode
 func TestMixedMode_SSRAndClient_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/app", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
@@ -224,7 +217,6 @@ func TestMixedMode_SSRAndClient_Dev(t *testing.T) {
 
 // TestMixedMode_SSRAndClient_Prod tests SSR + Client pages (no static) in prod mode
 func TestMixedMode_SSRAndClient_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/app", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
@@ -252,7 +244,6 @@ func TestMixedMode_SSRAndClient_Prod(t *testing.T) {
 
 // TestMixedMode_MultipleEach_Dev tests multiple pages of each type in dev mode
 func TestMixedMode_MultipleEach_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		// Multiple SSR
@@ -295,7 +286,6 @@ func TestMixedMode_MultipleEach_Dev(t *testing.T) {
 // TestMixedMode_MultipleEach_Prod tests multiple pages of each type in prod mode
 // Uses example app routes: / (SSR), /simple (SSR), /product (Static), /about (Client), /login (Client)
 func TestMixedMode_MultipleEach_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	// Use example app's actual routes
 	routes := []bifrost.Route{

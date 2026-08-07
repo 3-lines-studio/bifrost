@@ -1,7 +1,6 @@
 // Minimal Intl polyfill for in-process JS runtimes without native Intl.
 //
-// sobek (the goja fork) and quickjs-ng have no Intl implementation. This
-// shim covers the
+// quickjs-ng has no Intl implementation. This shim covers the
 // subsets actually exercised by the SSR bundle: dayjs-timezone offset math
 // (DateTimeFormat.formatToParts + timeZoneName), date-fns locale formatting
 // (DateTimeFormat.format), dayjs locale digit maps (NumberFormat.format),

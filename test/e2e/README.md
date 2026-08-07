@@ -44,7 +44,6 @@ Tests error handling and redirects:
 ### Prerequisites
 - Go 1.26.0+
 - JavaScript packages installed in `example/node_modules`
-- Bun only when running the optional Bun backend
 
 ### Run all checks from the repo root (recommended)
 ```bash
@@ -130,8 +129,6 @@ To add a new E2E test:
 Example:
 ```go
 func TestMyPage_Dev(t *testing.T) {
-    skipIfNoBun(t)
-
     routes := []bifrost.Route{
         bifrost.Page("/my-page", "./pages/my-page.tsx", 
             bifrost.WithLoader(func(*http.Request) (any, error) {
@@ -153,8 +150,7 @@ func TestMyPage_Dev(t *testing.T) {
 ## CI/CD Integration
 
 These tests are designed for CI environments:
-- Run with Sobek by default and do not require Bun
-- Skip only when the Bun backend is selected but Bun is unavailable
+- Run with QuickJS by default; no external JS runtime is required
 - No browser or display required
 - Fast execution (~10 seconds for all 24 tests)
 - Fail on snapshot mismatches

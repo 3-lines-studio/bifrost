@@ -2,7 +2,7 @@ node_modules/
 dist/
 .bifrost/
 !internal/templates/*/.bifrost/
-!internal/adapters/process/testembed/.bifrost/
+!internal/adapters/runtime/testembed/.bifrost/
 !internal/adapters/http/.bifrost/
 !internal/adapters/http/.bifrost/dist/
 !internal/adapters/http/.bifrost/dist/app.js

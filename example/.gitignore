@@ -2,9 +2,6 @@ node_modules/
 .bifrost/
 tmp/
 bifrost
-bifrost-sobek
-bifrost-bun
 bifrost-quickjs
-bifrost-modernc
 /full
 /cmd/full/full

@@ -11,8 +11,7 @@ Server-side rendering for React pages from Go: register routes, embed build outp
 - Linux or macOS (Bifrost uses Unix sockets; Windows is not supported)
 - [Go](https://go.dev/dl/) 1.26.0 or newer
 - JavaScript packages installed in `node_modules` with npm, pnpm, Bun, or another package manager
-- [Bun](https://bun.sh) only when using the optional Bun backend
-- A C toolchain (`gcc`/`clang`) — required by the default QuickJS backend; set `BIFROST_JS_RUNTIME=sobek` or `BIFROST_JS_RUNTIME=modernc` for a pure-Go build
+- A C toolchain (`gcc`/`clang`) — required by the QuickJS backend
 
 ## Install
 
@@ -52,14 +51,7 @@ Hot reload on `.go` file changes with reverse proxy on `:3000` → `:8080`. Fron
 
 `bifrost build` exits non-zero if a required page or bundle fails. Build-scanned `Page` declarations must use string-literal component paths and direct Bifrost option calls; unsupported indirect forms fail with a clear error.
 
-Production `/dist/` assets are content-hashed and served with a one-year immutable cache policy. QuickJS is the default JavaScript backend and runs in-process with a bounded worker pool. Select the optional Bun backend for higher SSR throughput, or the Sobek backend for a pure-Go build (no cgo, slower rendering):
-
-```bash
-BIFROST_JS_RUNTIME=bun bifrost dev ./main.go
-BIFROST_JS_RUNTIME=bun bifrost build ./main.go
-BIFROST_JS_RUNTIME=quickjs bifrost dev ./main.go
-BIFROST_JS_RUNTIME=quickjs bifrost build ./main.go
-```
+Production `/dist/` assets are content-hashed and served with a one-year immutable cache policy. QuickJS is the JavaScript backend: it runs in-process (cgo, vendored quickjs-ng) with a bounded worker pool, so the production binary has no child process and no external runtime.
 
 Use `http.Server` with graceful `SIGINT`/`SIGTERM` shutdown so deferred `app.Stop()` cleanup runs. Generated projects include this setup.
 

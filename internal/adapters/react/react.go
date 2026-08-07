@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"strings"
 
-	"github.com/3-lines-studio/bifrost/internal/adapters/process"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
@@ -20,10 +19,6 @@ var (
 	//go:embed react_client_only.txt
 	clientOnlyTemplate string
 )
-
-func RuntimeSource(mode core.Mode) string {
-	return process.RuntimeSource(mode)
-}
 
 func SSREntryTemplate() string {
 	return strings.ReplaceAll(ssrTemplate, "BIFROST_SSR_PAGE_WRAP", "pageEl")

@@ -1,44 +1,34 @@
 package quickjs
 
 import (
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
-
-	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-// BenchmarkWorkerInit isolates the per-worker setup cost (runtime, context,
-// shims, interrupt handler) from bundle evaluation and rendering.
-func BenchmarkWorkerInit(b *testing.B) {
-	b.ReportAllocs()
-	for range b.N {
-		renderer, err := NewRenderer(core.ModeProd, 1, nil)
-		if err != nil {
-			b.Fatal(err)
-		}
-		if err := renderer.Stop(); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
+var (
+	exampleBundleOnce sync.Once
+	exampleBundlePath string
+)
 
-// BenchmarkWorkerInitAndIIFEEval adds evaluating the prebuilt IIFE bundle.
-func BenchmarkWorkerInitAndIIFEEval(b *testing.B) {
-	bundle, skip := exampleHomeBundle(b)
-	if skip {
-		b.Skip("example SSR bundle unavailable")
-	}
-	props := map[string]any{"name": "Benchmark"}
-	b.ReportAllocs()
-	for range b.N {
-		renderer, err := NewRenderer(core.ModeProd, 1, nil)
+// exampleHomeBundle returns a bundle path for benchmarks, writing a small
+// SSR bundle to a temp file on first use.
+func exampleHomeBundle(b *testing.B) (string, bool) {
+	exampleBundleOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "bifrost-bench-*")
 		if err != nil {
-			b.Fatal(err)
+			return
 		}
-		if _, err := renderer.Render(bundle, props); err != nil {
-			b.Fatal(err)
+		path := filepath.Join(dir, "pages-home-entry-ssr.js")
+		content := []byte(`export async function render(props) { return { head: "<title>" + props.name + "</title>", html: "<main>Hello " + props.name + "</main>" }; }`)
+		if err := os.WriteFile(path, content, 0o644); err != nil {
+			return
 		}
-		if err := renderer.Stop(); err != nil {
-			b.Fatal(err)
-		}
+		exampleBundlePath = path
+	})
+	if exampleBundlePath == "" {
+		return "", true
 	}
+	return exampleBundlePath, false
 }

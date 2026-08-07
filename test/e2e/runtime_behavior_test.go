@@ -9,7 +9,6 @@ import (
 
 // TestProd_RuntimeInitialized_SSR verifies that SSR apps initialize runtime in production
 func TestProd_RuntimeInitialized_SSR(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/", "./pages/home.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
@@ -40,7 +39,6 @@ func TestProd_RuntimeInitialized_SSR(t *testing.T) {
 // Uses example app route: /product (Static)
 // This is the CRITICAL test - the website pattern
 func TestProd_NoRuntime_StaticOnly(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/product", "./pages/product.tsx", bifrost.WithStatic()),
@@ -59,7 +57,6 @@ func TestProd_NoRuntime_StaticOnly(t *testing.T) {
 
 // TestProd_NoRuntime_ClientOnly verifies that client-only apps work without runtime
 func TestProd_NoRuntime_ClientOnly(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/login", "./pages/login.tsx", bifrost.WithClient()),
@@ -77,7 +74,6 @@ func TestProd_NoRuntime_ClientOnly(t *testing.T) {
 // TestProd_RuntimeInitialized_MixedWithSSR verifies mixed apps with SSR use runtime
 // Uses example app routes: /dashboard (SSR), /product (Static), /about (Client)
 func TestProd_RuntimeInitialized_MixedWithSSR(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/dashboard", "./pages/dashboard.tsx", bifrost.WithLoader(func(r *http.Request) (any, error) {
@@ -112,7 +108,6 @@ func TestProd_RuntimeInitialized_MixedWithSSR(t *testing.T) {
 // TestProd_NoRuntime_MixedWithoutSSR verifies mixed apps without SSR work without runtime
 // Uses example app routes: /product (Static), /about (Client)
 func TestProd_NoRuntime_MixedWithoutSSR(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/product", "./pages/product.tsx", bifrost.WithStatic()),

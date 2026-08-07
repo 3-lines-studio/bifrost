@@ -7,7 +7,6 @@ import (
 )
 
 func TestClientOnlyAboutPage_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/about", "./pages/about.tsx", bifrost.WithClient()),
@@ -25,7 +24,6 @@ func TestClientOnlyAboutPage_Dev(t *testing.T) {
 }
 
 func TestClientOnlyAboutPage_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/about", "./pages/about.tsx", bifrost.WithClient()),
@@ -42,7 +40,6 @@ func TestClientOnlyAboutPage_Prod(t *testing.T) {
 }
 
 func TestClientOnlyLoginPage_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/login", "./pages/login.tsx", bifrost.WithClient()),
@@ -60,7 +57,6 @@ func TestClientOnlyLoginPage_Dev(t *testing.T) {
 }
 
 func TestClientOnlyLoginPage_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/login", "./pages/login.tsx", bifrost.WithClient()),
@@ -77,7 +73,6 @@ func TestClientOnlyLoginPage_Prod(t *testing.T) {
 }
 
 func TestClientOnlyNestedPath_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/client/deep", "./pages/login.tsx", bifrost.WithClient()),
@@ -95,7 +90,6 @@ func TestClientOnlyNestedPath_Dev(t *testing.T) {
 }
 
 func TestClientOnlyNestedPath_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/client/deep", "./pages/login.tsx", bifrost.WithClient()),

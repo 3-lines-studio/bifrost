@@ -8,7 +8,6 @@ import (
 )
 
 func TestSSRHomePage_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(*http.Request) (any, error) {
@@ -26,7 +25,6 @@ func TestSSRHomePage_Dev(t *testing.T) {
 }
 
 func TestSSRHomePage_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/{$}", "./pages/home.tsx", bifrost.WithLoader(func(*http.Request) (any, error) {
@@ -44,7 +42,6 @@ func TestSSRHomePage_Prod(t *testing.T) {
 }
 
 func TestSSRNestedPage_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/nested", "./pages/nested/page.tsx", bifrost.WithLoader(func(*http.Request) (any, error) {
@@ -62,7 +59,6 @@ func TestSSRNestedPage_Dev(t *testing.T) {
 }
 
 func TestSSRNestedPage_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/nested", "./pages/nested/page.tsx", bifrost.WithLoader(func(*http.Request) (any, error) {
@@ -80,7 +76,6 @@ func TestSSRNestedPage_Prod(t *testing.T) {
 }
 
 func TestSSRDynamicParams_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/message/{message}", "./pages/home.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
@@ -103,7 +98,6 @@ func TestSSRDynamicParams_Dev(t *testing.T) {
 }
 
 func TestSSRDynamicParams_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/message/{message}", "./pages/home.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
@@ -126,7 +120,6 @@ func TestSSRDynamicParams_Prod(t *testing.T) {
 }
 
 func TestSSRWithAPIDemo_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/api-demo", "./pages/api-demo.tsx", bifrost.WithLoader(func(*http.Request) (any, error) {
@@ -149,7 +142,6 @@ func TestSSRWithAPIDemo_Dev(t *testing.T) {
 }
 
 func TestSSRWithAPIDemo_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	// In production mode, the SSR bundle was built with main.go's loader data
 	// We verify the page renders correctly with the built data
@@ -174,7 +166,6 @@ func TestSSRWithAPIDemo_Prod(t *testing.T) {
 }
 
 func TestSSRNoLoader_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/simple", "./pages/home.tsx"),
@@ -190,7 +181,6 @@ func TestSSRNoLoader_Dev(t *testing.T) {
 }
 
 func TestSSRNoLoader_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/simple", "./pages/home.tsx"),
@@ -206,7 +196,6 @@ func TestSSRNoLoader_Prod(t *testing.T) {
 }
 
 func TestSSRQueryParams_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/search", "./pages/home.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
@@ -228,7 +217,6 @@ func TestSSRQueryParams_Dev(t *testing.T) {
 }
 
 func TestSSRQueryParams_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/search", "./pages/home.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
@@ -250,7 +238,6 @@ func TestSSRQueryParams_Prod(t *testing.T) {
 }
 
 func TestSSRPathValue_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/user/{id}", "./pages/home.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
@@ -268,7 +255,6 @@ func TestSSRPathValue_Dev(t *testing.T) {
 }
 
 func TestSSRPathValue_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/user/{id}", "./pages/home.tsx", bifrost.WithLoader(func(req *http.Request) (any, error) {
@@ -286,7 +272,6 @@ func TestSSRPathValue_Prod(t *testing.T) {
 }
 
 func TestSSRSharedComponent_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/shared-a", "./pages/home.tsx", bifrost.WithLoader(func(*http.Request) (any, error) {
@@ -312,7 +297,6 @@ func TestSSRSharedComponent_Dev(t *testing.T) {
 }
 
 func TestSSRSharedComponent_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/shared-a", "./pages/home.tsx", bifrost.WithLoader(func(*http.Request) (any, error) {
@@ -338,7 +322,6 @@ func TestSSRSharedComponent_Prod(t *testing.T) {
 }
 
 func TestSSREmptyProps_Dev(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/empty", "./pages/home.tsx", bifrost.WithLoader(func(*http.Request) (any, error) {
@@ -356,7 +339,6 @@ func TestSSREmptyProps_Dev(t *testing.T) {
 }
 
 func TestSSREmptyProps_Prod(t *testing.T) {
-	skipIfNoBun(t)
 
 	routes := []bifrost.Route{
 		bifrost.Page("/empty", "./pages/home.tsx", bifrost.WithLoader(func(*http.Request) (any, error) {

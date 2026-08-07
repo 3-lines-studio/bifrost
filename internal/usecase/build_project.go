@@ -20,18 +20,15 @@ type BuildError struct {
 }
 
 type BuildService struct {
-	renderer         Renderer
-	cli              CLIOutput
-	compileRuntimeFn func(bifrostDir string) error
+	renderer Renderer
+	cli      CLIOutput
 }
 
 func NewBuildService(renderer Renderer, cli CLIOutput) *BuildService {
-	svc := &BuildService{
+	return &BuildService{
 		renderer: renderer,
 		cli:      cli,
 	}
-	svc.compileRuntimeFn = svc.compileEmbeddedRuntime
-	return svc
 }
 
 func (s *BuildService) BuildProject(ctx context.Context, input BuildInput) BuildOutput {

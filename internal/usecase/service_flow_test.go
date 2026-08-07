@@ -420,7 +420,6 @@ func main() {
 		},
 	}
 	service := NewBuildService(renderer, &mockCLIOutput{})
-	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "main.go"),
@@ -479,7 +478,6 @@ func main() {
 		},
 	}
 	service := NewBuildService(renderer, &mockCLIOutput{})
-	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "main.go"),
@@ -525,7 +523,6 @@ func main() {
 		},
 	}
 	service := NewBuildService(renderer, &mockCLIOutput{})
-	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "main.go"),
@@ -613,7 +610,6 @@ func Register() {
 		},
 	}
 	service := NewBuildService(renderer, &mockCLIOutput{})
-	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "main.go"),
@@ -658,7 +654,6 @@ func main() {
 		},
 	}
 	service := NewBuildService(renderer, &mockCLIOutput{})
-	service.compileRuntimeFn = func(bifrostDir string) error { return nil }
 
 	result := service.BuildProject(context.Background(), BuildInput{
 		MainFile:   filepath.Join(tmpDir, "cmd", "app", "main.go"),

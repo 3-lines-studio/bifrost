@@ -1,6 +1,7 @@
-package process
+package runtime
 
 import (
+	"embed"
 	"fmt"
 	"os"
 	"path"
@@ -10,13 +11,13 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
-// ReadSSRBundle reads one SSR bundle by manifest-relative path (e.g. "/ssr/foo-ssr.js").
-type ReadSSRBundle func(manifestSSRPath string) ([]byte, error)
+// readSSRBundle reads one SSR bundle by manifest-relative path (e.g. "/ssr/foo-ssr.js").
+type readSSRBundle func(manifestSSRPath string) ([]byte, error)
 
-// StageSSRBundles copies all non-empty SSR paths from the manifest into a temp directory,
+// stageSSRBundles copies all non-empty SSR paths from the manifest into a temp directory,
 // preserving path segments (e.g. /ssr/x.js -> temp/ssr/x.js). Used for both embedded
 // assets and on-disk export layouts.
-func StageSSRBundles(read ReadSSRBundle, manifest *core.Manifest) (tempDir string, cleanup func(), err error) {
+func stageSSRBundles(read readSSRBundle, manifest *core.Manifest) (tempDir string, cleanup func(), err error) {
 	if manifest == nil {
 		return "", nil, fmt.Errorf("manifest is nil")
 	}
@@ -63,9 +64,20 @@ func StageSSRBundles(read ReadSSRBundle, manifest *core.Manifest) (tempDir strin
 	return tempDir, cleanup, nil
 }
 
-// ResolveStagedSSRBundlePath maps a manifest SSR path such as /ssr/page-ssr.js to the
+// extractSSRBundles stages the SSR bundles referenced by the manifest out of an
+// embedded assets filesystem.
+func extractSSRBundles(assetsFS embed.FS, manifest *core.Manifest) (string, func(), error) {
+	read := func(manifestSSRPath string) ([]byte, error) {
+		clean := strings.TrimPrefix(filepath.ToSlash(manifestSSRPath), "/")
+		embedPath := path.Join(".bifrost", clean)
+		return assetsFS.ReadFile(embedPath)
+	}
+	return stageSSRBundles(read, manifest)
+}
+
+// resolveStagedSSRBundlePath maps a manifest SSR path such as /ssr/page-ssr.js to the
 // absolute path used inside an extracted SSR temp directory.
-func ResolveStagedSSRBundlePath(tempDir string, manifestSSRPath string) string {
+func resolveStagedSSRBundlePath(tempDir string, manifestSSRPath string) string {
 	clean, err := cleanSSRBundlePath(manifestSSRPath)
 	if err != nil {
 		return ""

@@ -93,7 +93,7 @@ func (s *BuildService) newBuildRun(input BuildInput) (*buildRun, error) {
 		manifestPath:  filepath.Join(input.AppRoot, ".bifrost", "manifest.json"),
 	}
 
-	runtimeName := core.NormalizeJSRuntime(os.Getenv("BIFROST_JS_RUNTIME"))
+	runtimeName := core.JSRuntimeQuickJS
 	run := &buildRun{
 		input:           input,
 		paths:           paths,
@@ -478,20 +478,7 @@ func (s *BuildService) compileRuntime(run *buildRun) error {
 	if !run.needsRuntime && !run.hasStaticPrerender {
 		return nil
 	}
-	if run.manifest.Runtime == core.JSRuntimeSobek ||
-		run.manifest.Runtime == core.JSRuntimeQuickJS ||
-		run.manifest.Runtime == core.JSRuntimeModernc {
-		return os.RemoveAll(run.paths.runtimeDir)
-	}
-
-	step := run.report.StartStep("Compiling Bun runtime")
-	if err := s.compileRuntimeFn(run.paths.bifrostDir); err != nil {
-		run.report.AddError("Runtime", "Failed to compile embedded runtime", []string{err.Error()})
-		run.report.EndStep(step, false, "")
-		return fmt.Errorf("runtime compilation failed: %w", err)
-	}
-	run.report.EndStep(step, true, "")
-	return nil
+	return os.RemoveAll(run.paths.runtimeDir)
 }
 
 func (s *BuildService) exportStaticPrerender(_ context.Context, run *buildRun) error {

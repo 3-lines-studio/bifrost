@@ -1,4 +1,4 @@
-package process
+package runtime
 
 import (
 	"os"
@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3-lines-studio/bifrost/internal/adapters/process/testembed"
+	"github.com/3-lines-studio/bifrost/internal/adapters/runtime/testembed"
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
 
@@ -36,7 +36,7 @@ func TestStageSSRBundles(t *testing.T) {
 		return os.ReadFile(filepath.Join(dir, filepath.FromSlash(clean)))
 	}
 
-	tempDir, cleanup, err := StageSSRBundles(read, man)
+	tempDir, cleanup, err := stageSSRBundles(read, man)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestStageSSRBundlesDedupesRegistryReferencesAndPreservesFragment(t *testing
 		"home":  {SSR: "/ssr/registry.js#home"},
 		"about": {SSR: "/ssr/registry.js#about"},
 	}}
-	tempDir, cleanup, err := StageSSRBundles(func(path string) ([]byte, error) {
+	tempDir, cleanup, err := stageSSRBundles(func(path string) ([]byte, error) {
 		reads++
 		if path != "/ssr/registry.js" {
 			t.Fatalf("read path = %q", path)
@@ -73,7 +73,7 @@ func TestStageSSRBundlesDedupesRegistryReferencesAndPreservesFragment(t *testing
 	if reads != 1 {
 		t.Fatalf("reads = %d, want 1", reads)
 	}
-	resolved := ResolveStagedSSRBundlePath(tempDir, "/ssr/registry.js#home")
+	resolved := resolveStagedSSRBundlePath(tempDir, "/ssr/registry.js#home")
 	want := filepath.Join(tempDir, "ssr", "registry.js") + "#home"
 	if resolved != want {
 		t.Fatalf("resolved = %q, want %q", resolved, want)
@@ -92,7 +92,7 @@ func TestExtractSSRBundlesFromEmbed(t *testing.T) {
 		t.Fatalf("parse manifest: %v", err)
 	}
 
-	tempDir, cleanup, err := ExtractSSRBundles(testembed.Assets, manifest)
+	tempDir, cleanup, err := extractSSRBundles(testembed.Assets, manifest)
 	if err != nil {
 		t.Fatalf("extract SSR bundles: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestStageSSRBundlesRejectsUnsafePaths(t *testing.T) {
 			manifest := &core.Manifest{Entries: map[string]core.ManifestEntry{
 				"page": {SSR: ssrPath},
 			}}
-			_, _, err := StageSSRBundles(func(string) ([]byte, error) {
+			_, _, err := stageSSRBundles(func(string) ([]byte, error) {
 				readCalled = true
 				return nil, nil
 			}, manifest)
@@ -134,9 +134,9 @@ func TestStageSSRBundlesRejectsUnsafePaths(t *testing.T) {
 func TestResolveStagedSSRBundlePath(t *testing.T) {
 	t.Parallel()
 
-	got := ResolveStagedSSRBundlePath("/tmp/bifrost-ssr", "/ssr/pages-home-entry-ssr.js")
+	got := resolveStagedSSRBundlePath("/tmp/bifrost-ssr", "/ssr/pages-home-entry-ssr.js")
 	want := filepath.Join("/tmp/bifrost-ssr", "ssr", "pages-home-entry-ssr.js")
 	if got != want {
-		t.Fatalf("ResolveStagedSSRBundlePath() = %q, want %q", got, want)
+		t.Fatalf("resolveStagedSSRBundlePath() = %q, want %q", got, want)
 	}
 }
