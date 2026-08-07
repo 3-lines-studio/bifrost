@@ -33,6 +33,8 @@ type ServePageOutput struct {
 	Props      any
 	NeedsSetup bool
 	RenderMs   float64
+	PropsMs    float64
+	AssembleMs float64
 	Error      error
 }
 

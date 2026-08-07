@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"time"
 	"path/filepath"
+	"time"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
 )
@@ -104,13 +104,17 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 	input := state.input
 
 	var syncProps any
+	var propsMs float64
 	if input.Config.PropsLoader != nil {
 		var err error
+		propsStart := time.Now()
 		syncProps, err = input.Config.PropsLoader(input.Request)
+		propsMs = float64(time.Since(propsStart)) / float64(time.Millisecond)
 		if err != nil {
 			return ServePageOutput{
-				Action: core.ActionRenderSSR,
-				Error:  err,
+				Action:  core.ActionRenderSSR,
+				Error:   err,
+				PropsMs: propsMs,
 			}
 		}
 	}
@@ -135,11 +139,15 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 	}
 
 	if input.Markdown {
+		assembleStart := time.Now()
 		md, err := convertHTMLToMarkdown(page.Body)
+		assembleMs := float64(time.Since(assembleStart)) / float64(time.Millisecond)
 		if err != nil {
 			return ServePageOutput{
-				Action: core.ActionRenderSSR,
-				Error:  err,
+				Action:   core.ActionRenderSSR,
+				Error:    err,
+				RenderMs: renderMs,
+				PropsMs:  propsMs,
 			}
 		}
 		return ServePageOutput{
@@ -148,16 +156,22 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 			IsMarkdown: true,
 			Props:      syncPropsForReact,
 			RenderMs:   renderMs,
+			PropsMs:    propsMs,
+			AssembleMs: assembleMs,
 		}
 	}
 
+	assembleStart := time.Now()
 	html, err := s.renderPageHTMLWithArtifacts(state, syncPropsForReact, page, lang, htmlClass)
+	assembleMs := float64(time.Since(assembleStart)) / float64(time.Millisecond)
 	return ServePageOutput{
-		Action:   core.ActionRenderSSR,
-		HTML:     html,
-		Props:    syncPropsForReact,
-		RenderMs: renderMs,
-		Error:    err,
+		Action:     core.ActionRenderSSR,
+		HTML:       html,
+		Props:      syncPropsForReact,
+		RenderMs:   renderMs,
+		PropsMs:    propsMs,
+		AssembleMs: assembleMs,
+		Error:      err,
 	}
 }
 

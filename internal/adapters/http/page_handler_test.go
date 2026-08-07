@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
 	"github.com/3-lines-studio/bifrost/internal/usecase"
@@ -309,5 +310,41 @@ func TestDispatchPageOutput_ServesEmptyMarkdown(t *testing.T) {
 	}
 	if rec.Body.Len() != 0 {
 		t.Errorf("expected empty markdown body, got %q", rec.Body.String())
+	}
+}
+
+func TestSetTimingHeaders_RenderPathSetsAllSpans(t *testing.T) {
+	h := &PageHandler{}
+	rec := httptest.NewRecorder()
+
+	h.setTimingHeaders(rec, usecase.ServePageOutput{
+		RenderMs:   12.3,
+		PropsMs:    250.5,
+		AssembleMs: 4.2,
+	}, 300*time.Millisecond)
+
+	want := map[string]string{
+		"X-Bifrost-Render-Ms":   "12.3",
+		"X-Bifrost-Props-Ms":    "250.5",
+		"X-Bifrost-Assemble-Ms": "4.2",
+		"X-Bifrost-Serve-Ms":    "300.0",
+	}
+	for name, value := range want {
+		if got := rec.Header().Get(name); got != value {
+			t.Errorf("header %s = %q, want %q", name, got, value)
+		}
+	}
+}
+
+func TestSetTimingHeaders_SkipsNonRenderPaths(t *testing.T) {
+	h := &PageHandler{}
+	rec := httptest.NewRecorder()
+
+	h.setTimingHeaders(rec, usecase.ServePageOutput{}, time.Millisecond)
+
+	for _, name := range []string{"X-Bifrost-Render-Ms", "X-Bifrost-Props-Ms", "X-Bifrost-Assemble-Ms", "X-Bifrost-Serve-Ms"} {
+		if got := rec.Header().Get(name); got != "" {
+			t.Errorf("unexpected header %s = %q", name, got)
+		}
 	}
 }

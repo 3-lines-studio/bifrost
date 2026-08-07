@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/3-lines-studio/bifrost/internal/core"
 	"github.com/3-lines-studio/bifrost/internal/usecase"
@@ -67,12 +68,34 @@ func NewPageHandler(
 var errNeedsSetup = errors.New("page needs setup but setup not implemented in adapter")
 
 func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	start := time.Now()
 	output := h.service.ServePage(req.Context(), h.servePageInput(req))
 	if output.Error != nil {
 		h.serveError(w, req, output.Error)
 		return
 	}
+	h.setTimingHeaders(w, output, time.Since(start))
 	h.dispatchPageOutput(w, req, output)
+}
+
+func (h *PageHandler) setTimingHeaders(w http.ResponseWriter, output usecase.ServePageOutput, serve time.Duration) {
+	if output.RenderMs <= 0 && output.PropsMs <= 0 && output.AssembleMs <= 0 {
+		return
+	}
+	if output.RenderMs > 0 {
+		w.Header().Set("X-Bifrost-Render-Ms", formatMs(output.RenderMs))
+	}
+	if output.PropsMs > 0 {
+		w.Header().Set("X-Bifrost-Props-Ms", formatMs(output.PropsMs))
+	}
+	if output.AssembleMs > 0 {
+		w.Header().Set("X-Bifrost-Assemble-Ms", formatMs(output.AssembleMs))
+	}
+	w.Header().Set("X-Bifrost-Serve-Ms", formatMs(float64(serve)/float64(time.Millisecond)))
+}
+
+func formatMs(ms float64) string {
+	return strconv.FormatFloat(ms, 'f', 1, 64)
 }
 
 type markdownCtxKey struct{}
@@ -149,12 +172,12 @@ func (h *PageHandler) dispatchPageOutput(w http.ResponseWriter, req *http.Reques
 		if output.IsMarkdown {
 			h.serveMarkdown(w, output.Markdown)
 		} else {
-			h.serveHTML(w, output.HTML, output.RenderMs)
+			h.serveHTML(w, output.HTML)
 		}
 
 	case core.ActionRenderClientOnlyShell,
 		core.ActionRenderStaticPrerender:
-		h.serveHTML(w, output.HTML, 0)
+		h.serveHTML(w, output.HTML)
 	}
 }
 
@@ -169,10 +192,7 @@ func (h *PageHandler) serveBifrostHTMLFile(w http.ResponseWriter, req *http.Requ
 	}
 }
 
-func (h *PageHandler) serveHTML(w http.ResponseWriter, htmlContent string, renderMs float64) {
-	if renderMs > 0 {
-		w.Header().Set("X-Bifrost-Render-Ms", strconv.FormatFloat(renderMs, 'f', 1, 64))
-	}
+func (h *PageHandler) serveHTML(w http.ResponseWriter, htmlContent string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, htmlContent)

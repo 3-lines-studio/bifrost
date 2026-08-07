@@ -353,6 +353,8 @@ bifrost.Page("/user/{id}", "./pages/user.tsx",
 
 React SSR uses `renderToString`. Bifrost buffers the rendered page before writing the HTTP response so render failures can return a clean HTTP 500. Request cancellation propagates to the render request.
 
+Responses carry timing headers for the server-side breakdown: `X-Bifrost-Render-Ms` (QuickJS render, including worker queue wait), `X-Bifrost-Props-Ms` (props loader), `X-Bifrost-Assemble-Ms` (HTML assembly, including props JSON marshaling), and `X-Bifrost-Serve-Ms` (total handler time). Compare `X-Bifrost-Serve-Ms` with the browser's TTFB; a large gap means network, TLS, or proxy latency rather than rendering.
+
 For routes where latency, throughput, or Largest Contentful Paint matters most, prefer static prerender (`WithStatic`). Those routes serve prebuilt HTML without rendering per request.
 
 ### Static Pages
