@@ -1,4 +1,4 @@
-.PHONY: check bench release-check
+.PHONY: check bench bench-browser bench-sweep release-check
 
 check:
 	go run ./cmd/bifrost doctor ./example/cmd/full
@@ -14,6 +14,12 @@ check:
 
 bench:
 	go test ./internal/adapters/quickjs -run '^$$' -bench '^Benchmark' -benchmem -count=3
+
+bench-browser:
+	cd bench && bun i && go run ./harness
+
+bench-sweep:
+	cd bench && bun i && go run ./harness -sweep
 
 release-check: check
 	go vet ./...

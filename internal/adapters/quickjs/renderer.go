@@ -28,6 +28,7 @@ var intlShim string
 
 const (
 	defaultExecTimeout = 30 * time.Second
+	defaultGCInterval  = 25
 	prebuiltIIFEMarker = "/* bifrost:iife */"
 	prebuiltIIFEGlobal = "__BIFROST_SSR__"
 )
@@ -503,9 +504,11 @@ func (w *worker) evaluate(bundlePath string, source []byte, version [sha256.Size
 
 // quickjsGCThreshold returns the per-runtime automatic-GC threshold in
 // bytes. quickjs-go disables automatic GC by default (-1), which leaks the
-// per-render garbage until OOM (measured ~150 MB/s under load), so the
-// adapter defaults to 16 MiB: the sweep showed 1-32 MiB all bound RSS at the
-// working set with equal throughput, while larger thresholds balloon.
+// per-render garbage until OOM (measured ~150 MB/s under load). The
+// threshold bounds the heap in threshold mode (BIFROST_QUICKJS_GC_INTERVAL=0)
+// and acts as a floor in cadence mode; 16 MiB is the default because the
+// sweep showed 1-32 MiB all bound RSS at the working set with equal
+// throughput, while larger thresholds balloon.
 func quickjsGCThreshold() int64 {
 	value := os.Getenv("BIFROST_QUICKJS_GC_THRESHOLD")
 	if value == "" {
@@ -519,23 +522,34 @@ func quickjsGCThreshold() int64 {
 }
 
 // quickjsGCInterval returns the manual full-GC cadence in renders per worker
-// (0 = disabled). When set, the automatic-GC threshold is disabled (-1) and
-// each worker runs a full collection every N renders, so the pauses land at
-// render boundaries instead of mid-render.
+// (0 = threshold mode). Each worker runs a full collection every N renders so
+// the pauses land at render boundaries instead of mid-render. Default 25: the
+// bench sweep+soak measured cadence 5-25 beating the 16 MiB threshold on solo
+// TTFB p50 (~5%) and burst p95 on the heavy fixture, at 1.6-2.5x peak RSS —
+// garbage accumulates between boundary collections, ~linearly with the
+// interval and with page weight. BIFROST_QUICKJS_GC_INTERVAL=0 restores
+// threshold mode for memory-bound deployments.
 func quickjsGCInterval() int {
 	value := os.Getenv("BIFROST_QUICKJS_GC_INTERVAL")
 	if value == "" {
-		return 0
+		return defaultGCInterval
 	}
 	interval, err := strconv.Atoi(value)
-	if err != nil || interval < 1 {
+	if err != nil {
+		return defaultGCInterval
+	}
+	if interval < 1 {
 		return 0
 	}
 	return interval
 }
 
-// quickjsGCConfig resolves the GC strategy: manual-cadence mode wins over
-// the threshold when BIFROST_QUICKJS_GC_INTERVAL is set.
+// quickjsGCConfig resolves the GC strategy: render-boundary cadence
+// (default) wins over the automatic threshold; BIFROST_QUICKJS_GC_INTERVAL=0
+// restores threshold mode. Cadence mode disables the automatic threshold
+// (-1): any floor measured mid-render on heavy pages (64 and 128 MiB both
+// regressed the bench burst p95 by 11%+) and defeats the cadence. The
+// render exec timeout still bounds runaway renders.
 func quickjsGCConfig() (int64, int) {
 	threshold := quickjsGCThreshold()
 	interval := quickjsGCInterval()

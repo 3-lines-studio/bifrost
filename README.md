@@ -8,7 +8,7 @@ Server-side rendering for React pages from Go: register routes, embed build outp
 
 ## Requirements
 
-- Linux or macOS (Bifrost uses Unix sockets; Windows is not supported)
+- Linux or macOS (QuickJS is a cgo backend, so a POSIX toolchain is required; Windows is not supported)
 - [Go](https://go.dev/dl/) 1.26.0 or newer
 - JavaScript packages installed in `node_modules` with npm, pnpm, Bun, or another package manager
 - A C toolchain (`gcc`/`clang`) — required by the QuickJS backend
@@ -74,6 +74,8 @@ API, page modes (`WithLoader`, `WithClient`, `WithStatic`, …), redirects, and 
 ```bash
 make check
 make bench
+make bench-browser   # real-browser baseline (bench/, needs Chromium)
+make bench-sweep     # one-at-a-time knob sweep + soak
 ```
 
 See [RELEASING.md](RELEASING.md) for the v1 checklist and performance baseline.
