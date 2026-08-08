@@ -482,6 +482,9 @@ func TestServeHTTP_StreamsSSRPage(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("streamed response Content-Type = %q, want text/html; charset=utf-8", ct)
+	}
 	for _, want := range []string{"<!doctype html>", "<title>Stub</title>", "<main>stub</main>", `src="/dist/page.js"`, `id="__BIFROST_PROPS__"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("streamed page missing %q:\n%s", want, body)

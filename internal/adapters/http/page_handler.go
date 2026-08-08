@@ -87,6 +87,7 @@ func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	stream := h.canStream(req)
 	if stream {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Trailer", "X-Bifrost-Render-Ms, X-Bifrost-Props-Ms, X-Bifrost-Assemble-Ms, X-Bifrost-Serve-Ms")
 		if preRan {
 			w.Header().Set("X-Bifrost-PreLoader-Ms", formatMs(preMs))
