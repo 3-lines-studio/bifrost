@@ -129,9 +129,9 @@ func ExportStaticPages(in ExportStaticPagesInput) error {
 			if in.AppConfig != nil {
 				appDefault = in.AppConfig.DefaultHTMLLang
 			}
-			lang, htmlClass, propsForReact := core.ResolveHTMLDocumentAttrs(appDefault, config.HTMLLang, config.HTMLClass, entry.Props)
+			lang, htmlClass := core.ResolveHTMLDocumentAttrs(appDefault, config.HTMLLang, config.HTMLClass, core.PreLoaderResult{})
 
-			page, err := in.Renderer.Render(ssrBundlePath, propsForReact)
+			page, err := in.Renderer.Render(ssrBundlePath, entry.Props)
 			if err != nil {
 				exportErrors = append(exportErrors, fmt.Errorf("static page %s: failed to render %s: %w", route.Pattern, normalizedPath, err))
 				continue
@@ -148,7 +148,7 @@ func ExportStaticPages(in ExportStaticPagesInput) error {
 				}
 			}
 
-			html, err := core.RenderHTMLShell(page.Body, propsForReact, manifestEntry.Script, page.Head, criticalCSS, styleHrefs, manifestEntry.Chunks, lang, htmlClass)
+			html, err := core.RenderHTMLShell(page.Body, entry.Props, manifestEntry.Script, page.Head, criticalCSS, styleHrefs, manifestEntry.Chunks, lang, htmlClass)
 			if err != nil {
 				exportErrors = append(exportErrors, fmt.Errorf("static page %s: failed to build HTML for %s: %w", route.Pattern, normalizedPath, err))
 				continue

@@ -88,11 +88,11 @@ func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	stream := h.canStream(req)
 	if stream {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Trailer", "X-Bifrost-Render-Ms, X-Bifrost-Props-Ms, X-Bifrost-Assemble-Ms, X-Bifrost-Serve-Ms")
+		w.Header().Set("Trailer", "X-Bifrost-Render-Ms, X-Bifrost-Props-Ms, X-Bifrost-Assemble-Ms, X-Bifrost-Serve-Ms, Server-Timing")
 		if preRan {
 			w.Header().Set("X-Bifrost-PreLoader-Ms", formatMs(preMs))
 		}
-		h.sendEarlyHints(w)
+		h.sendEarlyHints(w, input.Pre)
 		h.writeStreamingHead(w, input.Pre)
 	}
 	output := h.service.ServePage(req.Context(), input)
@@ -116,14 +116,34 @@ func (h *PageHandler) canStream(req *http.Request) bool {
 	return req.Method == http.MethodGet &&
 		h.shell != nil &&
 		h.config.Mode == core.ModeSSR &&
+		!isBotUA(req.UserAgent()) &&
 		req.Context().Value(markdownCtxKey{}) != true
 }
 
-func (h *PageHandler) sendEarlyHints(w http.ResponseWriter) {
-	if len(h.earlyHints) == 0 {
+func isBotUA(ua string) bool {
+	if ua == "" {
+		return false
+	}
+	lower := strings.ToLower(ua)
+	for _, marker := range []string{"bot", "crawler", "spider", "slurp", "bingpreview", "facebookexternalhit", "whatsapp", "telegrambot", "mediapartners"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *PageHandler) sendEarlyHints(w http.ResponseWriter, pre *core.PreLoaderResult) {
+	var links []string
+	links = append(links, h.earlyHints...)
+	links = append(links, preloadLinks(h.config.Preloads)...)
+	if pre != nil {
+		links = append(links, preloadLinks(pre.Preloads)...)
+	}
+	if len(links) == 0 {
 		return
 	}
-	for _, link := range h.earlyHints {
+	for _, link := range links {
 		w.Header().Add("Link", link)
 	}
 	w.WriteHeader(http.StatusEarlyHints)
@@ -132,13 +152,43 @@ func (h *PageHandler) sendEarlyHints(w http.ResponseWriter) {
 	}
 }
 
+func preloadLinks(preloads []core.Preload) []string {
+	var links []string
+	for _, preload := range preloads {
+		if preload.Href == "" {
+			continue
+		}
+		switch preload.Kind {
+		case core.Preconnect:
+			links = append(links, "<"+preload.Href+">; rel=preconnect")
+		case core.DNSPrefetch:
+			links = append(links, "<"+preload.Href+">; rel=dns-prefetch")
+		default:
+			link := "<" + preload.Href + ">; rel=preload"
+			if preload.As != "" {
+				link += "; as=" + preload.As
+			}
+			if preload.FetchPriority != "" {
+				link += "; fetchpriority=" + preload.FetchPriority
+			}
+			links = append(links, link)
+		}
+	}
+	return links
+}
+
 func (h *PageHandler) writeStreamingHead(w http.ResponseWriter, pre *core.PreLoaderResult) {
 	var preResult core.PreLoaderResult
 	if pre != nil {
 		preResult = *pre
 	}
-	lang, class, _ := core.ResolveHTMLDocumentAttrsWithPre(h.defaultHTMLLang, h.config.HTMLLang, h.config.HTMLClass, preResult, nil)
-	_ = h.shell.WriteStaticHead(w, lang, class)
+	lang, class := core.ResolveHTMLDocumentAttrs(h.defaultHTMLLang, h.config.HTMLLang, h.config.HTMLClass, preResult)
+	extras := core.ShellExtras{
+		Preloads:       append(append([]core.Preload(nil), h.config.Preloads...), preResult.Preloads...),
+		StreamingShell: h.config.StreamingShell,
+		PrerenderPaths: h.config.PrerenderPaths,
+	}
+	_ = h.shell.WriteStaticHead(w, lang, class, extras)
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
@@ -227,6 +277,21 @@ func (h *PageHandler) setTimingHeaders(w http.ResponseWriter, output usecase.Ser
 	if preRan {
 		w.Header().Set("X-Bifrost-PreLoader-Ms", formatMs(preMs))
 	}
+	var timing []string
+	if preRan {
+		timing = append(timing, "bifrost-preloader;dur="+formatMs(preMs))
+	}
+	if output.PropsMs > 0 {
+		timing = append(timing, "bifrost-props;dur="+formatMs(output.PropsMs))
+	}
+	if output.RenderMs > 0 {
+		timing = append(timing, "bifrost-render;dur="+formatMs(output.RenderMs))
+	}
+	if output.AssembleMs > 0 {
+		timing = append(timing, "bifrost-assemble;dur="+formatMs(output.AssembleMs))
+	}
+	timing = append(timing, "bifrost-serve;dur="+formatMs(float64(serve)/float64(time.Millisecond)))
+	w.Header().Set("Server-Timing", strings.Join(timing, ", "))
 	w.Header().Set("X-Bifrost-Serve-Ms", formatMs(float64(serve)/float64(time.Millisecond)))
 }
 

@@ -10,8 +10,29 @@ type PropsLoader func(*http.Request) (any, error)
 type PreLoader func(*http.Request) (PreLoaderResult, error)
 
 type PreLoaderResult struct {
-	Lang  string
-	Class string
+	Lang     string
+	Class    string
+	Preloads []Preload
+}
+
+// PreloadKind describes the kind of asset hint a page declares for the
+// streamed document head.
+type PreloadKind int
+
+const (
+	PreloadLink PreloadKind = iota
+	Preconnect
+	DNSPrefetch
+)
+
+// Preload declares an asset hint written into the streamed head and the 103
+// Early Hints response. Href is required; As and FetchPriority apply to
+// PreloadLink.
+type Preload struct {
+	Kind          PreloadKind
+	Href          string
+	As            string
+	FetchPriority string
 }
 
 type RedirectError interface {
@@ -78,6 +99,9 @@ type PageConfig struct {
 	PropsLoader      PropsLoader
 	PreLoader        PreLoader
 	StaticDataLoader StaticDataLoader
+	Preloads         []Preload
+	StreamingShell   string
+	PrerenderPaths   []string
 	HTMLLang         string
 	HTMLClass        string
 	modeOptions      uint8
@@ -89,6 +113,9 @@ const (
 	optionPreLoader
 	optionStatic
 	optionStaticData
+	optionPreloads
+	optionStreamingShell
+	optionPrerender
 )
 
 type PageOption func(*PageConfig)
@@ -107,6 +134,36 @@ func WithPreLoader(loader PreLoader) PageOption {
 	return func(c *PageConfig) {
 		c.PreLoader = loader
 		c.optionFlags |= optionPreLoader
+	}
+}
+
+// WithPreloads declares asset hints for an SSR page. They are written into the
+// streamed head and the 103 Early Hints response. The pre loader can add
+// request-dependent hints via PreLoaderResult.Preloads.
+func WithPreloads(preloads ...Preload) PageOption {
+	return func(c *PageConfig) {
+		c.Preloads = append(c.Preloads, preloads...)
+		c.optionFlags |= optionPreloads
+	}
+}
+
+// WithStreamingShell sets a CSS fragment rendered as a full-viewport loading
+// overlay in the streamed head while the page renders. The overlay is removed
+// automatically once content mounts into <div id="app">.
+func WithStreamingShell(css string) PageOption {
+	return func(c *PageConfig) {
+		c.StreamingShell = css
+		c.optionFlags |= optionStreamingShell
+	}
+}
+
+// WithPrerender declares likely next navigations for an SSR page. Bifrost
+// writes a speculationrules script into the streamed head so Chromium
+// prerenders them.
+func WithPrerender(paths ...string) PageOption {
+	return func(c *PageConfig) {
+		c.PrerenderPaths = append(c.PrerenderPaths, paths...)
+		c.optionFlags |= optionPrerender
 	}
 }
 

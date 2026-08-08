@@ -58,5 +58,11 @@ func PageConfigFromRoute(route Route) (PageConfig, error) {
 	if config.optionFlags&optionPreLoader != 0 && config.Mode != ModeSSR {
 		return PageConfig{}, fmt.Errorf("bifrost: page %q can only use WithPreLoader in SSR mode", route.ComponentPath)
 	}
+	if config.optionFlags&optionStreamingShell != 0 && config.StreamingShell == "" {
+		return PageConfig{}, fmt.Errorf("bifrost: page %q has an empty streaming shell", route.ComponentPath)
+	}
+	if config.optionFlags&(optionPreloads|optionStreamingShell|optionPrerender) != 0 && config.Mode != ModeSSR {
+		return PageConfig{}, fmt.Errorf("bifrost: page %q can only use WithPreloads, WithStreamingShell, or WithPrerender in SSR mode", route.ComponentPath)
+	}
 	return config, nil
 }

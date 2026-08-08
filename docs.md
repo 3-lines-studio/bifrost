@@ -258,9 +258,9 @@ func WithHTMLClass(class string) PageOption
 func WithDefaultHTMLLang(lang string) ConfigOption
 ```
 
-**Document language:** precedence is the pre loader's `Lang` → loader/static-data field `bifrost.PropHTMLLang` (`"__bifrost_html_lang"`) → `WithHTMLLang` → `WithDefaultHTMLLang` → `"en"`. The reserved key is stripped before props reach the component.
+**Document language:** precedence is the pre loader's `Lang` → `WithHTMLLang` → `WithDefaultHTMLLang` → `"en"`.
 
-**Document class:** precedence is the pre loader's `Class` → loader/static-data field `bifrost.PropHTMLClass` (`"__bifrost_html_class"`) → `WithHTMLClass` → empty class. The reserved key is stripped before props reach the component.
+**Document class:** precedence is the pre loader's `Class` → `WithHTMLClass` → empty class.
 
 **Props Loader:**
 
@@ -367,9 +367,27 @@ bifrost.Page("/user/{id}", "./pages/user.tsx",
 
 #### SSR Performance
 
-React SSR uses `renderToString` and streams the response: the static document head (charset, viewport, critical CSS, stylesheet links, modulepreloads) is flushed and `103 Early Hints` with the page's CSS and JS are sent before the props loader and render run, then the React-managed head, body, and props stream after. Two behavior notes: because the head is flushed before the loader runs, a `RedirectError` from the props loader becomes a meta-refresh in the streamed document instead of an HTTP 302, and `<html lang>`/`class` come from the page config rather than the `__bifrost_html_lang`/`__bifrost_html_class` props — apps that derive language from the request (Accept-Language, cookies, CDN headers) should set `document.documentElement.lang` in a client script after load. Request cancellation propagates to the render request.
+React SSR uses `renderToString` and streams the response: the static document head (charset, viewport, critical CSS, stylesheet links, modulepreloads) is flushed and `103 Early Hints` with the page's CSS and JS are sent before the props loader and render run, then the React-managed head, body, and props stream after. Two behavior notes: because the head is flushed before the loader runs, a `RedirectError` from the props loader becomes a meta-refresh in the streamed document instead of an HTTP 302, and `<html lang>`/`class` come from the pre loader's `Lang`/`Class`, the page config, or the app default — the legacy `__bifrost_html_lang`/`__bifrost_html_class` props were removed, so use a pre loader for request-driven document attributes. Request cancellation propagates to the render request.
 
-Responses carry timing headers for the server-side breakdown: `X-Bifrost-Render-Ms` (QuickJS render, including worker queue wait), `X-Bifrost-Props-Ms` (props loader), `X-Bifrost-Assemble-Ms` (HTML assembly, including props JSON marshaling), `X-Bifrost-PreLoader-Ms` (pre loader), and `X-Bifrost-Serve-Ms` (total handler time). On streamed SSR responses the four post-render spans travel as HTTP trailers (declared before the response starts); `curl -i` shows them after the body, and buffered responses — including HEAD requests — carry them as regular headers. Compare `X-Bifrost-Serve-Ms` with the browser's TTFB; a large gap means network, TLS, or proxy latency rather than rendering.
+Responses carry timing headers for the server-side breakdown: `X-Bifrost-Render-Ms` (QuickJS render, including worker queue wait), `X-Bifrost-Props-Ms` (props loader), `X-Bifrost-Assemble-Ms` (HTML assembly, including props JSON marshaling), `X-Bifrost-PreLoader-Ms` (pre loader), and `X-Bifrost-Serve-Ms` (total handler time), plus a `Server-Timing` header with the same spans. On streamed SSR responses the post-render spans travel as HTTP trailers (declared before the response starts); `curl -i` shows them after the body, and buffered responses — including HEAD requests — carry them as regular headers. Compare `X-Bifrost-Serve-Ms` with the browser's TTFB; a large gap means network, TLS, or proxy latency rather than rendering.
+
+**Streamed head extras:**
+
+```go
+bifrost.Page("/", "./web/pages/home.tsx",
+	bifrost.WithPreloads(
+		bifrost.Preload{Kind: bifrost.PreloadLink, Href: "/hero.webp", As: "image", FetchPriority: "high"},
+		bifrost.Preload{Kind: bifrost.Preconnect, Href: "https://img.example.com"},
+	),
+	bifrost.WithStreamingShell(".shell{position:fixed;inset:0;background:#fff}"),
+	bifrost.WithPrerender("/comprar-fotos", "/calculator"),
+)
+```
+
+- `WithPreloads` writes `<link rel="preload|preconnect|dns-prefetch">` tags into the streamed head and matching `Link` headers into the `103 Early Hints` response, so render-dependent assets (hero images, fonts) start fetching before the render finishes. The pre loader can add request-dependent hints via `PreLoaderResult.Preloads`. Note the distinction: `WithPreLoader` is the pre-flush *gating* loader (redirects, document attributes); `WithPreloads`/`Preload` are *asset hints* (`rel=preload`).
+- `WithStreamingShell` writes a CSS loading overlay (a `<style id="bifrost-shell">`) into the streamed head; it is removed automatically once content mounts into `<div id="app">`.
+- `WithPrerender` writes a speculationrules script so Chromium prerenders likely next pages.
+- Bots (crawlers, link previews, social agents) get the buffered path instead of streaming.
 
 For routes where latency, throughput, or Largest Contentful Paint matters most, prefer static prerender (`WithStatic`). Those routes serve prebuilt HTML without rendering per request.
 

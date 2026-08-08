@@ -397,7 +397,7 @@ func TestHTMLDocumentShell_StaticHeadAndTailMatchRender(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sb strings.Builder
-	if err := shell.WriteStaticHead(&sb, "en", "dark"); err != nil {
+	if err := shell.WriteStaticHead(&sb, "en", "dark", ShellExtras{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := shell.WriteTail(&sb, headHTML, body, propsJSON); err != nil {
@@ -415,7 +415,7 @@ func TestHTMLDocumentShell_StaticHeadStopsBeforeHeadClose(t *testing.T) {
 	}
 
 	var sb strings.Builder
-	if err := shell.WriteStaticHead(&sb, "en", ""); err != nil {
+	if err := shell.WriteStaticHead(&sb, "en", "", ShellExtras{}); err != nil {
 		t.Fatal(err)
 	}
 	out := sb.String()
@@ -428,6 +428,40 @@ func TestHTMLDocumentShell_StaticHeadStopsBeforeHeadClose(t *testing.T) {
 	for _, banned := range []string{"</head>", "<title", "<body"} {
 		if strings.Contains(out, banned) {
 			t.Errorf("static head must not contain %q:\n%s", banned, out)
+		}
+	}
+}
+
+func TestHTMLDocumentShell_StaticHeadExtras(t *testing.T) {
+	shell, err := NewHTMLDocumentShell("/dist/page.js", "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sb strings.Builder
+	err = shell.WriteStaticHead(&sb, "en", "", ShellExtras{
+		Preloads: []Preload{
+			{Kind: PreloadLink, Href: "/hero.webp", As: "image", FetchPriority: "high"},
+			{Kind: Preconnect, Href: "https://img.example.com"},
+			{Kind: DNSPrefetch, Href: "https://api.example.com"},
+		},
+		StreamingShell: ".shell{position:fixed;inset:0}",
+		PrerenderPaths: []string{"/comprar-fotos", "/calculator"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := sb.String()
+	for _, want := range []string{
+		`<link rel="preload" href="/hero.webp" as="image" fetchpriority="high" />`,
+		`<link rel="preconnect" href="https://img.example.com" />`,
+		`<link rel="dns-prefetch" href="https://api.example.com" />`,
+		`<style id="bifrost-shell">.shell{position:fixed;inset:0}</style>`,
+		`<script type="speculationrules">`,
+		`"urls":["/comprar-fotos","/calculator"]`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("static head missing %q:\n%s", want, out)
 		}
 	}
 }

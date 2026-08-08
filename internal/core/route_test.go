@@ -73,6 +73,10 @@ func TestPageConfigFromRoute_RejectsInvalidRoute(t *testing.T) {
 		{name: "loader on client page", route: Page("/", "./page.tsx", WithClient(), WithLoader(func(*http.Request) (any, error) { return nil, nil }))},
 		{name: "pre loader on client page", route: Page("/", "./page.tsx", WithClient(), WithPreLoader(func(*http.Request) (PreLoaderResult, error) { return PreLoaderResult{}, nil }))},
 		{name: "loader on static page", route: Page("/", "./page.tsx", WithStatic(), WithLoader(func(*http.Request) (any, error) { return nil, nil }))},
+		{name: "empty streaming shell", route: Page("/", "./page.tsx", WithStreamingShell(""))},
+		{name: "preloads on client page", route: Page("/", "./page.tsx", WithClient(), WithPreloads(Preload{Kind: PreloadLink, Href: "/a.png"}))},
+		{name: "streaming shell on static page", route: Page("/", "./page.tsx", WithStatic(), WithStreamingShell(".s{}"))},
+		{name: "prerender on client page", route: Page("/", "./page.tsx", WithClient(), WithPrerender("/next"))},
 		{name: "redundant static options", route: Page("/", "./page.tsx", WithStatic(), WithStaticData(func(context.Context) ([]StaticPathData, error) { return nil, nil }))},
 	}
 

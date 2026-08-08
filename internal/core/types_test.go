@@ -135,6 +135,30 @@ func TestPageConfigOptions(t *testing.T) {
 		}
 	})
 
+	t.Run("WithPreloads sets Preloads", func(t *testing.T) {
+		route := Page("/", "./pages/home.tsx", WithPreloads(Preload{Kind: Preconnect, Href: "https://img.example.com"}))
+		config := mustPageConfig(t, route)
+		if len(config.Preloads) != 1 || config.Preloads[0].Href != "https://img.example.com" {
+			t.Errorf("expected preload to be set, got %+v", config.Preloads)
+		}
+	})
+
+	t.Run("WithStreamingShell sets shell CSS", func(t *testing.T) {
+		route := Page("/", "./pages/home.tsx", WithStreamingShell(".shell{}"))
+		config := mustPageConfig(t, route)
+		if config.StreamingShell != ".shell{}" {
+			t.Errorf("expected streaming shell to be set, got %q", config.StreamingShell)
+		}
+	})
+
+	t.Run("WithPrerender sets paths", func(t *testing.T) {
+		route := Page("/", "./pages/home.tsx", WithPrerender("/comprar-fotos", "/calculator"))
+		config := mustPageConfig(t, route)
+		if len(config.PrerenderPaths) != 2 || config.PrerenderPaths[0] != "/comprar-fotos" {
+			t.Errorf("expected prerender paths to be set, got %v", config.PrerenderPaths)
+		}
+	})
+
 	t.Run("WithClient sets client-only mode", func(t *testing.T) {
 		route := Page("/", "./pages/home.tsx", WithClient())
 		config := mustPageConfig(t, route)

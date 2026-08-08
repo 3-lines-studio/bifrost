@@ -18,6 +18,14 @@ type HTMLDocumentShell struct {
 	staticLen int
 }
 
+// ShellExtras carries page-declared asset hints and streaming extras written
+// into the static document head.
+type ShellExtras struct {
+	Preloads       []Preload
+	StreamingShell string
+	PrerenderPaths []string
+}
+
 // lengthCounter counts bytes written without retaining them.
 type lengthCounter int
 
@@ -91,7 +99,7 @@ func RenderHTMLShell(bodyHTML string, props any, scriptSrc string, headHTML stri
 // WriteStaticHead writes from doctype through the asset hints (critical CSS,
 // stylesheet links, modulepreloads), leaving <head> open. The React-managed
 // head and the body are written later by WriteTail.
-func (s HTMLDocumentShell) WriteStaticHead(w io.Writer, htmlLang string, htmlClass string) error {
+func (s HTMLDocumentShell) WriteStaticHead(w io.Writer, htmlLang string, htmlClass string, extras ShellExtras) error {
 	langAttr := SanitizeHTMLLang(htmlLang)
 	classAttr := SanitizeHTMLClass(htmlClass)
 
@@ -145,8 +153,92 @@ func (s HTMLDocumentShell) WriteStaticHead(w io.Writer, htmlLang string, htmlCla
 	if _, err := io.WriteString(w, s.scriptSrc); err != nil {
 		return err
 	}
-	_, err := io.WriteString(w, `" />`)
-	return err
+	if _, err := io.WriteString(w, `" />`); err != nil {
+		return err
+	}
+
+	for _, preload := range extras.Preloads {
+		if preload.Href == "" {
+			continue
+		}
+		switch preload.Kind {
+		case Preconnect:
+			if _, err := io.WriteString(w, `<link rel="preconnect" href="`); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, html.EscapeString(preload.Href)); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, `" />`); err != nil {
+				return err
+			}
+		case DNSPrefetch:
+			if _, err := io.WriteString(w, `<link rel="dns-prefetch" href="`); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, html.EscapeString(preload.Href)); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, `" />`); err != nil {
+				return err
+			}
+		default:
+			if _, err := io.WriteString(w, `<link rel="preload" href="`); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, html.EscapeString(preload.Href)); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, `"`); err != nil {
+				return err
+			}
+			if preload.As != "" {
+				if _, err := io.WriteString(w, ` as="`); err != nil {
+					return err
+				}
+				if _, err := io.WriteString(w, html.EscapeString(preload.As)); err != nil {
+					return err
+				}
+				if _, err := io.WriteString(w, `"`); err != nil {
+					return err
+				}
+			}
+			if preload.FetchPriority != "" {
+				if _, err := io.WriteString(w, ` fetchpriority="`); err != nil {
+					return err
+				}
+				if _, err := io.WriteString(w, html.EscapeString(preload.FetchPriority)); err != nil {
+					return err
+				}
+				if _, err := io.WriteString(w, `"`); err != nil {
+					return err
+				}
+			}
+			if _, err := io.WriteString(w, ` />`); err != nil {
+				return err
+			}
+		}
+	}
+
+	if extras.StreamingShell != "" {
+		if _, err := io.WriteString(w, `<style id="bifrost-shell">`+extras.StreamingShell+`</style>`); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, `<script>(function(){var s=document.getElementById("bifrost-shell");if(!s)return;var t=setInterval(function(){var r=document.getElementById("app");if(r&&r.children.length){s.remove();clearInterval(t)}},50);setTimeout(function(){s.remove();clearInterval(t)},15000)})();</script>`); err != nil {
+			return err
+		}
+	}
+
+	if len(extras.PrerenderPaths) > 0 {
+		urls, err := json.Marshal(extras.PrerenderPaths)
+		if err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, `<script type="speculationrules">{"prerender":[{"source":"list","urls":`+string(urls)+`}]}</script>`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s HTMLDocumentShell) writeHeadRest(w io.Writer, headHTML string) error {
@@ -178,7 +270,7 @@ func (s HTMLDocumentShell) WriteTail(w io.Writer, headHTML string, bodyHTML stri
 
 // WritePreamble writes from doctype through the opening <div id="app"> (exclusive of body HTML).
 func (s HTMLDocumentShell) WritePreamble(w io.Writer, headHTML string, htmlLang string, htmlClass string) error {
-	if err := s.WriteStaticHead(w, htmlLang, htmlClass); err != nil {
+	if err := s.WriteStaticHead(w, htmlLang, htmlClass, ShellExtras{}); err != nil {
 		return err
 	}
 	return s.writeHeadRest(w, headHTML)

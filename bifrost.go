@@ -108,6 +108,38 @@ func WithPreLoader(loader PreLoader) PageOption {
 	return core.WithPreLoader(loader)
 }
 
+// PreloadKind describes the kind of asset hint a page declares.
+type PreloadKind = core.PreloadKind
+
+const (
+	PreloadLink PreloadKind = core.PreloadLink
+	Preconnect  PreloadKind = core.Preconnect
+	DNSPrefetch PreloadKind = core.DNSPrefetch
+)
+
+// Preload declares an asset hint for the streamed document head.
+type Preload = core.Preload
+
+// WithPreloads declares asset hints for an SSR page. They are written into the
+// streamed head and the 103 Early Hints response.
+func WithPreloads(preloads ...Preload) PageOption {
+	return core.WithPreloads(preloads...)
+}
+
+// WithStreamingShell sets a CSS fragment rendered as a full-viewport loading
+// overlay in the streamed head while the page renders. The overlay is removed
+// automatically once content mounts into <div id="app">.
+func WithStreamingShell(css string) PageOption {
+	return core.WithStreamingShell(css)
+}
+
+// WithPrerender declares likely next navigations for an SSR page. Bifrost
+// writes a speculationrules script into the streamed head so Chromium
+// prerenders them.
+func WithPrerender(paths ...string) PageOption {
+	return core.WithPrerender(paths...)
+}
+
 // WithClient makes a page render only in the browser.
 func WithClient() PageOption {
 	return core.WithClient()
@@ -122,12 +154,6 @@ func WithStatic() PageOption {
 func WithStaticData(loader StaticDataLoader) PageOption {
 	return core.WithStaticData(loader)
 }
-
-// PropHTMLLang is the reserved props key that sets the document language.
-const PropHTMLLang = core.PropHTMLLang
-
-// PropHTMLClass is the reserved props key that sets the document class.
-const PropHTMLClass = core.PropHTMLClass
 
 // WithDefaultHTMLLang sets the app's default document language.
 func WithDefaultHTMLLang(lang string) ConfigOption {

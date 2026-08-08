@@ -338,6 +338,103 @@ func TestSetTimingHeaders_RenderPathSetsAllSpans(t *testing.T) {
 			t.Errorf("header %s = %q, want %q", name, got, value)
 		}
 	}
+	if got := rec.Header().Get("Server-Timing"); !strings.Contains(got, "bifrost-render;dur=12.3") {
+		t.Errorf("Server-Timing = %q, want render span", got)
+	}
+}
+
+func TestSendEarlyHints_IncludesPageAndDynamicPreloads(t *testing.T) {
+	h := &PageHandler{
+		config: core.PageConfig{Preloads: []core.Preload{
+			{Kind: core.Preconnect, Href: "https://img.example.com"},
+			{Kind: core.PreloadLink, Href: "/logo.svg", As: "image"},
+		}},
+	}
+	rec := httptest.NewRecorder()
+
+	h.sendEarlyHints(rec, &core.PreLoaderResult{Preloads: []core.Preload{
+		{Kind: core.PreloadLink, Href: "/hero.webp", As: "image", FetchPriority: "high"},
+	}})
+
+	want := []string{
+		"<https://img.example.com>; rel=preconnect",
+		"</logo.svg>; rel=preload; as=image",
+		"</hero.webp>; rel=preload; as=image; fetchpriority=high",
+	}
+	links := rec.Header().Values("Link")
+	for _, w := range want {
+		if !slices.Contains(links, w) {
+			t.Errorf("missing Link %q in %v", w, links)
+		}
+	}
+}
+
+func TestIsBotUA(t *testing.T) {
+	cases := []struct {
+		ua   string
+		want bool
+	}{
+		{"Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", true},
+		{"Twitterbot/1.0", true},
+		{"facebookexternalhit/1.1", true},
+		{"curl/8.0.0", false},
+		{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := isBotUA(c.ua); got != c.want {
+			t.Errorf("isBotUA(%q) = %v, want %v", c.ua, got, c.want)
+		}
+	}
+}
+
+func TestServeHTTP_StreamsExtrasInHead(t *testing.T) {
+	config := core.PageConfig{
+		Mode:           core.ModeSSR,
+		ComponentPath:  "./pages/home.tsx",
+		StreamingShell: ".shell{position:fixed;inset:0}",
+		PrerenderPaths: []string{"/comprar-fotos"},
+		Preloads: []core.Preload{
+			{Kind: core.PreloadLink, Href: "/hero.webp", As: "image", FetchPriority: "high"},
+			{Kind: core.Preconnect, Href: "https://img.example.com"},
+		},
+	}
+	entryName := core.EntryNameForPath(config.ComponentPath)
+	manifest := &core.Manifest{Entries: map[string]core.ManifestEntry{
+		entryName: {Script: "/dist/page.js"},
+	}}
+	handler := NewPageHandler(usecase.NewPageService(stubRenderer{}), config, manifest, embed.FS{}, false, "", "en")
+
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(body)
+	for _, want := range []string{
+		`<link rel="preload" href="/hero.webp" as="image" fetchpriority="high" />`,
+		`<link rel="preconnect" href="https://img.example.com" />`,
+		`<style id="bifrost-shell">.shell{position:fixed;inset:0}</style>`,
+		`<script type="speculationrules">`,
+		`"urls":["/comprar-fotos"]`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("streamed head missing %q:\n%s", want, s)
+		}
+	}
+	if !strings.Contains(strings.Join(resp.Header.Values("Link"), " "), "/hero.webp") {
+		t.Errorf("Link header missing preload hint, got %v", resp.Header.Values("Link"))
+	}
+	if got := resp.Trailer.Get("Server-Timing"); got == "" {
+		t.Error("missing Server-Timing trailer")
+	}
 }
 
 func TestSetTimingHeaders_SkipsNonRenderPaths(t *testing.T) {
@@ -376,7 +473,7 @@ func TestSendEarlyHints_SetsLinkHeaders(t *testing.T) {
 	h := &PageHandler{earlyHints: []string{"</dist/page.css>; rel=preload; as=style"}}
 	rec := httptest.NewRecorder()
 
-	h.sendEarlyHints(rec)
+	h.sendEarlyHints(rec, nil)
 
 	if got := rec.Header().Get("Link"); got != "</dist/page.css>; rel=preload; as=style" {
 		t.Errorf("Link header = %q, want early hint link", got)
@@ -474,7 +571,7 @@ func TestServeHTTP_StreamsSSRPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)
@@ -541,7 +638,7 @@ func TestServeHTTP_PreLoaderLangInStreamedHead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)

@@ -16,7 +16,7 @@ func (s *PageService) renderClientOnlyShell(state pageRequestState) (string, err
 	if err != nil {
 		return "", err
 	}
-	lang, htmlClass, _ := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
+	lang, htmlClass := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, core.PreLoaderResult{})
 	return shell.Render("", nil, "", lang, htmlClass)
 }
 
@@ -49,7 +49,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 			}
 		}
 
-		lang, htmlClass, propsForReact := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, props)
+		lang, htmlClass := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, core.PreLoaderResult{})
 
 		if s.renderer == nil {
 			return ServePageOutput{
@@ -58,7 +58,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 			}
 		}
 
-		page, err := renderWithContext(ctx, s.renderer, state.renderPath, propsForReact)
+		page, err := renderWithContext(ctx, s.renderer, state.renderPath, props)
 		if err != nil {
 			return ServePageOutput{
 				Action: core.ActionRenderStaticPrerender,
@@ -66,11 +66,11 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 			}
 		}
 
-		html, err := s.renderPageHTMLWithArtifacts(state, propsForReact, page, lang, htmlClass)
+		html, err := s.renderPageHTMLWithArtifacts(state, props, page, lang, htmlClass)
 		return ServePageOutput{
 			Action: core.ActionRenderStaticPrerender,
 			HTML:   html,
-			Props:  propsForReact,
+			Props:  props,
 			Error:  err,
 		}
 	}
@@ -82,9 +82,9 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 		}
 	}
 
-	lang, htmlClass, propsForReact := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, nil)
+	lang, htmlClass := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, core.PreLoaderResult{})
 
-	page, err := renderWithContext(ctx, s.renderer, state.renderPath, propsForReact)
+	page, err := renderWithContext(ctx, s.renderer, state.renderPath, nil)
 	if err != nil {
 		return ServePageOutput{
 			Action: core.ActionRenderStaticPrerender,
@@ -92,7 +92,7 @@ func (s *PageService) renderStaticPrerender(ctx context.Context, state pageReque
 		}
 	}
 
-	html, err := s.renderPageHTMLWithArtifacts(state, propsForReact, page, lang, htmlClass)
+	html, err := s.renderPageHTMLWithArtifacts(state, nil, page, lang, htmlClass)
 	return ServePageOutput{
 		Action: core.ActionRenderStaticPrerender,
 		HTML:   html,
@@ -130,7 +130,7 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		pre = preResult
 	}
 
-	lang, htmlClass, syncPropsForReact := core.ResolveHTMLDocumentAttrsWithPre(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, pre, syncProps)
+	lang, htmlClass := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, pre)
 
 	if s.renderer == nil {
 		return ServePageOutput{
@@ -140,7 +140,7 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 	}
 
 	renderStart := time.Now()
-	page, err := renderWithContext(ctx, s.renderer, state.renderPath, syncPropsForReact)
+	page, err := renderWithContext(ctx, s.renderer, state.renderPath, syncProps)
 	renderMs := float64(time.Since(renderStart)) / float64(time.Millisecond)
 	if err != nil {
 		return ServePageOutput{
@@ -165,7 +165,7 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 			Action:     core.ActionRenderSSR,
 			Markdown:   md,
 			IsMarkdown: true,
-			Props:      syncPropsForReact,
+			Props:      syncProps,
 			RenderMs:   renderMs,
 			PropsMs:    propsMs,
 			AssembleMs: assembleMs,
@@ -173,12 +173,12 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 	}
 
 	assembleStart := time.Now()
-	html, err := s.renderPageHTMLWithArtifacts(state, syncPropsForReact, page, lang, htmlClass)
+	html, err := s.renderPageHTMLWithArtifacts(state, syncProps, page, lang, htmlClass)
 	assembleMs := float64(time.Since(assembleStart)) / float64(time.Millisecond)
 	return ServePageOutput{
 		Action:     core.ActionRenderSSR,
 		HTML:       html,
-		Props:      syncPropsForReact,
+		Props:      syncProps,
 		RenderMs:   renderMs,
 		PropsMs:    propsMs,
 		AssembleMs: assembleMs,
