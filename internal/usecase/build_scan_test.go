@@ -201,7 +201,10 @@ func TestScanFileForPagesRejectsInvalidOptionContracts(t *testing.T) {
 	}{
 		{name: "loader on client page", opts: `bifrost.WithClient(), bifrost.WithLoader(load)`},
 		{name: "loader on static page", opts: `bifrost.WithStatic(), bifrost.WithLoader(load)`},
+		{name: "pre loader on client page", opts: `bifrost.WithClient(), bifrost.WithPreLoader(pre)`},
+		{name: "pre loader on static page", opts: `bifrost.WithStatic(), bifrost.WithPreLoader(pre)`},
 		{name: "nil props loader", opts: `bifrost.WithLoader(nil)`},
+		{name: "nil pre loader", opts: `bifrost.WithPreLoader(nil)`},
 		{name: "nil static data loader", opts: `bifrost.WithStaticData(nil)`},
 		{name: "redundant static options", opts: `bifrost.WithStatic(), bifrost.WithStaticData(staticData)`},
 		{name: "non bifrost option", opts: `other.WithClient()`},

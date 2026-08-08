@@ -63,7 +63,7 @@ func isNilExpr(expr ast.Expr) bool {
 }
 
 func parsePageBuildOptions(args []ast.Expr, importMap map[string]string) (mode core.PageMode, htmlLang string, htmlClass string, err error) {
-	var hasLoader, hasClient, hasStatic, hasStaticData bool
+	var hasLoader, hasPreLoader, hasClient, hasStatic, hasStaticData bool
 
 	for _, arg := range args {
 		call, ok := arg.(*ast.CallExpr)
@@ -81,6 +81,11 @@ func parsePageBuildOptions(args []ast.Expr, importMap map[string]string) (mode c
 				return core.ModeSSR, "", "", fmt.Errorf("WithLoader requires one non-nil loader")
 			}
 			hasLoader = true
+		case "WithPreLoader":
+			if len(call.Args) != 1 || isNilExpr(call.Args[0]) {
+				return core.ModeSSR, "", "", fmt.Errorf("WithPreLoader requires one non-nil loader")
+			}
+			hasPreLoader = true
 		case "WithClient":
 			if len(call.Args) != 0 {
 				return core.ModeSSR, "", "", fmt.Errorf("WithClient does not accept arguments")
@@ -124,7 +129,7 @@ func parsePageBuildOptions(args []ast.Expr, importMap map[string]string) (mode c
 	if hasStatic && hasStaticData {
 		return core.ModeSSR, "", "", fmt.Errorf("WithStatic and WithStaticData cannot be combined")
 	}
-	if hasLoader && (hasClient || hasStatic || hasStaticData) {
+	if (hasLoader || hasPreLoader) && (hasClient || hasStatic || hasStaticData) {
 		return core.ModeSSR, "", "", fmt.Errorf("WithLoader is only valid in SSR mode")
 	}
 	if hasStatic || hasStaticData {
