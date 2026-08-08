@@ -119,7 +119,18 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		}
 	}
 
-	lang, htmlClass, syncPropsForReact := core.ResolveHTMLDocumentAttrs(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, syncProps)
+	pre := core.PreLoaderResult{}
+	if input.Pre != nil {
+		pre = *input.Pre
+	} else if input.Config.PreLoader != nil {
+		preResult, err := input.Config.PreLoader(input.Request)
+		if err != nil {
+			return ServePageOutput{Action: core.ActionRenderSSR, Error: err}
+		}
+		pre = preResult
+	}
+
+	lang, htmlClass, syncPropsForReact := core.ResolveHTMLDocumentAttrsWithPre(input.DefaultHTMLLang, input.Config.HTMLLang, input.Config.HTMLClass, pre, syncProps)
 
 	if s.renderer == nil {
 		return ServePageOutput{
@@ -171,6 +182,7 @@ func (s *PageService) renderSSR(ctx context.Context, state pageRequestState) Ser
 		RenderMs:   renderMs,
 		PropsMs:    propsMs,
 		AssembleMs: assembleMs,
+		Page:       page,
 		Error:      err,
 	}
 }

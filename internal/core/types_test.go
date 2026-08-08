@@ -126,6 +126,15 @@ func TestPageConfigOptions(t *testing.T) {
 		}
 	})
 
+	t.Run("WithPreLoader sets PreLoader", func(t *testing.T) {
+		loader := func(*http.Request) (PreLoaderResult, error) { return PreLoaderResult{}, nil }
+		route := Page("/", "./pages/home.tsx", WithPreLoader(loader))
+		config := mustPageConfig(t, route)
+		if config.PreLoader == nil {
+			t.Fatal("expected PreLoader to be set")
+		}
+	})
+
 	t.Run("WithClient sets client-only mode", func(t *testing.T) {
 		route := Page("/", "./pages/home.tsx", WithClient())
 		config := mustPageConfig(t, route)

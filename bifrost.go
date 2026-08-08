@@ -93,6 +93,21 @@ func WithLoader(loader PropsLoader) PageOption {
 	return core.WithLoader(loader)
 }
 
+// PreLoaderResult carries the document attributes a pre loader decides before
+// the props loader runs.
+type PreLoaderResult = core.PreLoaderResult
+
+// PreLoader runs before the response starts and decides redirects and document
+// attributes for an SSR page.
+type PreLoader = core.PreLoader
+
+// WithPreLoader sets the pre loader for an SSR page. It runs before the
+// response starts: return a RedirectError to redirect with a real status code,
+// or set Lang/Class to control the document attributes in the streamed head.
+func WithPreLoader(loader PreLoader) PageOption {
+	return core.WithPreLoader(loader)
+}
+
 // WithClient makes a page render only in the browser.
 func WithClient() PageOption {
 	return core.WithClient()

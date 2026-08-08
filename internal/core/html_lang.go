@@ -64,6 +64,13 @@ func jsonRoundTrip(props any) map[string]any {
 }
 
 func ResolveHTMLDocumentAttrs(appDefaultLang, pageLang, pageClass string, props any) (lang string, htmlClass string, propsForReact any) {
+	return ResolveHTMLDocumentAttrsWithPre(appDefaultLang, pageLang, pageClass, PreLoaderResult{}, props)
+}
+
+// ResolveHTMLDocumentAttrsWithPre resolves document attributes with a pre loader
+// result taking precedence over the reserved props keys, the page config, and
+// the app default.
+func ResolveHTMLDocumentAttrsWithPre(appDefaultLang, pageLang, pageClass string, pre PreLoaderResult, props any) (lang string, htmlClass string, propsForReact any) {
 	var fromLoaderLang string
 	var fromLoaderClass string
 
@@ -94,6 +101,8 @@ func ResolveHTMLDocumentAttrs(appDefaultLang, pageLang, pageClass string, props 
 	}
 
 	switch {
+	case strings.TrimSpace(pre.Lang) != "":
+		lang = SanitizeHTMLLang(pre.Lang)
 	case strings.TrimSpace(fromLoaderLang) != "":
 		lang = SanitizeHTMLLang(fromLoaderLang)
 	case strings.TrimSpace(pageLang) != "":
@@ -105,6 +114,8 @@ func ResolveHTMLDocumentAttrs(appDefaultLang, pageLang, pageClass string, props 
 	}
 
 	switch {
+	case strings.TrimSpace(pre.Class) != "":
+		htmlClass = SanitizeHTMLClass(pre.Class)
 	case strings.TrimSpace(fromLoaderClass) != "":
 		htmlClass = SanitizeHTMLClass(fromLoaderClass)
 	case strings.TrimSpace(pageClass) != "":

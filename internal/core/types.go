@@ -7,6 +7,13 @@ import (
 
 type PropsLoader func(*http.Request) (any, error)
 
+type PreLoader func(*http.Request) (PreLoaderResult, error)
+
+type PreLoaderResult struct {
+	Lang  string
+	Class string
+}
+
 type RedirectError interface {
 	error
 	RedirectURL() string
@@ -69,6 +76,7 @@ type PageConfig struct {
 	ComponentPath    string
 	Mode             PageMode
 	PropsLoader      PropsLoader
+	PreLoader        PreLoader
 	StaticDataLoader StaticDataLoader
 	HTMLLang         string
 	HTMLClass        string
@@ -78,6 +86,7 @@ type PageConfig struct {
 
 const (
 	optionLoader uint8 = 1 << iota
+	optionPreLoader
 	optionStatic
 	optionStaticData
 )
@@ -88,6 +97,16 @@ func WithLoader(loader PropsLoader) PageOption {
 	return func(c *PageConfig) {
 		c.PropsLoader = loader
 		c.optionFlags |= optionLoader
+	}
+}
+
+// WithPreLoader sets the pre loader for an SSR page. It runs before the
+// response starts: return a RedirectError to redirect with a real status code,
+// or set Lang/Class to control the document attributes in the streamed head.
+func WithPreLoader(loader PreLoader) PageOption {
+	return func(c *PageConfig) {
+		c.PreLoader = loader
+		c.optionFlags |= optionPreLoader
 	}
 }
 

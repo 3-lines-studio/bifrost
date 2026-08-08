@@ -68,8 +68,10 @@ func TestPageConfigFromRoute_RejectsInvalidRoute(t *testing.T) {
 		{name: "blank component", route: Page("/", "  ")},
 		{name: "nil option", route: Page("/", "./page.tsx", nil)},
 		{name: "nil props loader", route: Page("/", "./page.tsx", WithLoader(nil))},
+		{name: "nil pre loader", route: Page("/", "./page.tsx", WithPreLoader(nil))},
 		{name: "nil static data loader", route: Page("/", "./page.tsx", WithStaticData(nil))},
 		{name: "loader on client page", route: Page("/", "./page.tsx", WithClient(), WithLoader(func(*http.Request) (any, error) { return nil, nil }))},
+		{name: "pre loader on client page", route: Page("/", "./page.tsx", WithClient(), WithPreLoader(func(*http.Request) (PreLoaderResult, error) { return PreLoaderResult{}, nil }))},
 		{name: "loader on static page", route: Page("/", "./page.tsx", WithStatic(), WithLoader(func(*http.Request) (any, error) { return nil, nil }))},
 		{name: "redundant static options", route: Page("/", "./page.tsx", WithStatic(), WithStaticData(func(context.Context) ([]StaticPathData, error) { return nil, nil }))},
 	}
@@ -87,6 +89,20 @@ func TestPageOptions(t *testing.T) {
 	t.Run("WithLoader creates route with loader", func(t *testing.T) {
 		route := Page("/test", "./test.tsx", WithLoader(func(*http.Request) (any, error) {
 			return map[string]any{"test": "value"}, nil
+		}))
+
+		if route.Pattern != "/test" {
+			t.Errorf("Expected pattern '/test', got '%s'", route.Pattern)
+		}
+
+		if len(route.Options) != 1 {
+			t.Errorf("Expected 1 option, got %d", len(route.Options))
+		}
+	})
+
+	t.Run("WithPreLoader creates route with pre loader", func(t *testing.T) {
+		route := Page("/test", "./test.tsx", WithPreLoader(func(*http.Request) (PreLoaderResult, error) {
+			return PreLoaderResult{Lang: "pt"}, nil
 		}))
 
 		if route.Pattern != "/test" {

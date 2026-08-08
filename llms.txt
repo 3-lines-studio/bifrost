@@ -2,7 +2,7 @@
 
 > Bifrost is a Go library for server-side rendering React components with QuickJS. It bridges Go backends with React frontends, rendering in-process with no external JS runtime.
 
-Bifrost enables Go HTTP servers to render React components on the server with a small API. React SSR uses `renderToString` and buffers the completed page before writing the HTTP response. Static pages are pre-rendered at build time into HTML with client-side React hydration (MPA-style). Development hot reload is handled by `bifrost dev` with built-in reverse proxy. Production deployment uses embedded assets for single binary distribution.
+Bifrost enables Go HTTP servers to render React components on the server with a small API. React SSR uses `renderToString` and streams the response with `103 Early Hints`, flushing the static head before the props loader and render. Static pages are pre-rendered at build time into HTML with client-side React hydration (MPA-style). Development hot reload is handled by `bifrost dev` with built-in reverse proxy. Production deployment uses embedded assets for single binary distribution.
 
 ## Features
 

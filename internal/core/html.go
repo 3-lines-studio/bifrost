@@ -88,14 +88,12 @@ func RenderHTMLShell(bodyHTML string, props any, scriptSrc string, headHTML stri
 	return shell.Render(bodyHTML, props, headHTML, htmlLang, htmlClass)
 }
 
-func (s HTMLDocumentShell) WritePreamble(w io.Writer, headHTML string, htmlLang string, htmlClass string) error {
+// WriteStaticHead writes from doctype through the asset hints (critical CSS,
+// stylesheet links, modulepreloads), leaving <head> open. The React-managed
+// head and the body are written later by WriteTail.
+func (s HTMLDocumentShell) WriteStaticHead(w io.Writer, htmlLang string, htmlClass string) error {
 	langAttr := SanitizeHTMLLang(htmlLang)
 	classAttr := SanitizeHTMLClass(htmlClass)
-
-	hasCustomTitle := false
-	if headHTML != "" {
-		hasCustomTitle = containsTitle(headHTML)
-	}
 
 	if _, err := io.WriteString(w, "<!doctype html>\n<html lang=\""); err != nil {
 		return err
@@ -124,16 +122,6 @@ func (s HTMLDocumentShell) WritePreamble(w io.Writer, headHTML string, htmlLang 
 		return err
 	}
 
-	if !hasCustomTitle {
-		if _, err := io.WriteString(w, "<title>Bifrost</title>"); err != nil {
-			return err
-		}
-	}
-	if headHTML != "" {
-		if _, err := io.WriteString(w, headHTML); err != nil {
-			return err
-		}
-	}
 	if s.styleTags != "" {
 		if _, err := io.WriteString(w, s.styleTags); err != nil {
 			return err
@@ -157,12 +145,43 @@ func (s HTMLDocumentShell) WritePreamble(w io.Writer, headHTML string, htmlLang 
 	if _, err := io.WriteString(w, s.scriptSrc); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(w, `" />`); err != nil {
-		return err
-	}
+	_, err := io.WriteString(w, `" />`)
+	return err
+}
 
+func (s HTMLDocumentShell) writeHeadRest(w io.Writer, headHTML string) error {
+	if !containsTitle(headHTML) {
+		if _, err := io.WriteString(w, "<title>Bifrost</title>"); err != nil {
+			return err
+		}
+	}
+	if headHTML != "" {
+		if _, err := io.WriteString(w, headHTML); err != nil {
+			return err
+		}
+	}
 	_, err := io.WriteString(w, "\n  </head>\n  <body>\n    <div id=\"app\">")
 	return err
+}
+
+// WriteTail writes the render-dependent head, the opening body tag, the rendered
+// body, and the suffix. Call after WriteStaticHead.
+func (s HTMLDocumentShell) WriteTail(w io.Writer, headHTML string, bodyHTML string, propsJSON []byte) error {
+	if err := s.writeHeadRest(w, headHTML); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, bodyHTML); err != nil {
+		return err
+	}
+	return s.WriteSuffix(w, propsJSON)
+}
+
+// WritePreamble writes from doctype through the opening <div id="app"> (exclusive of body HTML).
+func (s HTMLDocumentShell) WritePreamble(w io.Writer, headHTML string, htmlLang string, htmlClass string) error {
+	if err := s.WriteStaticHead(w, htmlLang, htmlClass); err != nil {
+		return err
+	}
+	return s.writeHeadRest(w, headHTML)
 }
 
 func (s HTMLDocumentShell) WriteSuffix(w io.Writer, propsJSON []byte) error {

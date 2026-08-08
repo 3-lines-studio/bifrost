@@ -29,6 +29,7 @@ type PageHandler struct {
 	staticPath      string
 	defaultHTMLLang string
 	shell           *core.HTMLDocumentShell
+	earlyHints      []string
 }
 
 func NewPageHandler(
@@ -62,6 +63,7 @@ func NewPageHandler(
 		staticPath:      staticPath,
 		defaultHTMLLang: defaultHTMLLang,
 		shell:           shell,
+		earlyHints:      earlyHintLinks(artifacts),
 	}
 }
 
@@ -69,17 +71,147 @@ var errNeedsSetup = errors.New("page needs setup but setup not implemented in ad
 
 func (h *PageHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
-	output := h.service.ServePage(req.Context(), h.servePageInput(req))
+	input := h.servePageInput(req)
+	preMs := 0.0
+	preRan := false
+	if h.config.Mode == core.ModeSSR && h.config.PreLoader != nil {
+		preStart := time.Now()
+		pre, err := h.config.PreLoader(req)
+		preMs = float64(time.Since(preStart)) / float64(time.Millisecond)
+		if err != nil {
+			h.serveError(w, req, err)
+			return
+		}
+		preRan = true
+		input.Pre = &pre
+	}
+	stream := h.canStream(req)
+	if stream {
+		w.Header().Set("Trailer", "X-Bifrost-Render-Ms, X-Bifrost-Props-Ms, X-Bifrost-Assemble-Ms, X-Bifrost-Serve-Ms")
+		if preRan {
+			w.Header().Set("X-Bifrost-PreLoader-Ms", formatMs(preMs))
+		}
+		h.sendEarlyHints(w)
+		h.writeStreamingHead(w, input.Pre)
+	}
+	output := h.service.ServePage(req.Context(), input)
 	if output.Error != nil {
+		if stream {
+			h.serveStreamingError(w, req, output.Error)
+			return
+		}
 		h.serveError(w, req, output.Error)
 		return
 	}
-	h.setTimingHeaders(w, output, time.Since(start))
+	h.setTimingHeaders(w, output, time.Since(start), preMs, preRan)
+	if stream {
+		h.serveStreamingPage(w, req, output)
+		return
+	}
 	h.dispatchPageOutput(w, req, output)
 }
 
-func (h *PageHandler) setTimingHeaders(w http.ResponseWriter, output usecase.ServePageOutput, serve time.Duration) {
-	if output.RenderMs <= 0 && output.PropsMs <= 0 && output.AssembleMs <= 0 {
+func (h *PageHandler) canStream(req *http.Request) bool {
+	return req.Method == http.MethodGet &&
+		h.shell != nil &&
+		h.config.Mode == core.ModeSSR &&
+		req.Context().Value(markdownCtxKey{}) != true
+}
+
+func (h *PageHandler) sendEarlyHints(w http.ResponseWriter) {
+	if len(h.earlyHints) == 0 {
+		return
+	}
+	for _, link := range h.earlyHints {
+		w.Header().Add("Link", link)
+	}
+	w.WriteHeader(http.StatusEarlyHints)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (h *PageHandler) writeStreamingHead(w http.ResponseWriter, pre *core.PreLoaderResult) {
+	var preResult core.PreLoaderResult
+	if pre != nil {
+		preResult = *pre
+	}
+	lang, class, _ := core.ResolveHTMLDocumentAttrsWithPre(h.defaultHTMLLang, h.config.HTMLLang, h.config.HTMLClass, preResult, nil)
+	_ = h.shell.WriteStaticHead(w, lang, class)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (h *PageHandler) serveStreamingPage(w http.ResponseWriter, req *http.Request, output usecase.ServePageOutput) {
+	switch output.Action {
+	case core.ActionRenderSSR:
+		h.serveStreamingTail(w, output)
+	case core.ActionNotFound:
+		h.serveStreamingError(w, req, fmt.Errorf("page not found"))
+	default:
+		h.serveStreamingError(w, req, fmt.Errorf("unexpected page action %v after streamed response", output.Action))
+	}
+}
+
+func (h *PageHandler) serveStreamingTail(w http.ResponseWriter, output usecase.ServePageOutput) {
+	propsJSON, err := core.MarshalBifrostPropsJSON(output.Props)
+	if err != nil {
+		propsJSON = []byte("{}")
+	}
+	_ = h.shell.WriteTail(w, output.Page.Head, output.Page.Body, propsJSON)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (h *PageHandler) serveStreamingError(w http.ResponseWriter, req *http.Request, err error) {
+	logRequestError(req, err)
+
+	var redirectErr core.RedirectError
+	if errors.As(err, &redirectErr) {
+		url := redirectErr.RedirectURL()
+		head := `<meta http-equiv="refresh" content="0; url=` + html.EscapeString(url) + `">`
+		body := `<p><a href="` + html.EscapeString(url) + `">Redirecting&hellip;</a></p>`
+		_ = h.shell.WriteTail(w, head, body, []byte("{}"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		return
+	}
+
+	msg := "An error occurred while processing your request"
+	if h.isDev {
+		msg = err.Error()
+	}
+	_ = h.shell.WriteTail(w, "", `<pre>`+html.EscapeString(msg)+`</pre>`, []byte("{}"))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func earlyHintLinks(a core.PageArtifacts) []string {
+	var links []string
+	for _, css := range core.StylesheetHrefsFor(a) {
+		if css == "" {
+			continue
+		}
+		links = append(links, "<"+css+">; rel=preload; as=style")
+	}
+	for _, chunk := range a.Chunks {
+		if chunk == "" {
+			continue
+		}
+		links = append(links, "<"+chunk+">; rel=modulepreload")
+	}
+	if a.Script != "" {
+		links = append(links, "<"+a.Script+">; rel=modulepreload")
+	}
+	return links
+}
+
+func (h *PageHandler) setTimingHeaders(w http.ResponseWriter, output usecase.ServePageOutput, serve time.Duration, preMs float64, preRan bool) {
+	if output.RenderMs <= 0 && output.PropsMs <= 0 && output.AssembleMs <= 0 && !preRan {
 		return
 	}
 	if output.RenderMs > 0 {
@@ -90,6 +222,9 @@ func (h *PageHandler) setTimingHeaders(w http.ResponseWriter, output usecase.Ser
 	}
 	if output.AssembleMs > 0 {
 		w.Header().Set("X-Bifrost-Assemble-Ms", formatMs(output.AssembleMs))
+	}
+	if preRan {
+		w.Header().Set("X-Bifrost-PreLoader-Ms", formatMs(preMs))
 	}
 	w.Header().Set("X-Bifrost-Serve-Ms", formatMs(float64(serve)/float64(time.Millisecond)))
 }

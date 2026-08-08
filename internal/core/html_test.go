@@ -373,3 +373,61 @@ func TestMarshalBifrostPropsJSON_Struct(t *testing.T) {
 		t.Errorf("unexpected JSON: %s", string(b))
 	}
 }
+
+func TestHTMLDocumentShell_StaticHeadAndTailMatchRender(t *testing.T) {
+	const body = "<main>Hello</main>"
+	props := map[string]any{"name": "World"}
+	scriptSrc := "/dist/page.js"
+	headHTML := "<title>Test</title><meta name=\"description\" content=\"x\" />"
+	criticalCSS := ".hero{display:block}"
+	cssHrefs := []string{"/dist/page.css"}
+	chunks := []string{"/dist/chunk-a.js"}
+
+	shell, err := NewHTMLDocumentShell(scriptSrc, criticalCSS, cssHrefs, chunks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := shell.Render(body, props, headHTML, "en", "dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	propsJSON, err := MarshalBifrostPropsJSON(props)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sb strings.Builder
+	if err := shell.WriteStaticHead(&sb, "en", "dark"); err != nil {
+		t.Fatal(err)
+	}
+	if err := shell.WriteTail(&sb, headHTML, body, propsJSON); err != nil {
+		t.Fatal(err)
+	}
+	if got := sb.String(); got != want {
+		t.Fatalf("WriteStaticHead+WriteTail mismatch\nwant: %s\ngot:  %s", want, got)
+	}
+}
+
+func TestHTMLDocumentShell_StaticHeadStopsBeforeHeadClose(t *testing.T) {
+	shell, err := NewHTMLDocumentShell("/dist/page.js", ".hero{display:block}", []string{"/dist/page.css"}, []string{"/dist/chunk-a.js"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sb strings.Builder
+	if err := shell.WriteStaticHead(&sb, "en", ""); err != nil {
+		t.Fatal(err)
+	}
+	out := sb.String()
+
+	for _, want := range []string{"<!doctype html>", `<meta charset="UTF-8" />`, `<style data-bifrost-critical>`, `<link rel="stylesheet" href="/dist/page.css"`, `rel="modulepreload"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("static head missing %q:\n%s", want, out)
+		}
+	}
+	for _, banned := range []string{"</head>", "<title", "<body"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("static head must not contain %q:\n%s", banned, out)
+		}
+	}
+}

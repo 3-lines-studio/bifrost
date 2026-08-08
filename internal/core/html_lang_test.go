@@ -337,3 +337,29 @@ func TestResolveHTMLDocumentAttrs_StructOmitEmptyDropped(t *testing.T) {
 		t.Fatal("reserved class key should be stripped")
 	}
 }
+
+func TestResolveHTMLDocumentAttrsWithPre_Precedence(t *testing.T) {
+	props := map[string]any{"__bifrost_html_lang": "nl", "k": 1}
+
+	pre := PreLoaderResult{Lang: "pt", Class: "dark"}
+	lang, class, _ := ResolveHTMLDocumentAttrsWithPre("en", "fr", "light", pre, props)
+	if lang != "pt" {
+		t.Errorf("lang = %q, want pt (pre wins)", lang)
+	}
+	if class != "dark" {
+		t.Errorf("class = %q, want dark (pre wins)", class)
+	}
+
+	lang2, class2, _ := ResolveHTMLDocumentAttrsWithPre("en", "fr", "light", PreLoaderResult{}, props)
+	if lang2 != "nl" {
+		t.Errorf("lang = %q, want nl (props fallback)", lang2)
+	}
+	if class2 != "light" {
+		t.Errorf("class = %q, want light (page fallback)", class2)
+	}
+
+	lang3, _, _ := ResolveHTMLDocumentAttrsWithPre("en", "", "", PreLoaderResult{Lang: "pt"}, nil)
+	if lang3 != "pt" {
+		t.Errorf("lang = %q, want pt with nil props", lang3)
+	}
+}

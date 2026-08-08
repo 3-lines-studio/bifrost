@@ -2,9 +2,12 @@ package http
 
 import (
 	"context"
+	"embed"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -321,13 +324,14 @@ func TestSetTimingHeaders_RenderPathSetsAllSpans(t *testing.T) {
 		RenderMs:   12.3,
 		PropsMs:    250.5,
 		AssembleMs: 4.2,
-	}, 300*time.Millisecond)
+	}, 300*time.Millisecond, 1.5, true)
 
 	want := map[string]string{
-		"X-Bifrost-Render-Ms":   "12.3",
-		"X-Bifrost-Props-Ms":    "250.5",
-		"X-Bifrost-Assemble-Ms": "4.2",
-		"X-Bifrost-Serve-Ms":    "300.0",
+		"X-Bifrost-Render-Ms":    "12.3",
+		"X-Bifrost-Props-Ms":     "250.5",
+		"X-Bifrost-Assemble-Ms":  "4.2",
+		"X-Bifrost-PreLoader-Ms": "1.5",
+		"X-Bifrost-Serve-Ms":     "300.0",
 	}
 	for name, value := range want {
 		if got := rec.Header().Get(name); got != value {
@@ -340,11 +344,212 @@ func TestSetTimingHeaders_SkipsNonRenderPaths(t *testing.T) {
 	h := &PageHandler{}
 	rec := httptest.NewRecorder()
 
-	h.setTimingHeaders(rec, usecase.ServePageOutput{}, time.Millisecond)
+	h.setTimingHeaders(rec, usecase.ServePageOutput{}, time.Millisecond, 0, false)
 
-	for _, name := range []string{"X-Bifrost-Render-Ms", "X-Bifrost-Props-Ms", "X-Bifrost-Assemble-Ms", "X-Bifrost-Serve-Ms"} {
+	for _, name := range []string{"X-Bifrost-Render-Ms", "X-Bifrost-Props-Ms", "X-Bifrost-Assemble-Ms", "X-Bifrost-PreLoader-Ms", "X-Bifrost-Serve-Ms"} {
 		if got := rec.Header().Get(name); got != "" {
 			t.Errorf("unexpected header %s = %q", name, got)
 		}
+	}
+}
+
+func TestEarlyHintLinks(t *testing.T) {
+	a := core.PageArtifacts{
+		Script:      "/dist/page.js",
+		CriticalCSS: ".a{}",
+		CSS:         "/dist/page.css",
+		CSSFiles:    []string{"/dist/extra.css"},
+		Chunks:      []string{"/dist/chunk-a.js"},
+	}
+	want := []string{
+		"</dist/page.css>; rel=preload; as=style",
+		"</dist/extra.css>; rel=preload; as=style",
+		"</dist/chunk-a.js>; rel=modulepreload",
+		"</dist/page.js>; rel=modulepreload",
+	}
+	if got := earlyHintLinks(a); !slices.Equal(got, want) {
+		t.Errorf("earlyHintLinks = %v, want %v", got, want)
+	}
+}
+
+func TestSendEarlyHints_SetsLinkHeaders(t *testing.T) {
+	h := &PageHandler{earlyHints: []string{"</dist/page.css>; rel=preload; as=style"}}
+	rec := httptest.NewRecorder()
+
+	h.sendEarlyHints(rec)
+
+	if got := rec.Header().Get("Link"); got != "</dist/page.css>; rel=preload; as=style" {
+		t.Errorf("Link header = %q, want early hint link", got)
+	}
+}
+
+func TestServeStreaming_WritesFullDocument(t *testing.T) {
+	shell, err := core.NewHTMLDocumentShell("/dist/page.js", "", nil, []string{"/dist/chunk-a.js"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &PageHandler{shell: &shell}
+	rec := httptest.NewRecorder()
+
+	h.writeStreamingHead(rec, nil)
+	h.serveStreamingTail(rec, usecase.ServePageOutput{
+		Action: core.ActionRenderSSR,
+		Page:   core.RenderedPage{Head: "<title>Stub</title>", Body: "<main>stub</main>"},
+		Props:  map[string]any{"name": "World"},
+	})
+
+	body := rec.Body.String()
+	for _, want := range []string{"<!doctype html>", `rel="modulepreload"`, "<title>Stub</title>", "<main>stub</main>", `"name":"World"`, `type="module" defer`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("streamed body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestServeStreamingError_RedirectUsesMetaRefresh(t *testing.T) {
+	shell, err := core.NewHTMLDocumentShell("/dist/page.js", "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &PageHandler{shell: &shell, isDev: true}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	h.serveStreamingError(rec, req, &testRedirectErr{url: "/login", code: http.StatusFound})
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `<meta http-equiv="refresh" content="0; url=/login">`) {
+		t.Errorf("expected meta refresh redirect, got:\n%s", body)
+	}
+	if !strings.Contains(body, `href="/login"`) {
+		t.Errorf("expected link to /login, got:\n%s", body)
+	}
+}
+
+func TestServeStreamingError_ProdHidesDetails(t *testing.T) {
+	shell, err := core.NewHTMLDocumentShell("/dist/page.js", "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &PageHandler{shell: &shell, isDev: false}
+	rec := httptest.NewRecorder()
+
+	h.serveStreamingError(rec, httptest.NewRequest(http.MethodGet, "/", nil), fmt.Errorf("secret detail"))
+
+	body := rec.Body.String()
+	if strings.Contains(body, "secret detail") {
+		t.Errorf("production must not leak error details, got:\n%s", body)
+	}
+	if !strings.Contains(body, "An error occurred while processing your request") {
+		t.Errorf("expected generic production message, got:\n%s", body)
+	}
+}
+
+type stubRenderer struct{}
+
+func (stubRenderer) Render(path string, props any) (core.RenderedPage, error) {
+	return core.RenderedPage{Head: "<title>Stub</title>", Body: "<main>stub</main>"}, nil
+}
+
+func (stubRenderer) Build(entrypoints []string, outdir string, entryNames []string) (map[string]core.ClientBuildResult, error) {
+	return nil, nil
+}
+
+func (stubRenderer) BuildSSR(entrypoints []string, outdir string) error {
+	return nil
+}
+
+func TestServeHTTP_StreamsSSRPage(t *testing.T) {
+	config := core.PageConfig{Mode: core.ModeSSR, ComponentPath: "./pages/home.tsx"}
+	entryName := core.EntryNameForPath(config.ComponentPath)
+	manifest := &core.Manifest{Entries: map[string]core.ManifestEntry{
+		entryName: {Script: "/dist/page.js"},
+	}}
+	handler := NewPageHandler(usecase.NewPageService(stubRenderer{}), config, manifest, embed.FS{}, false, "", "en")
+
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	for _, want := range []string{"<!doctype html>", "<title>Stub</title>", "<main>stub</main>", `src="/dist/page.js"`, `id="__BIFROST_PROPS__"`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("streamed page missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestServeHTTP_PreLoaderRedirectsBeforeFlush(t *testing.T) {
+	config := core.PageConfig{
+		Mode:          core.ModeSSR,
+		ComponentPath: "./pages/home.tsx",
+		PreLoader: func(r *http.Request) (core.PreLoaderResult, error) {
+			return core.PreLoaderResult{}, &testRedirectErr{url: "/login", code: http.StatusFound}
+		},
+	}
+	entryName := core.EntryNameForPath(config.ComponentPath)
+	manifest := &core.Manifest{Entries: map[string]core.ManifestEntry{
+		entryName: {Script: "/dist/page.js"},
+	}}
+	handler := NewPageHandler(usecase.NewPageService(stubRenderer{}), config, manifest, embed.FS{}, false, "", "en")
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/login" {
+		t.Errorf("Location = %q, want /login", loc)
+	}
+	if strings.Contains(rec.Body.String(), "<!doctype html>") {
+		t.Error("static head flushed before the pre loader redirect")
+	}
+}
+
+func TestServeHTTP_PreLoaderLangInStreamedHead(t *testing.T) {
+	config := core.PageConfig{
+		Mode:          core.ModeSSR,
+		ComponentPath: "./pages/home.tsx",
+		PreLoader: func(r *http.Request) (core.PreLoaderResult, error) {
+			return core.PreLoaderResult{Lang: "pt"}, nil
+		},
+	}
+	entryName := core.EntryNameForPath(config.ComponentPath)
+	manifest := &core.Manifest{Entries: map[string]core.ManifestEntry{
+		entryName: {Script: "/dist/page.js"},
+	}}
+	handler := NewPageHandler(usecase.NewPageService(stubRenderer{}), config, manifest, embed.FS{}, false, "", "en")
+
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(body), "<!doctype html>\n<html lang=\"pt\"") {
+		t.Errorf("pre loader lang missing from streamed head:\n%s", body)
+	}
+	if got := resp.Header.Get("X-Bifrost-PreLoader-Ms"); got == "" {
+		t.Error("missing X-Bifrost-PreLoader-Ms header")
+	}
+	if got := resp.Trailer.Get("X-Bifrost-Render-Ms"); got == "" {
+		t.Error("missing X-Bifrost-Render-Ms trailer")
 	}
 }

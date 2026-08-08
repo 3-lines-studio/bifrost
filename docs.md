@@ -231,6 +231,9 @@ Creates a route configuration for a React component.
 // Props loader - function to load data from request
 func WithLoader(loader PropsLoader) PageOption
 
+// Pre loader - runs before the response starts; decides redirects and document attributes
+func WithPreLoader(loader PreLoader) PageOption
+
 // Client-only mode - static page with empty shell + client render
 func WithClient() PageOption
 
@@ -247,7 +250,7 @@ func WithHTMLLang(lang string) PageOption
 func WithHTMLClass(class string) PageOption
 ```
 
-`WithLoader` is valid only for SSR pages. Bifrost rejects loaders on client-only or static pages, nil loaders, and combining `WithStatic` with `WithStaticData`.
+`WithLoader` and `WithPreLoader` are valid only for SSR pages. Bifrost rejects loaders on client-only or static pages, nil loaders, and combining `WithStatic` with `WithStaticData`.
 
 **App options** (use `NewWithOptions(assets, []bifrost.ConfigOption{...}, pages...)`):
 
@@ -255,9 +258,9 @@ func WithHTMLClass(class string) PageOption
 func WithDefaultHTMLLang(lang string) ConfigOption
 ```
 
-**Document language:** precedence is loader/static-data field `bifrost.PropHTMLLang` (`"__bifrost_html_lang"`) → `WithHTMLLang` → `WithDefaultHTMLLang` → `"en"`. The reserved key is stripped before props reach the component.
+**Document language:** precedence is the pre loader's `Lang` → loader/static-data field `bifrost.PropHTMLLang` (`"__bifrost_html_lang"`) → `WithHTMLLang` → `WithDefaultHTMLLang` → `"en"`. The reserved key is stripped before props reach the component.
 
-**Document class:** precedence is loader/static-data field `bifrost.PropHTMLClass` (`"__bifrost_html_class"`) → `WithHTMLClass` → empty class. The reserved key is stripped before props reach the component.
+**Document class:** precedence is the pre loader's `Class` → loader/static-data field `bifrost.PropHTMLClass` (`"__bifrost_html_class"`) → `WithHTMLClass` → empty class. The reserved key is stripped before props reach the component.
 
 **Props Loader:**
 
@@ -266,6 +269,19 @@ type PropsLoader func(*http.Request) (any, error)
 ```
 
 A function that receives the HTTP request and returns props to pass to the component.
+
+**Pre Loader:**
+
+```go
+type PreLoader func(*http.Request) (PreLoaderResult, error)
+
+type PreLoaderResult struct {
+	Lang  string
+	Class string
+}
+```
+
+A function that runs before the response starts. Return a `RedirectError` to redirect with a real status code (nothing has been flushed yet, so redirects and errors keep their normal status semantics), or set `Lang`/`Class` to control the document attributes in the streamed head. Keep it fast: it runs on the critical path before the first byte. Keep redirects and status decisions here rather than in the props loader — a redirect from the props loader on a streaming page becomes a meta-refresh with a 200 status. The pre loader and the props loader cannot share data through the request; re-fetch or use your own request-scoped cache.
 
 ### Registering Routes
 
@@ -351,9 +367,9 @@ bifrost.Page("/user/{id}", "./pages/user.tsx",
 
 #### SSR Performance
 
-React SSR uses `renderToString`. Bifrost buffers the rendered page before writing the HTTP response so render failures can return a clean HTTP 500. Request cancellation propagates to the render request.
+React SSR uses `renderToString` and streams the response: the static document head (charset, viewport, critical CSS, stylesheet links, modulepreloads) is flushed and `103 Early Hints` with the page's CSS and JS are sent before the props loader and render run, then the React-managed head, body, and props stream after. Two behavior notes: because the head is flushed before the loader runs, a `RedirectError` from the props loader becomes a meta-refresh in the streamed document instead of an HTTP 302, and `<html lang>`/`class` come from the page config rather than the `__bifrost_html_lang`/`__bifrost_html_class` props — apps that derive language from the request (Accept-Language, cookies, CDN headers) should set `document.documentElement.lang` in a client script after load. Request cancellation propagates to the render request.
 
-Responses carry timing headers for the server-side breakdown: `X-Bifrost-Render-Ms` (QuickJS render, including worker queue wait), `X-Bifrost-Props-Ms` (props loader), `X-Bifrost-Assemble-Ms` (HTML assembly, including props JSON marshaling), and `X-Bifrost-Serve-Ms` (total handler time). Compare `X-Bifrost-Serve-Ms` with the browser's TTFB; a large gap means network, TLS, or proxy latency rather than rendering.
+Responses carry timing headers for the server-side breakdown: `X-Bifrost-Render-Ms` (QuickJS render, including worker queue wait), `X-Bifrost-Props-Ms` (props loader), `X-Bifrost-Assemble-Ms` (HTML assembly, including props JSON marshaling), `X-Bifrost-PreLoader-Ms` (pre loader), and `X-Bifrost-Serve-Ms` (total handler time). On streamed SSR responses the four post-render spans travel as HTTP trailers (declared before the response starts); `curl -i` shows them after the body, and buffered responses — including HEAD requests — carry them as regular headers. Compare `X-Bifrost-Serve-Ms` with the browser's TTFB; a large gap means network, TLS, or proxy latency rather than rendering.
 
 For routes where latency, throughput, or Largest Contentful Paint matters most, prefer static prerender (`WithStatic`). Those routes serve prebuilt HTML without rendering per request.
 

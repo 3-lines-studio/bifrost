@@ -43,6 +43,9 @@ func PageConfigFromRoute(route Route) (PageConfig, error) {
 	if config.optionFlags&optionLoader != 0 && config.PropsLoader == nil {
 		return PageConfig{}, fmt.Errorf("bifrost: page %q has a nil props loader", route.ComponentPath)
 	}
+	if config.optionFlags&optionPreLoader != 0 && config.PreLoader == nil {
+		return PageConfig{}, fmt.Errorf("bifrost: page %q has a nil pre loader", route.ComponentPath)
+	}
 	if config.optionFlags&optionStaticData != 0 && config.StaticDataLoader == nil {
 		return PageConfig{}, fmt.Errorf("bifrost: page %q has a nil static data loader", route.ComponentPath)
 	}
@@ -51,6 +54,9 @@ func PageConfigFromRoute(route Route) (PageConfig, error) {
 	}
 	if config.optionFlags&optionLoader != 0 && config.Mode != ModeSSR {
 		return PageConfig{}, fmt.Errorf("bifrost: page %q can only use WithLoader in SSR mode", route.ComponentPath)
+	}
+	if config.optionFlags&optionPreLoader != 0 && config.Mode != ModeSSR {
+		return PageConfig{}, fmt.Errorf("bifrost: page %q can only use WithPreLoader in SSR mode", route.ComponentPath)
 	}
 	return config, nil
 }

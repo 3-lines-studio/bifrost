@@ -52,6 +52,38 @@ func (f *fakeRenderer) BuildSSR(entrypoints []string, outdir string) error {
 	return nil
 }
 
+func TestRenderSSR_RunsPreLoaderWhenInputPreAbsent(t *testing.T) {
+	shell, err := core.NewHTMLDocumentShell("/dist/page.js", "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := core.PageConfig{
+		Mode:          core.ModeSSR,
+		ComponentPath: "./pages/home.tsx",
+		PreLoader: func(r *http.Request) (core.PreLoaderResult, error) {
+			return core.PreLoaderResult{Lang: "pt"}, nil
+		},
+	}
+	entryName := core.EntryNameForPath(config.ComponentPath)
+	service := NewPageService(&fakeRenderer{})
+	output := service.ServePage(context.Background(), ServePageInput{
+		Config:          config,
+		DefaultHTMLLang: "en",
+		Manifest:        &core.Manifest{Entries: map[string]core.ManifestEntry{entryName: {Script: "/dist/page.js"}}},
+		EntryName:       entryName,
+		RequestPath:     "/",
+		Request:         httptest.NewRequest(http.MethodGet, "/", nil),
+		Shell:           &shell,
+	})
+
+	if output.Error != nil {
+		t.Fatalf("ServePage error: %v", output.Error)
+	}
+	if !strings.Contains(output.HTML, `<html lang="pt"`) {
+		t.Errorf("expected pre loader lang in HTML, got: %s", output.HTML)
+	}
+}
+
 func TestPageServiceDevSSRBuildsThenRenders(t *testing.T) {
 	tmpDir := t.TempDir()
 	writeTestFile(t, filepath.Join(tmpDir, "pages", "home.tsx"), "export default function Page(){ return <div>Hello</div> }")

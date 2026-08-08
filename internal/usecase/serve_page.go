@@ -20,6 +20,7 @@ type ServePageInput struct {
 	HasRenderer     bool
 	Request         *http.Request
 	Markdown        bool
+	Pre             *core.PreLoaderResult
 	Shell           *core.HTMLDocumentShell
 }
 
@@ -35,6 +36,7 @@ type ServePageOutput struct {
 	RenderMs   float64
 	PropsMs    float64
 	AssembleMs float64
+	Page       core.RenderedPage
 	Error      error
 }
 
