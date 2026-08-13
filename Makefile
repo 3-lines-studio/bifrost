@@ -1,28 +1,40 @@
-.PHONY: check bench bench-browser bench-sweep release-check
+.PHONY: check test race vet bench fuzz integration dev-integration reproducible
 
-check:
-	go run ./cmd/bifrost doctor ./example/cmd/full
-	go build -o /tmp/bifrost ./cmd/bifrost
-	cd example && bun i && PATH="$$(go env GOROOT)/bin:/usr/bin:/bin" /tmp/bifrost build ./cmd/full/main.go
-	mkdir -p test/e2e/.bifrost
-	cp -r example/cmd/full/.bifrost/. test/e2e/.bifrost/
-	env GOCACHE=/tmp/bifrost-go-build-cache GOMODCACHE=/tmp/bifrost-go-mod-cache GOPATH=/tmp/bifrost-go-path GOLANGCI_LINT_CACHE=/tmp/bifrost-golangci-lint-cache golangci-lint run ./...
-	go test ./... -race
-	cd example && go test ./...
-	cd test/e2e && PATH="$$(go env GOROOT)/bin:/usr/bin:/bin" go test ./...
-	go build
+check: test race vet
+
+test:
+	@test -z "$$(gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'))" || (gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'); exit 1)
+	go test ./...
+
+race:
+	go test -race ./...
+
+vet:
+	go vet ./...
 
 bench:
-	go test ./internal/adapters/quickjs -run '^$$' -bench '^Benchmark' -benchmem -count=3
+	go test -run '^$$' -bench . -benchmem ./...
 
-bench-browser:
-	cd bench && bun i && go run ./harness
+fuzz:
+	go test -run '^$$' -fuzz FuzzParseManifest -fuzztime=10s .
+	go test -run '^$$' -fuzz FuzzDocumentPath -fuzztime=10s .
+	go test -run '^$$' -fuzz FuzzRawProps -fuzztime=10s .
 
-bench-sweep:
-	cd bench && bun i && go run ./harness -sweep
+integration:
+	bun install --frozen-lockfile
+	go run ./cmd/bifrost build ./example/basic
+	go run ./cmd/bifrost build ./example/plugin
+	bash ./scripts/vite-failure.sh
+	bash ./scripts/cancellation-integration.sh
+	bash ./scripts/integration.sh
+	bash ./scripts/structured-integration.sh
 
-release-check: check
-	go vet ./...
-	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-	bun audit
-	git diff --check
+dev-integration:
+	bash ./scripts/dev-integration.sh
+
+reproducible:
+	go run ./cmd/bifrost build ./example/basic
+	cp example/basic/.bifrost/manifest.json /tmp/bifrost-manifest-1.json
+	go run ./cmd/bifrost build ./example/basic
+	diff -u /tmp/bifrost-manifest-1.json example/basic/.bifrost/manifest.json
+	rm -f /tmp/bifrost-manifest-1.json

@@ -1,7 +1,0 @@
-{
-  "entries": {
-    "pages-home-entry": {
-      "ssr": "/ssr/pages-home-entry-ssr.js"
-    }
-  }
-}

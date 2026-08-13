@@ -1,0 +1,2 @@
+@import "tailwindcss";
+@source "../workspace-ui/src/**/*.{ts,tsx}";

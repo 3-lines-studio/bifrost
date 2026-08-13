@@ -1,0 +1,10 @@
+{
+  "name": "@bifrost/structured-example",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@bifrost/example-ui": "workspace:*",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  }
+}

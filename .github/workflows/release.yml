@@ -24,7 +24,7 @@ jobs:
           version: v2.12.2
 
       - name: Run release checks
-        run: make release-check
+        run: make check
 
       - name: Run renderer benchmarks
         run: make bench

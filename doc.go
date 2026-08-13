@@ -1,3 +1,4 @@
-// Package bifrost serves React pages from Go with server-side rendering,
-// client-only rendering, and static generation powered by QuickJS.
+// Package bifrost serves Vite-built React Server, Static, and Client pages
+// through the standard Go net/http stack. Vite owns frontend builds and
+// development; Bun executes streaming SSR; Go owns server behavior.
 package bifrost

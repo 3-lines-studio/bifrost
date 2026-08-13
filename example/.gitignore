@@ -1,7 +1,0 @@
-node_modules/
-.bifrost/
-tmp/
-bifrost
-bifrost-quickjs
-/full
-/cmd/full/full

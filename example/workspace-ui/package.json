@@ -1,0 +1,9 @@
+{
+  "name": "@bifrost/example-ui",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.tsx",
+  "peerDependencies": {
+    "react": "^19.2.4"
+  }
+}
