@@ -72,8 +72,10 @@ if err := app.Register(mux); err != nil {
     log.Fatal(err)
 }
 mux.Handle("/", apiRouter)
-handler := sharedMiddleware(mux)
+handler := sharedMiddleware(app.ResolveMarkdown(mux))
 ```
+
+`ResolveMarkdown` serves server-rendered routes as Markdown for a `.md` path suffix or a preferred `Accept: text/markdown` media type. It leaves static pages, client pages, public files, and other mux handlers unchanged. `Handler` applies it automatically.
 
 Use `/{$}` for an exact root page. The standard `/` pattern is a subtree fallback. Bifrost does not add router-specific adapters.
 

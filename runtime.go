@@ -35,18 +35,25 @@ type renderSink interface {
 	Body([]byte) error
 }
 
+type pageRenderSink interface {
+	renderSink
+	finish() error
+	committed() bool
+}
+
 type renderer interface {
 	Render(context.Context, renderRequest, renderSink) error
 	Close(context.Context) error
 }
 
 type runtimeState struct {
-	assets   fs.FS
-	manifest *compiledManifest
-	renderer renderer
-	handlers map[string]http.Handler
-	files    map[string]protocol.FileRef
-	public   map[string]protocol.FileRef
+	assets         fs.FS
+	manifest       *compiledManifest
+	renderer       renderer
+	handlers       map[string]http.Handler
+	serverPatterns map[string]struct{}
+	files          map[string]protocol.FileRef
+	public         map[string]protocol.FileRef
 }
 
 func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render renderer) (*runtimeState, error) {
@@ -54,12 +61,13 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 		return nil, errors.New("bifrost: incomplete runtime input")
 	}
 	state := &runtimeState{
-		assets:   assets,
-		manifest: manifest,
-		renderer: render,
-		handlers: make(map[string]http.Handler, len(app.routes)),
-		files:    make(map[string]protocol.FileRef),
-		public:   manifest.public,
+		assets:         assets,
+		manifest:       manifest,
+		renderer:       render,
+		handlers:       make(map[string]http.Handler, len(app.routes)),
+		serverPatterns: make(map[string]struct{}),
+		files:          make(map[string]protocol.FileRef),
+		public:         manifest.public,
 	}
 	maps.Copy(state.files, manifest.clientFiles)
 	for _, route := range manifest.routes {
@@ -102,6 +110,7 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 			if render == nil || serverEntry == "" {
 				return nil, fmt.Errorf("bifrost: server route %q has no renderer", pattern)
 			}
+			state.serverPatterns["GET "+pattern] = struct{}{}
 			handler = &serverPageHandler{
 				pattern: pattern,
 				load:    declaration.load,
@@ -207,7 +216,12 @@ func (h *serverPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 }
 
 func (h *serverPageHandler) renderProps(w http.ResponseWriter, request *http.Request, propsJSON json.RawMessage, document Document) {
-	sink := &httpRenderSink{writer: w, shell: h.shell, props: propsJSON, document: document, limits: h.limits}
+	var sink pageRenderSink
+	if markdownRequested(request.Context()) {
+		sink = &markdownRenderSink{writer: w, limits: h.limits}
+	} else {
+		sink = &httpRenderSink{writer: w, shell: h.shell, props: propsJSON, document: document, limits: h.limits}
+	}
 	var started time.Time
 	if len(h.hooks.renderHooks) > 0 {
 		started = time.Now()
@@ -223,7 +237,7 @@ func (h *serverPageHandler) renderProps(w http.ResponseWriter, request *http.Req
 		}
 	}
 	if err != nil {
-		if !sink.started {
+		if !sink.committed() {
 			h.serveError(w, request, err)
 		} else if h.logger != nil {
 			h.logger.Error("bifrost render failed after response commit", "pattern", h.pattern, "error", err)
@@ -301,6 +315,8 @@ func (s *httpRenderSink) Body(body []byte) error {
 	_, err := s.writer.Write(body)
 	return err
 }
+
+func (s *httpRenderSink) committed() bool { return s.started }
 
 func (s *httpRenderSink) finish() error {
 	if !s.started {

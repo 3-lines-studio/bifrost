@@ -131,7 +131,7 @@ func (a *App) Handler() http.Handler {
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		})
 	}
-	return mux
+	return a.ResolveMarkdown(mux)
 }
 
 // Ready checks whether every renderer process can accept work. Applications

@@ -109,11 +109,14 @@ func TestNormalizeLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if limits.MaxPropsBytes == 0 || limits.MaxHeadBytes == 0 || limits.MaxFrameBytes == 0 {
+	if limits.MaxPropsBytes == 0 || limits.MaxHeadBytes == 0 || limits.MaxFrameBytes == 0 || limits.MaxMarkdownBytes == 0 {
 		t.Fatalf("defaults not applied: %+v", limits)
 	}
 	if _, err := normalizeLimits(Limits{MaxPropsBytes: -1}); err == nil {
 		t.Fatal("negative limit succeeded")
+	}
+	if _, err := normalizeLimits(Limits{MaxMarkdownBytes: -1}); err == nil {
+		t.Fatal("negative markdown limit succeeded")
 	}
 	if _, err := normalizeLimits(Limits{MaxFrameBytes: maxWireFrameBytes + 1}); err == nil {
 		t.Fatal("oversized wire frame limit succeeded")
