@@ -38,6 +38,9 @@ const shared = {
   root: request.root,
   base: "/_bifrost/dist/",
   logLevel: "warn" as const,
+  resolve: {
+    dedupe: ["react", "react-dom"],
+  },
 };
 
 await build({

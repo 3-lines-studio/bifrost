@@ -5,4 +5,10 @@ node_modules/
 !/example/plugin/.bifrost/embed.placeholder
 /example/structured/cmd/server/.bifrost/*
 !/example/structured/cmd/server/.bifrost/embed.placeholder
+/example/wails/.bifrost/*
+!/example/wails/.bifrost/embed.placeholder
+/example/wails/bin/
+/example/wails/wails
+/example/wails/frontend/bindings/
+/example/wails/frontend/node_modules/
 *.tmp

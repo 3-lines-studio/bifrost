@@ -1,0 +1,27 @@
+version: "3"
+
+dev_mode:
+  root_path: .
+  log_level: warn
+  debounce: 400
+  ignore:
+    dir:
+      - .git
+      - .bifrost
+      - bin
+      - frontend
+      - node_modules
+    file:
+      - "*_test.go"
+    watched_extension:
+      - "*.go"
+      - go.mod
+      - go.sum
+    git_ignore: true
+  executes:
+    - cmd: wails3 task build DEV=true
+      type: blocking
+    - cmd: wails3 task frontend:dev
+      type: background
+    - cmd: wails3 task run
+      type: primary

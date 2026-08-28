@@ -1,0 +1,5 @@
+.bifrost/*
+!.bifrost/embed.placeholder
+bin/
+frontend/bindings/
+frontend/node_modules/

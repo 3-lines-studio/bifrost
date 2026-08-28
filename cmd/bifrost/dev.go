@@ -23,6 +23,7 @@ func runDev(args []string) error {
 	dir := flags.String("C", ".", "working directory")
 	interval := flags.Duration("poll", 400*time.Millisecond, "Go file polling interval")
 	vitePort := flags.Int("vite-port", 5173, "Vite development server port")
+	prepareOnly := flags.Bool("prepare-only", false, "prepare development assets without starting the application")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -30,12 +31,15 @@ func runDev(args []string) error {
 	if flags.NArg() > 0 {
 		packagePath = flags.Arg(0)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	if *vitePort < 1 || *vitePort > 65535 {
 		return fmt.Errorf("invalid Vite port %d", *vitePort)
 	}
+	if *prepareOnly {
+		return builder.Build(context.Background(), builder.Options{Package: packagePath, Dir: *dir, Development: true, ExternalDevelopment: true, SourceMaps: false, OnDescribe: printRouteTable, Version: bifrost.Version})
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	var child *exec.Cmd
 	var devDir string

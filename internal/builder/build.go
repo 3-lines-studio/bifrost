@@ -32,15 +32,16 @@ import (
 )
 
 type Options struct {
-	Package       string
-	Dir           string
-	Output        string
-	Development   bool
-	StaticWorkers int
-	SourceMaps    bool
-	OnDescribe    func(protocol.DescribeResult)
-	OnOutput      func(string)
-	Version       string
+	Package             string
+	Dir                 string
+	Output              string
+	Development         bool
+	ExternalDevelopment bool
+	StaticWorkers       int
+	SourceMaps          bool
+	OnDescribe          func(protocol.DescribeResult)
+	OnOutput            func(string)
+	Version             string
 }
 
 type packageInfo struct {
@@ -89,15 +90,27 @@ func Build(ctx context.Context, options Options) error {
 	if options.OnDescribe != nil {
 		options.OnDescribe(describe)
 	}
-	generated, err := runGenerate(ctx, options.Dir, options.Package)
-	if err != nil {
-		return err
-	}
-	if generated.SpecHash != describe.SpecHash {
-		return fmt.Errorf("bifrost: app declarations changed between describe and generate phases: %s != %s", describe.SpecHash, generated.SpecHash)
-	}
-	if generated.Limits != describe.Limits {
-		return errors.New("bifrost: app limits changed between describe and generate phases")
+	generated := protocol.GenerateResult{SpecHash: describe.SpecHash, Limits: describe.Limits}
+	if options.ExternalDevelopment {
+		if !options.Development {
+			return errors.New("external development requires development mode")
+		}
+		for _, route := range describe.Spec.Routes {
+			if route.Kind != "client" {
+				return fmt.Errorf("external Vite development requires Client routes; route %q is %s", route.Pattern, route.Kind)
+			}
+		}
+	} else {
+		generated, err = runGenerate(ctx, options.Dir, options.Package)
+		if err != nil {
+			return err
+		}
+		if generated.SpecHash != describe.SpecHash {
+			return fmt.Errorf("bifrost: app declarations changed between describe and generate phases: %s != %s", describe.SpecHash, generated.SpecHash)
+		}
+		if generated.Limits != describe.Limits {
+			return errors.New("bifrost: app limits changed between describe and generate phases")
+		}
 	}
 
 	temporary, err := os.MkdirTemp(filepath.Dir(output), ".bifrost-build-")
@@ -115,7 +128,7 @@ func Build(ctx context.Context, options Options) error {
 	}
 
 	buildID := ""
-	if options.Development {
+	if options.Development && !options.ExternalDevelopment {
 		buildID = digest(strconv.FormatInt(time.Now().UnixNano(), 10))
 	}
 	plans, routeViews, err := planViews(describe, temporary)
@@ -125,13 +138,15 @@ func Build(ctx context.Context, options Options) error {
 	if err := writeEntries(describe.SourceRoot, temporary, plans, buildID); err != nil {
 		return err
 	}
-	if options.Development {
+	if options.Development && !options.ExternalDevelopment {
 		if err := os.WriteFile(filepath.Join(temporary, "entries", "vite-dev.ts"), []byte(renderproc.DevRuntimeSource), 0o600); err != nil {
 			return err
 		}
 	}
-	if err := buildFrontend(ctx, describe.SourceRoot, temporary, plans, options.SourceMaps, options.Development); err != nil {
-		return err
+	if !options.ExternalDevelopment {
+		if err := buildFrontend(ctx, describe.SourceRoot, temporary, plans, options.SourceMaps, options.Development); err != nil {
+			return err
+		}
 	}
 
 	needsRender := false
@@ -153,7 +168,13 @@ func Build(ctx context.Context, options Options) error {
 		}
 	}
 
-	views, clientFiles, err := collectBuiltViews(temporary, plans, options.Development)
+	var views []protocol.BuiltView
+	var clientFiles []protocol.FileRef
+	if options.ExternalDevelopment {
+		views, clientFiles, err = collectExternalDevelopmentViews(temporary, plans)
+	} else {
+		views, clientFiles, err = collectBuiltViews(temporary, plans, options.Development)
+	}
 	if err != nil {
 		return err
 	}
@@ -241,6 +262,19 @@ func Build(ctx context.Context, options Options) error {
 	manifestData = append(manifestData, '\n')
 	if err := os.WriteFile(filepath.Join(temporary, "manifest.json"), manifestData, 0o644); err != nil {
 		return err
+	}
+	if options.ExternalDevelopment {
+		current, readErr := os.ReadFile(filepath.Join(output, "manifest.json"))
+		refs := slices.Clone(clientFiles)
+		for _, asset := range public {
+			refs = append(refs, asset.File)
+		}
+		if readErr == nil && bytes.Equal(current, manifestData) && fileRefsMatch(output, refs) {
+			if options.OnOutput != nil {
+				options.OnOutput(output)
+			}
+			return nil
+		}
 	}
 	if !options.Development {
 		_ = os.RemoveAll(filepath.Join(temporary, "entries"))
@@ -545,6 +579,23 @@ type viteManifestEntry struct {
 }
 
 type viteManifest map[string]viteManifestEntry
+
+func collectExternalDevelopmentViews(output string, plans []viewPlan) ([]protocol.BuiltView, []protocol.FileRef, error) {
+	views := make([]protocol.BuiltView, len(plans))
+	files := make([]protocol.FileRef, len(plans))
+	for index, plan := range plans {
+		if plan.Mode != "mount" || plan.ServerFile != "" {
+			return nil, nil, errors.New("external Vite development requires mount views")
+		}
+		ref, err := fileRef(output, plan.ClientFile)
+		if err != nil {
+			return nil, nil, err
+		}
+		views[index] = protocol.BuiltView{ID: plan.ID, Source: plan.Source, Mode: plan.Mode, Client: protocol.AssetSet{Entry: ref}}
+		files[index] = ref
+	}
+	return views, files, nil
+}
 
 func collectBuiltViews(output string, plans []viewPlan, development bool) ([]protocol.BuiltView, []protocol.FileRef, error) {
 	clientManifestPath := filepath.Join(output, "dist", "client-manifest.json")
@@ -1027,6 +1078,16 @@ func fileRef(root, filePath string) (protocol.FileRef, error) {
 		return protocol.FileRef{}, err
 	}
 	return protocol.FileRef{Path: filepath.ToSlash(rel), Hash: digestBytes(data), Size: int64(len(data))}, nil
+}
+
+func fileRefsMatch(root string, refs []protocol.FileRef) bool {
+	for _, expected := range refs {
+		actual, err := fileRef(root, filepath.Join(root, filepath.FromSlash(expected.Path)))
+		if err != nil || actual != expected {
+			return false
+		}
+	}
+	return true
 }
 
 func copyFile(sourcePath, destination string) error {

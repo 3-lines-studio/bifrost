@@ -58,7 +58,15 @@ func (a *App) initializeProduction(config Config) error {
 		if parseErr != nil || port < 1 || port > 65535 {
 			return errors.New("bifrost: invalid BIFROST_VITE_PORT")
 		}
-		render, err = newDevelopmentRenderer(a.sourceRoot, devDir, port, concurrency, queue, a.logger, a.hooks.queueHooks)
+		if os.Getenv("BIFROST_EXTERNAL_VITE") != "" {
+			for _, route := range wireManifest.Routes {
+				if route.Kind != "client" {
+					return fmt.Errorf("bifrost: external Vite development requires Client routes; route %q is %s", route.Pattern, route.Kind)
+				}
+			}
+		} else {
+			render, err = newDevelopmentRenderer(a.sourceRoot, devDir, port, concurrency, queue, a.logger, a.hooks.queueHooks)
+		}
 	} else if wireManifest.Runtime != nil {
 		render, err = newProductionRenderer(config.Assets, manifest, concurrency, queue, a.logger, a.hooks.queueHooks)
 	}

@@ -1,0 +1,54 @@
+version: "3"
+
+vars:
+  APP_NAME: bifrost-wails
+  BIN_DIR: bin
+  VITE_PORT: '{{.WAILS_VITE_PORT | default "9245"}}'
+
+tasks:
+  install:
+    cmds:
+      - bun install --cwd frontend --frozen-lockfile
+
+  bindings:
+    cmds:
+      - wails3 generate bindings -clean=true -ts -i -d frontend/bindings
+
+  assets:
+    deps: [install, bindings]
+    cmds:
+      - '{{if eq .DEV "true"}}go run github.com/3-lines-studio/bifrost/cmd/bifrost dev --prepare-only --vite-port {{.VITE_PORT}} .{{else}}go run github.com/3-lines-studio/bifrost/cmd/bifrost build .{{end}}'
+
+  build:
+    deps: [assets]
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - '{{if eq .DEV "true"}}go build -gcflags=all="-l" -o {{.BIN_DIR}}/{{.APP_NAME}} .{{else}}go build -tags production -trimpath -ldflags="-w -s" -o {{.BIN_DIR}}/{{.APP_NAME}} .{{end}}'
+
+  frontend:dev:
+    deps: [install]
+    cmds:
+      - bun run --cwd frontend dev -- --host 127.0.0.1 --port {{.VITE_PORT}} --strictPort
+
+  run:
+    cmds:
+      - |
+        for _ in $(seq 1 120); do
+          if curl -fsS http://127.0.0.1:{{.VITE_PORT}}/@vite/client >/dev/null 2>&1; then
+            exec env -u FRONTEND_DEVSERVER_URL BIFROST_DEV_DIR="{{.ROOT_DIR}}/.bifrost" BIFROST_VITE_PORT="{{.VITE_PORT}}" BIFROST_EXTERNAL_VITE=1 ./{{.BIN_DIR}}/{{.APP_NAME}}
+          fi
+          sleep 0.1
+        done
+        exit 1
+
+  server:
+    deps: [assets]
+    cmds:
+      - go run -tags server .
+
+  check:
+    deps: [assets]
+    cmds:
+      - bash scripts/check.sh
+      - go run github.com/3-lines-studio/bifrost/cmd/bifrost dev --prepare-only --vite-port {{.VITE_PORT}} .
+      - BIFROST_CHECK_DEV=1 bash scripts/check.sh

@@ -30,6 +30,28 @@ func TestPlanViewsDeduplicatesSharedViews(t *testing.T) {
 	}
 }
 
+func TestCollectExternalDevelopmentViewsUsesGeneratedEntries(t *testing.T) {
+	root := t.TempDir()
+	entry := filepath.Join(root, "entries", "client.tsx")
+	if err := os.MkdirAll(filepath.Dir(entry), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entry, []byte("export {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan := viewPlan{ID: digest("view"), Source: "pages/app.tsx", Mode: "mount", ClientFile: entry}
+	views, files, err := collectExternalDevelopmentViews(root, []viewPlan{plan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || len(files) != 1 || views[0].Client.Entry != files[0] {
+		t.Fatalf("views = %+v files = %+v", views, files)
+	}
+	if files[0].Path != "entries/client.tsx" {
+		t.Fatalf("entry path = %q", files[0].Path)
+	}
+}
+
 func TestViteManifestDependencyTraversal(t *testing.T) {
 	manifest := viteManifest{
 		"entry.tsx": {File: "assets/entry.js", Name: "entry", IsEntry: true, Imports: []string{"shared.js"}, CSS: []string{"assets/entry.css"}},
@@ -46,6 +68,27 @@ func TestViteManifestDependencyTraversal(t *testing.T) {
 	}
 	if strings.Join(styles, ",") != "assets/entry.css,assets/shared.css" {
 		t.Fatalf("styles = %v", styles)
+	}
+}
+
+func TestFileRefsMatch(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "entry.tsx")
+	if err := os.WriteFile(filePath, []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := fileRef(root, filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fileRefsMatch(root, []protocol.FileRef{ref}) {
+		t.Fatal("matching file was rejected")
+	}
+	if err := os.WriteFile(filePath, []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if fileRefsMatch(root, []protocol.FileRef{ref}) {
+		t.Fatal("changed file was accepted")
 	}
 }
 

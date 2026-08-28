@@ -15,6 +15,9 @@ const vite = await createServer({
     strictPort: true,
     cors: true,
   },
+  resolve: {
+    dedupe: ["react", "react-dom"],
+  },
 });
 await vite.listen();
 vite.printUrls();
