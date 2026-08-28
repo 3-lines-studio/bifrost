@@ -31,6 +31,10 @@ for _ in $(seq 1 600); do
   fi
   sleep 0.05
 done
+if "$cli" dev ./example/basic >/tmp/bifrost-dev-second.out 2>/tmp/bifrost-dev-second.err; then
+  exit 1
+fi
+grep -q "development server is already running" /tmp/bifrost-dev-second.err
 bun ./scripts/dev-browser.mjs
 bridge_pid_before=$(pgrep -f "entries/vite-dev.ts" | head -1)
 test -n "$bridge_pid_before"

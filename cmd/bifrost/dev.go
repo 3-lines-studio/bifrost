@@ -66,7 +66,17 @@ func runDev(args []string) error {
 		return err
 	}
 	digest := sha256.Sum256([]byte(absolute))
-	socketDir := filepath.Join(os.TempDir(), "bifrost-dev-"+hex.EncodeToString(digest[:8]))
+	name := "bifrost-dev-" + hex.EncodeToString(digest[:8])
+	lock, err := os.OpenFile(filepath.Join(os.TempDir(), name+".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Close() }()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return errors.New("bifrost: development server is already running for this directory")
+	}
+	socketDir := filepath.Join(os.TempDir(), name+"-"+fmt.Sprint(os.Getpid()))
+	defer func() { _ = os.RemoveAll(socketDir) }()
 	socket := filepath.Join(socketDir, "vite.sock")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -90,9 +100,6 @@ func runDev(args []string) error {
 		stopProcess(bridge)
 	}()
 
-	// bridgeAlive reports whether the bridge process we spawned is still
-	// running. A bridge whose health probe is slow because Vite is busy is
-	// alive; only an exited process is dead.
 	bridgeAlive := func() bool {
 		if bridgeDone == nil {
 			return false
@@ -106,7 +113,7 @@ func runDev(args []string) error {
 	}
 
 	ensureBridge := func() error {
-		if bridgeAlive() || bridgeHealthy(socket) {
+		if bridgeAlive() {
 			return nil
 		}
 		stopProcess(bridge)
@@ -201,7 +208,7 @@ func runDev(args []string) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if !bridgeAlive() && !bridgeHealthy(socket) {
+			if !bridgeAlive() {
 				fmt.Fprintln(os.Stderr, "bifrost: development bridge stopped; restarting Vite")
 				if err := ensureBridge(); err != nil {
 					fmt.Fprintln(os.Stderr, "bifrost: bridge restart:", err)
