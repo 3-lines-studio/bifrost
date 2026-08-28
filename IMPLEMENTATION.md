@@ -28,7 +28,7 @@ This file separates the accepted scope from ideas explicitly deferred by the que
 - `bifrost.Building()` guard so user startup side effects do not run during builds.
 - No Go AST route scanning.
 - Unique hydrate/mount view planning and shared-view deduplication.
-- Vite 8 client and SSR builds running under Bun, with the user's standard Vite configuration and plugins.
+- Vite 8 app builds running under Bun via `createBuilder`: client and SSR are environments of one build, with the user's standard Vite configuration and plugins and optional `--vite-config` override.
 - Vite manifests as the authoritative entry, shared-chunk, CSS, dynamic-import, and asset graph.
 - Shared client and SSR chunks, CSS Modules, Tailwind, image/font/SVG/JSON assets, and virtual modules through Vite.
 - Go computes hashes and validates Vite output but never renames it.
@@ -68,12 +68,20 @@ This file separates the accepted scope from ideas explicitly deferred by the que
 ### Development and CLI
 
 - `bifrost init`, `build`, `dev`, and `version`.
-- One validated bootstrap build followed by a Bun-hosted Vite development server and SSR bridge; development binaries embed neither production SSR output nor the standalone renderer.
+- `bifrost init` runs `bun install` automatically; `--no-install` skips it.
+- `bifrost dev` owns the Vite development bridge: one validated bootstrap build, then a Bun-hosted Vite server and SSR bridge that survives Go child restarts. Development binaries attach to the bridge over a Unix socket; a Go child run outside `bifrost dev` still starts its own bridge.
+- Single-origin development: Vite module URLs, the HMR websocket, and page requests all share the Go origin through a `/_bifrost/dev/` reverse proxy, so the Vite port never has to be reachable from the browser. The port is picked automatically; `--vite-port` overrides it.
+- Development SSR responses carry stylesheet links extracted from Vite's SSR module graph, removing the unstyled flash in server and static pages. Client-only pages still receive CSS through Vite's client injection.
+- Build-ID polling is a long-poll that holds until a Go replacement, cutting idle dev traffic to almost zero.
 - Vite HMR, React Fast Refresh, CSS updates, plugin watching, development source maps, and browser overlay.
 - Server and Static development renders use Vite's live SSR module graph.
 - Frontend changes do not rebuild Go; Go/module changes atomically rebuild and replace the Go child.
 - Last good server remains active when a Go rebuild fails.
 - Build-ID polling performs full reload only after Go replacement.
+- SSR render errors appear in Vite's browser overlay with fixed stack traces.
+- Client entries are warmed when the bridge starts.
+- `virtual:bifrost/routes` exposes the Go route table and an `href` pattern interpolator to frontend code in builds and development; route changes invalidate it in development.
+- `--vite-config` selects a Vite configuration file outside the source root for both builds and development.
 - Route table output.
 - Three complete examples: mixed Server/Static/Client/Tailwind, static/client with Go app plugins, and a structured monorepo app.
 - The structured example covers internal app packages, generated-asset injection, standard `ServeMux` fallback composition, shared middleware, Vite aliases, a linked workspace package, Tailwind workspace scanning, and React Compiler.

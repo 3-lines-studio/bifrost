@@ -208,7 +208,7 @@ The standard `http.ServeMux` performs route matching. Bifrost registers page pat
 
 Frontend and server extensions use different systems.
 
-Frontend extensions are normal Vite plugins declared in `vite.config.ts`. Vite owns module resolution, loading, transforms, CSS, assets, source maps, virtual modules, build hooks, file watching, HMR, React Fast Refresh, and its browser error overlay. Bifrost injects generated client and SSR entries and enforces output roots, the asset base, SSR bundling, and final artifact validation. Go never renames Vite output.
+Frontend extensions are normal Vite plugins declared in `vite.config.ts`. Vite owns module resolution, loading, transforms, CSS, assets, source maps, virtual modules, build hooks, file watching, HMR, React Fast Refresh, and its browser error overlay. Bifrost injects generated client and SSR entries, publishes the `virtual:bifrost/routes` module from the build specification, and enforces output roots, the asset base, SSR bundling, and final artifact validation. Go never renames Vite output.
 
 Server extensions use a small typed Go API:
 
@@ -299,7 +299,7 @@ Production defaults to one Bun worker process and one active render. `RenderConc
 1. Build the user's Go app or invoke it through `go run`.
 2. Run it with `BIFROST_PHASE=describe` and read `BuildSpec` from a dedicated inherited file descriptor.
 3. Generate one client entry for every unique mount/hydrate view and one SSR entry for every hydrate view.
-4. Run Vite under Bun with the user's `vite.config.ts` for client and SSR builds.
+4. Run one Vite 8 app build under Bun with the user's `vite.config.ts`; the client and SSR builds are environments of one `createBuilder` app build.
 5. Read Vite's manifests as the authoritative entry, chunk, CSS, and asset graph. Compute hashes without renaming output.
 6. Run the app with `BIFROST_PHASE=generate` for static records.
 7. Render every static document through the Vite SSR output running under Bun.
@@ -332,13 +332,19 @@ Validation happens before handlers become visible.
 
 ## Development mode
 
-`bifrost dev` performs one validated bootstrap build, then starts a Bun process containing Vite's development server and the SSR bridge.
+`bifrost dev` performs one validated bootstrap build, then starts and owns one Bun process containing Vite's development server and the SSR bridge. The bridge listens on a Unix socket and a private HTTP port; it is started once and outlives Go child restarts. When the Go application starts with the bridge socket in its environment, it attaches to the bridge over the socket instead of starting its own. A Go child run outside `bifrost dev` starts its own bridge so standalone development keeps working.
 
 - Browser entries load from Vite and use its HMR, React Fast Refresh, CSS updates, plugin watching, and error overlay.
+- All development requests, including Vite module URLs and the HMR websocket, are proxied through the user's Go origin at `/_bifrost/dev/`, so the browser only ever talks to one origin. Vite's base path is `/_bifrost/dev/` and the Go application forwards that prefix unchanged.
+- Server and Static development responses include stylesheet links collected from Vite's SSR module graph (served with the `?direct` query), so pages arrive styled instead of flashing unstyled content. Client-only pages still receive CSS through Vite's client injection.
+- Go replacement is detected by a long-poll to the build-id endpoint that holds until the Go process is replaced, keeping idle development nearly request-free.
 - Server and Static development renders use `vite.ssrLoadModule`, so frontend SSR updates do not rebuild Go.
-- Go source or module changes perform a new atomic bootstrap build and restart only the Go child and its Vite bridge.
+- Go source or module changes perform a new atomic bootstrap build and restart only the Go child; the bridge keeps its module graph, dependency optimizer, and websocket clients.
 - Build failures leave the previous Go process active.
 - A build-ID poll remains only to reload browsers after a successful Go restart; frontend changes use Vite HMR.
+- SSR render errors are forwarded to Vite's browser overlay with fixed stack traces.
+- Client entries are warmed when the bridge starts.
+- The route table is published to the bridge as a JSON file; route changes invalidate the `virtual:bifrost/routes` module and reload browsers.
 
 Production and development share route declarations and generated entry contracts. Vite intentionally supplies development modules instead of pretending hashed production artifacts are a development server.
 

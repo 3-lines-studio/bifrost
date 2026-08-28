@@ -6,7 +6,6 @@ import (
 	"errors"
 	"html"
 	"io"
-	"net/url"
 	"strings"
 
 	"github.com/3-lines-studio/bifrost/internal/protocol"
@@ -15,6 +14,10 @@ import (
 const (
 	// AssetPrefix is the HTTP prefix under which built assets are served.
 	AssetPrefix = "/_bifrost/"
+	// DevPrefix is the HTTP prefix under which the Vite development server is
+	// proxied during development. It is Vite's base path, so proxied request
+	// paths pass through unchanged.
+	DevPrefix = "/_bifrost/dev/"
 	// defaultDocumentOpen is the open tag for the default English document.
 	defaultDocumentOpen = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
 )
@@ -44,10 +47,9 @@ func NewShell(assets protocol.AssetSet) (Shell, error) {
 		after.WriteString(`">`)
 	}
 	entryURL := FrontendAssetURL(assets.Entry.Path)
-	if parsed, err := url.Parse(entryURL); err == nil && parsed.IsAbs() {
-		origin := parsed.Scheme + "://" + parsed.Host
-		after.WriteString(`<script type="module">import RefreshRuntime from "` + html.EscapeString(origin) + `/@react-refresh";RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script>`)
-		after.WriteString(`<script type="module" src="` + html.EscapeString(origin) + `/@vite/client"></script>`)
+	if strings.HasPrefix(entryURL, DevPrefix) {
+		after.WriteString(`<script type="module">import RefreshRuntime from "` + html.EscapeString(DevPrefix+"@react-refresh") + `";RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script>`)
+		after.WriteString(`<script type="module" src="` + html.EscapeString(DevPrefix+"@vite/client") + `"></script>`)
 	}
 	after.WriteString(`<link rel="modulepreload" fetchpriority="low" href="`)
 	after.WriteString(html.EscapeString(entryURL))
@@ -63,10 +65,11 @@ func NewShell(assets protocol.AssetSet) (Shell, error) {
 	return Shell{afterHead: after.String(), suffix: suffix.String()}, nil
 }
 
-// FrontendAssetURL converts a build artifact path into a browser URL. Absolute
-// URLs pass through for the Vite development server.
+// FrontendAssetURL converts a build artifact path into a browser URL. Root-
+// relative URLs pass through for the proxied Vite development server, and
+// absolute URLs pass through for external development servers.
 func FrontendAssetURL(value string) string {
-	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
+	if strings.HasPrefix(value, "/") || strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
 		return value
 	}
 	return AssetPrefix + value

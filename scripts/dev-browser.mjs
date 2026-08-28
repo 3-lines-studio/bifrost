@@ -13,14 +13,27 @@ const browser = await chromium.launch({
 });
 try {
   const page = await browser.newPage();
-  await page.goto("http://127.0.0.1:8080/?name=Dev", { waitUntil: "networkidle" });
+  await page.goto("http://127.0.0.1:8080/?name=Dev", { waitUntil: "domcontentloaded" });
   if ((await page.locator("h1").textContent()) !== "Hello Dev") throw new Error("unexpected initial development page");
+  const foreign = await page.evaluate(() =>
+    [...document.querySelectorAll("script[src], link[href]")]
+      .map((node) => node.src || node.href)
+      .filter((url) => new URL(url).origin !== location.origin),
+  );
+  if (foreign.length > 0) throw new Error(`development page references foreign origins: ${foreign.join(", ")}`);
+
+  let buildIdRequests = 0;
+  page.on("request", (request) => {
+    if (request.url().includes("/_bifrost/build-id")) buildIdRequests++;
+  });
+  await page.waitForTimeout(2500);
+  if (buildIdRequests > 2) throw new Error(`build-id long-poll not active: ${buildIdRequests} requests in 2.5s`);
 
   const changed = original.replace("<h1>Hello ", "<h1>Welcome ");
   if (changed === original) throw new Error("development fixture replacement did not match");
   await writeFile(sourcePath, changed);
   await page.waitForFunction(() => document.querySelector("h1")?.textContent === "Welcome Dev", undefined, { timeout: 60_000 });
-  await page.reload({ waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "domcontentloaded" });
   if ((await page.locator("h1").textContent()) !== "Welcome Dev") {
     throw new Error("Vite SSR module graph did not update");
   }
@@ -32,15 +45,19 @@ try {
   await page.locator("vite-error-overlay").waitFor({ state: "detached", timeout: 60_000 });
   await page.waitForFunction(() => document.querySelector("h1")?.textContent === "Welcome Dev", undefined, { timeout: 60_000 });
 
-  await page.goto("http://127.0.0.1:8080/about", { waitUntil: "networkidle" });
+  await page.goto("http://127.0.0.1:8080/about", { waitUntil: "domcontentloaded" });
   const changedStatic = originalStatic.replace("<h1>About", "<h1>Static HMR");
   if (changedStatic === originalStatic) throw new Error("static fixture replacement did not match");
   await writeFile(staticPath, changedStatic);
   await page.waitForFunction(() => document.querySelector("h1")?.textContent === "Static HMR", undefined, { timeout: 60_000 });
-  await page.reload({ waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "domcontentloaded" });
   if ((await page.locator("h1").textContent()) !== "Static HMR") {
     throw new Error("Static development SSR did not use Vite's live module graph");
   }
+  const directCss = await page.evaluate(() =>
+    [...document.querySelectorAll("link[rel=stylesheet]")].filter((node) => node.href.includes("?direct")).length,
+  );
+  if (directCss < 1) throw new Error("SSR page did not include Vite CSS stylesheet links");
 
   await page.goto("http://127.0.0.1:8080/app", { waitUntil: "domcontentloaded" });
   const button = page.locator("button");

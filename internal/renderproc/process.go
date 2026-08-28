@@ -46,6 +46,7 @@ type Process struct {
 	cmd       *exec.Cmd
 	socket    string
 	client    *http.Client
+	attached  bool
 	waitDone  chan struct{}
 	waitMu    sync.Mutex
 	waitErr   error
@@ -107,6 +108,40 @@ func StartCommand(executable string, args []string, workDir string, environment 
 		return nil, err
 	}
 	return process, nil
+}
+
+// Attach connects to an already-running renderer listening on socket. The
+// caller owns the renderer process lifecycle; Attach never starts, restarts,
+// or removes the socket.
+func Attach(socket string) (*Process, error) {
+	if socket == "" {
+		return nil, errors.New("empty renderer socket")
+	}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "unix", socket)
+		},
+		MaxIdleConns:        32,
+		MaxIdleConnsPerHost: 32,
+		IdleConnTimeout:     90 * time.Second,
+		DisableCompression:  true,
+	}
+	process := &Process{socket: socket, client: &http.Client{Transport: transport}, attached: true}
+	if err := process.waitHealthy(); err != nil {
+		return nil, err
+	}
+	return process, nil
+}
+
+// Recover drops pooled transport connections after the remote renderer
+// restarted on the same socket.
+func (p *Process) Recover() {
+	if p == nil || p.client == nil {
+		return
+	}
+	if transport, ok := p.client.Transport.(*http.Transport); ok {
+		transport.CloseIdleConnections()
+	}
 }
 
 func (p *Process) waitHealthy() error {
@@ -264,7 +299,9 @@ func (p *Process) Close(ctx context.Context) error {
 				closeErr = ctx.Err()
 			}
 		}
-		_ = os.Remove(p.socket)
+		if !p.attached {
+			_ = os.Remove(p.socket)
+		}
 	})
 	return closeErr
 }

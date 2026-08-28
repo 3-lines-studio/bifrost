@@ -39,6 +39,7 @@ type Options struct {
 	ExternalDevelopment bool
 	StaticWorkers       int
 	SourceMaps          bool
+	ViteConfig          string
 	OnDescribe          func(protocol.DescribeResult)
 	OnOutput            func(string)
 	Version             string
@@ -144,7 +145,7 @@ func Build(ctx context.Context, options Options) error {
 		}
 	}
 	if !options.ExternalDevelopment {
-		if err := buildFrontend(ctx, describe.SourceRoot, temporary, plans, options.SourceMaps, options.Development); err != nil {
+		if err := buildFrontend(ctx, describe, temporary, plans, options.SourceMaps, options.ViteConfig, options.Development); err != nil {
 			return err
 		}
 	}
@@ -427,7 +428,7 @@ func writeEntries(sourceRoot, output string, plans []viewPlan, buildID string) e
 			client = "import React from 'react';\nimport { hydrateRoot } from 'react-dom/client';\nimport { Page } from " + quoted + ";\nconst node=document.getElementById('__BIFROST_PROPS__'); const props=node?.textContent ? JSON.parse(node.textContent) : {}; const root=document.getElementById('app'); if(!root) throw new Error('missing #app'); hydrateRoot(root, React.createElement(Page, props));\n"
 		}
 		if buildID != "" {
-			client += "const bifrostBuild=" + strconv.Quote(buildID) + "; setInterval(async()=>{try{const r=await fetch('/_bifrost/build-id',{cache:'no-store'}); if(r.ok && (await r.text())!==bifrostBuild) location.reload()}catch{}},500);\n"
+			client += "const bifrostBuild=" + strconv.Quote(buildID) + ";async function bifrostPoll(){try{const r=await fetch('/_bifrost/build-id?wait='+bifrostBuild,{cache:'no-store'});if(r.ok){if((await r.text())!==bifrostBuild){location.reload();return;}setTimeout(bifrostPoll,0);}else{setTimeout(bifrostPoll,500);}}catch{setTimeout(bifrostPoll,500);}}bifrostPoll();\n"
 		}
 		if err := os.WriteFile(plan.ClientFile, []byte(client), 0o644); err != nil {
 			return err
@@ -465,13 +466,15 @@ type viteTargetRequest struct {
 }
 
 type viteBuildRequest struct {
-	Root       string             `json:"root"`
-	SourceMaps bool               `json:"sourceMaps"`
-	Client     viteTargetRequest  `json:"client"`
-	Server     *viteTargetRequest `json:"server,omitempty"`
+	Root       string               `json:"root"`
+	SourceMaps bool                 `json:"sourceMaps"`
+	ConfigFile string               `json:"configFile,omitempty"`
+	Routes     []protocol.RouteSpec `json:"routes"`
+	Client     viteTargetRequest    `json:"client"`
+	Server     *viteTargetRequest   `json:"server,omitempty"`
 }
 
-func buildFrontend(ctx context.Context, sourceRoot, output string, plans []viewPlan, sourceMaps, development bool) error {
+func buildFrontend(ctx context.Context, describe protocol.DescribeResult, output string, plans []viewPlan, sourceMaps bool, viteConfig string, development bool) error {
 	if len(plans) == 0 {
 		return nil
 	}
@@ -484,8 +487,10 @@ func buildFrontend(ctx context.Context, sourceRoot, output string, plans []viewP
 		}
 	}
 	request := viteBuildRequest{
-		Root:       sourceRoot,
+		Root:       describe.SourceRoot,
 		SourceMaps: sourceMaps,
+		ConfigFile: viteConfig,
+		Routes:     describe.Spec.Routes,
 		Client: viteTargetRequest{
 			Entries:  clientEntries,
 			OutDir:   filepath.Join(output, "dist"),
@@ -508,10 +513,11 @@ func buildFrontend(ctx context.Context, sourceRoot, output string, plans []viewP
 		return err
 	}
 	command := exec.CommandContext(ctx, "bun", "run", runner)
-	command.Dir = sourceRoot
+	command.Dir = describe.SourceRoot
 	command.Stdin = bytes.NewReader(data)
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
+	command.Env = append(os.Environ(), "BIFROST=1", "BIFROST_BUILD=1")
 	if err := command.Run(); err != nil {
 		return commandError(command, err)
 	}

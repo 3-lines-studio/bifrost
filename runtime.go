@@ -11,6 +11,7 @@ import (
 	"maps"
 	"mime"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path"
@@ -54,6 +55,14 @@ type runtimeState struct {
 	serverPatterns map[string]struct{}
 	files          map[string]protocol.FileRef
 	public         map[string]protocol.FileRef
+	devProxy       http.Handler
+}
+
+func newDevelopmentProxy(port int) http.Handler {
+	target := &url.URL{Scheme: "http", Host: "127.0.0.1:" + strconv.Itoa(port)}
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.FlushInterval = -1
+	return proxy
 }
 
 func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render renderer) (*runtimeState, error) {
@@ -81,7 +90,13 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 		declarations[route.pattern] = route
 	}
 	devDir := os.Getenv("BIFROST_DEV_DIR")
-	devPort := os.Getenv("BIFROST_VITE_PORT")
+	if devDir != "" {
+		port, portErr := strconv.Atoi(os.Getenv("BIFROST_VITE_PORT"))
+		if portErr != nil || port < 1 || port > 65535 {
+			return nil, errors.New("bifrost: invalid BIFROST_VITE_PORT")
+		}
+		state.devProxy = newDevelopmentProxy(port)
+	}
 	for pattern, builtRoute := range manifest.routes {
 		declaration := declarations[pattern]
 		view := manifest.views[builtRoute.ViewID]
@@ -92,11 +107,11 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 		}
 		if devDir != "" {
 			clientFile := filepath.Join(devDir, "entries", view.ID+"-client.tsx")
-			clientModule := (&url.URL{Path: "/@fs/" + filepath.ToSlash(clientFile)}).EscapedPath()
-			clientAssets = protocol.AssetSet{Entry: protocol.FileRef{Path: "http://127.0.0.1:" + devPort + clientModule}}
+			clientModule := (&url.URL{Path: dochtml.DevPrefix + "@fs" + filepath.ToSlash(clientFile)}).EscapedPath()
+			clientAssets = protocol.AssetSet{Entry: protocol.FileRef{Path: clientModule}}
 			if view.Mode == "hydrate" {
 				serverFile := filepath.Join(devDir, "entries", view.ID+"-server.tsx")
-				serverEntry = (&url.URL{Path: "/@fs/" + filepath.ToSlash(serverFile)}).EscapedPath()
+				serverEntry = (&url.URL{Path: "/@fs" + filepath.ToSlash(serverFile)}).EscapedPath()
 			}
 		}
 		shell, err := dochtml.NewShell(clientAssets)

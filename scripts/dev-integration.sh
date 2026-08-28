@@ -32,6 +32,8 @@ for _ in $(seq 1 600); do
   sleep 0.05
 done
 bun ./scripts/dev-browser.mjs
+bridge_pid_before=$(pgrep -f "entries/vite-dev.ts" | head -1)
+test -n "$bridge_pid_before"
 before=$(curl -fsS http://127.0.0.1:8080/_bifrost/build-id)
 touch "$go_file"
 restarted=0
@@ -45,3 +47,9 @@ for _ in $(seq 1 1200); do
 done
 test "$restarted" = 1
 echo "Go development restart passed"
+bridge_pid_after=$(pgrep -f "entries/vite-dev.ts" | head -1)
+if [[ "$bridge_pid_before" != "$bridge_pid_after" ]]; then
+  echo "Vite bridge was replaced during Go restart" >&2
+  exit 1
+fi
+echo "Vite bridge survived Go restart"

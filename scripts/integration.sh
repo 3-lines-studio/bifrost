@@ -53,6 +53,7 @@ grep -q '<title>Hello Don</title>' /tmp/bifrost-home.html
 grep -q 'Hello.*Don' /tmp/bifrost-home.html
 grep -q '<h1>About</h1>' /tmp/bifrost-about.html
 grep -q '__BIFROST_PROPS__' /tmp/bifrost-app.html
+grep -rqF '`/post/{slug}`' "$root/example/basic/.bifrost/dist/assets/"
 grep -q '<html lang="pt-BR" dir="ltr">' /tmp/bifrost-post-first.html
 grep -q '<h1>Second</h1>' /tmp/bifrost-post.html
 grep -q 'User-agent' /tmp/bifrost-robots.txt

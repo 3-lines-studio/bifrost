@@ -79,6 +79,19 @@ try {
   if ((await button.evaluate((node) => getComputedStyle(node).fontWeight)) !== "700") {
     throw new Error("CSS Module did not load");
   }
+  const routeLink = page.locator("nav a");
+  await routeLink.waitFor();
+  if ((await routeLink.getAttribute("href")) !== "/post/first") {
+    throw new Error("virtual routes module did not generate the link href");
+  }
+  if (Number(await routeLink.getAttribute("data-routes")) !== 5) {
+    throw new Error("virtual routes module has an unexpected route count");
+  }
+  await routeLink.click();
+  await page.waitForURL("**/post/first");
+  if ((await page.locator("h1").textContent()) !== "First") {
+    throw new Error("virtual routes link did not navigate to a working page");
+  }
   assertNoBrowserErrors();
 } finally {
   await browser.close();

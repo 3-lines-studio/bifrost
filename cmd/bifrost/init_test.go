@@ -9,7 +9,7 @@ import (
 
 func TestRunInitCreatesFormattedScaffoldAndRefusesOverwrite(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "app")
-	if err := runInit([]string{target}); err != nil {
+	if err := runInit([]string{"--no-install", target}); err != nil {
 		t.Fatal(err)
 	}
 	mainData, err := os.ReadFile(filepath.Join(target, "main.go"))
@@ -28,7 +28,7 @@ func TestRunInitCreatesFormattedScaffoldAndRefusesOverwrite(t *testing.T) {
 	if !strings.Contains(string(viteData), "@tailwindcss/vite") || !strings.Contains(string(viteData), "@vitejs/plugin-react") {
 		t.Fatalf("vite.config.ts is incomplete:\n%s", viteData)
 	}
-	if err := runInit([]string{target}); err == nil || !strings.Contains(err.Error(), "refusing to overwrite") {
+	if err := runInit([]string{"--no-install", target}); err == nil || !strings.Contains(err.Error(), "refusing to overwrite") {
 		t.Fatalf("second init error = %v", err)
 	}
 }

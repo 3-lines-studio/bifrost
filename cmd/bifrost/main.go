@@ -48,6 +48,7 @@ func runBuild(args []string) error {
 	dir := flags.String("C", ".", "working directory")
 	staticWorkers := flags.Int("static-workers", 4, "concurrent static render workers")
 	sourceMaps := flags.Bool("sourcemaps", false, "include inline production source maps")
+	viteConfig := flags.String("vite-config", "", "path to the Vite configuration file")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -58,7 +59,7 @@ func runBuild(args []string) error {
 	if flags.NArg() > 1 {
 		return fmt.Errorf("build accepts one package path")
 	}
-	if err := builder.Build(context.Background(), builder.Options{Package: packagePath, Dir: *dir, Output: *output, StaticWorkers: *staticWorkers, SourceMaps: *sourceMaps, OnDescribe: printRouteTable, Version: bifrost.Version}); err != nil {
+	if err := builder.Build(context.Background(), builder.Options{Package: packagePath, Dir: *dir, Output: *output, StaticWorkers: *staticWorkers, SourceMaps: *sourceMaps, ViteConfig: *viteConfig, OnDescribe: printRouteTable, Version: bifrost.Version}); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintln(os.Stdout, "Bifrost build complete")

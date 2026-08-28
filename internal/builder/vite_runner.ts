@@ -1,5 +1,5 @@
 import path from "node:path";
-import { build, type Plugin } from "vite";
+import { createBuilder, type Plugin } from "vite";
 
 type Target = {
   entries: Record<string, string>;
@@ -7,16 +7,58 @@ type Target = {
   manifest: string;
 };
 
+type RouteSpec = {
+  pattern: string;
+  view: string;
+  kind: string;
+};
+
 type Request = {
   root: string;
   sourceMaps: boolean;
+  configFile?: string;
+  routes?: RouteSpec[];
   client: Target;
   server?: Target;
 };
 
 const request = (await Bun.stdin.json()) as Request;
 
-function bifrostGuard(outDir: string, ssr: boolean): Plugin {
+function generateRoutesModule(routes: RouteSpec[]): string {
+  return [
+    `const routes = ${JSON.stringify(routes)};`,
+    "export function href(pattern, params = {}) {",
+    "  if (pattern === '/{$}') return '/';",
+    "  const origin = 'http://placeholder';",
+    "  const url = new URL(pattern.replace(/\\{([^}]+)\\}/g, (whole, name) => {",
+    "    if (name === '$') return '';",
+    "    const value = params[name];",
+    "    if (value === undefined) throw new Error(`missing route param ${name} for pattern ${pattern}`);",
+    "    const raw = Array.isArray(value) ? value.join('/') : String(value);",
+    "    return raw.split('/').map(encodeURIComponent).join('/');",
+    "  }), origin);",
+    "  return url.pathname + url.search;",
+    "}",
+    "export { routes };",
+    "",
+  ].join("\n");
+}
+
+function bifrostRoutes(routes: RouteSpec[]): Plugin {
+  const id = "virtual:bifrost/routes";
+  const resolved = "\0" + id;
+  return {
+    name: "bifrost:routes",
+    resolveId(source) {
+      return source === id ? resolved : null;
+    },
+    load(source) {
+      return source === resolved ? generateRoutesModule(routes) : null;
+    },
+  };
+}
+
+function bifrostGuard(clientOutDir: string, serverOutDir?: string): Plugin {
   return {
     name: "bifrost:invariant-guard",
     enforce: "post",
@@ -24,11 +66,18 @@ function bifrostGuard(outDir: string, ssr: boolean): Plugin {
       if (config.base !== "/_bifrost/dist/") {
         throw new Error(`Bifrost requires Vite base /_bifrost/dist/, got ${config.base}`);
       }
-      if (path.resolve(config.build.outDir) !== path.resolve(outDir)) {
-        throw new Error(`Bifrost requires Vite output ${outDir}, got ${config.build.outDir}`);
+      const ssr = Boolean(config.build.ssr);
+      const expected = ssr ? serverOutDir : clientOutDir;
+      if (!expected) {
+        throw new Error("Bifrost Vite SSR mode was changed by user configuration");
       }
-      if (Boolean(config.build.ssr) !== ssr) {
-        throw new Error(`Bifrost Vite SSR mode was changed by user configuration`);
+      const environmentOutDir = config.environments?.[ssr ? "ssr" : "client"]?.build?.outDir;
+      const isEnvironmentResolution = environmentOutDir !== undefined && path.resolve(environmentOutDir) === path.resolve(config.build.outDir);
+      if (!isEnvironmentResolution) {
+        return;
+      }
+      if (path.resolve(config.build.outDir) !== path.resolve(expected)) {
+        throw new Error(`Bifrost requires Vite output ${expected}, got ${config.build.outDir}`);
       }
     },
   };
@@ -36,6 +85,7 @@ function bifrostGuard(outDir: string, ssr: boolean): Plugin {
 
 const shared = {
   root: request.root,
+  configFile: request.configFile,
   base: "/_bifrost/dist/",
   logLevel: "warn" as const,
   resolve: {
@@ -43,54 +93,59 @@ const shared = {
   },
 };
 
-await build({
+const builder = await createBuilder({
   ...shared,
-  plugins: [bifrostGuard(request.client.outDir, false)],
-  build: {
-    outDir: request.client.outDir,
-    emptyOutDir: false,
-    copyPublicDir: false,
-    manifest: request.client.manifest,
-    sourcemap: request.sourceMaps ? "inline" : false,
-    minify: true,
-    assetsInlineLimit: 0,
-    chunkSizeWarningLimit: 5000,
-    rollupOptions: {
-      input: request.client.entries,
-      output: {
-        entryFileNames: "assets/[name]-[hash].js",
-        chunkFileNames: "assets/chunk-[name]-[hash].js",
-        assetFileNames: "assets/[name]-[hash][extname]",
-      },
-    },
-  },
-});
-
-if (request.server && Object.keys(request.server.entries).length > 0) {
-  await build({
-    ...shared,
-    plugins: [bifrostGuard(request.server.outDir, true)],
-    build: {
-      outDir: request.server.outDir,
-      emptyOutDir: false,
-      copyPublicDir: false,
-      manifest: request.server.manifest,
-      ssr: true,
-      sourcemap: request.sourceMaps ? "inline" : false,
-      minify: true,
-      assetsInlineLimit: 0,
-      chunkSizeWarningLimit: 5000,
-      rollupOptions: {
-        input: request.server.entries,
-        output: {
-          entryFileNames: "[name]-[hash].js",
-          chunkFileNames: "chunks/[name]-[hash].js",
-          assetFileNames: "assets/[name]-[hash][extname]",
+  builder: {},
+  plugins: [bifrostRoutes(request.routes ?? []), bifrostGuard(request.client.outDir, request.server?.outDir)],
+  environments: {
+    client: {
+      build: {
+        outDir: request.client.outDir,
+        emptyOutDir: false,
+        copyPublicDir: false,
+        manifest: request.client.manifest,
+        sourcemap: request.sourceMaps ? "inline" : false,
+        minify: true,
+        assetsInlineLimit: 0,
+        chunkSizeWarningLimit: 5000,
+        rollupOptions: {
+          input: request.client.entries,
+          output: {
+            entryFileNames: "assets/[name]-[hash].js",
+            chunkFileNames: "assets/chunk-[name]-[hash].js",
+            assetFileNames: "assets/[name]-[hash][extname]",
+          },
         },
       },
     },
-    ssr: {
-      noExternal: true,
-    },
-  });
-}
+    ...(request.server && Object.keys(request.server.entries).length > 0
+      ? {
+          ssr: {
+            resolve: {
+              noExternal: true,
+            },
+            build: {
+              outDir: request.server.outDir,
+              emptyOutDir: false,
+              copyPublicDir: false,
+              manifest: request.server.manifest,
+              sourcemap: request.sourceMaps ? "inline" : false,
+              minify: true,
+              assetsInlineLimit: 0,
+              chunkSizeWarningLimit: 5000,
+              rollupOptions: {
+                input: request.server.entries,
+                output: {
+                  entryFileNames: "[name]-[hash].js",
+                  chunkFileNames: "chunks/[name]-[hash].js",
+                  assetFileNames: "assets/[name]-[hash][extname]",
+                },
+              },
+            },
+          },
+        }
+      : {}),
+  },
+});
+
+await builder.buildApp();

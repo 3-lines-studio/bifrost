@@ -89,7 +89,7 @@ func TestDocumentGivesModulePreloadsLowPriority(t *testing.T) {
 }
 
 func TestDevelopmentDocumentIncludesViteRuntime(t *testing.T) {
-	shell, err := dochtml.NewShell(protocol.AssetSet{Entry: protocol.FileRef{Path: "http://127.0.0.1:5173/@fs/app.tsx"}})
+	shell, err := dochtml.NewShell(protocol.AssetSet{Entry: protocol.FileRef{Path: dochtml.DevPrefix + "@fs/app.tsx"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestDevelopmentDocumentIncludesViteRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"/@vite/client", "/@react-refresh", "http://127.0.0.1:5173/@fs/app.tsx"} {
+	for _, expected := range []string{"/_bifrost/dev/@vite/client", "/_bifrost/dev/@react-refresh", "/_bifrost/dev/@fs/app.tsx"} {
 		if !bytes.Contains(document, []byte(expected)) {
 			t.Fatalf("development document lacks %q: %s", expected, document)
 		}

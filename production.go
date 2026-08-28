@@ -5,6 +5,7 @@ package bifrost
 import (
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -64,8 +65,14 @@ func (a *App) initializeProduction(config Config) error {
 					return fmt.Errorf("bifrost: external Vite development requires Client routes; route %q is %s", route.Pattern, route.Kind)
 				}
 			}
+		} else if socket := os.Getenv("BIFROST_VITE_SOCKET"); socket != "" {
+			render, err = newAttachedDevelopmentRenderer(socket, queue, a.logger, a.hooks.queueHooks)
 		} else {
-			render, err = newDevelopmentRenderer(a.sourceRoot, devDir, port, concurrency, queue, a.logger, a.hooks.queueHooks)
+			routesFile, routeErr := writeDevelopmentRoutesFile(a.spec.Routes)
+			if routeErr != nil && a.logger != nil {
+				a.logger.Warn("bifrost: development route metadata unavailable", "error", routeErr)
+			}
+			render, err = newDevelopmentRenderer(a.sourceRoot, devDir, port, routesFile, concurrency, queue, a.logger, a.hooks.queueHooks)
 		}
 	} else if wireManifest.Runtime != nil {
 		render, err = newProductionRenderer(config.Assets, manifest, concurrency, queue, a.logger, a.hooks.queueHooks)
@@ -113,11 +120,22 @@ func (a *App) Register(mux *http.ServeMux) (err error) {
 	for _, pattern := range patterns {
 		mux.Handle("GET "+pattern, a.runtime.handlers[pattern])
 	}
-	mux.HandleFunc("GET "+dochtml.AssetPrefix+"build-id", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET "+dochtml.AssetPrefix+"build-id", func(w http.ResponseWriter, request *http.Request) {
+		id := a.runtime.manifest.manifest.BuildID
+		if request.URL.Query().Get("wait") == id && a.runtime.devProxy != nil {
+			select {
+			case <-request.Context().Done():
+				return
+			case <-time.After(30 * time.Second):
+			}
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write([]byte(a.runtime.manifest.manifest.BuildID))
+		_, _ = w.Write([]byte(id))
 	})
+	if a.runtime.devProxy != nil {
+		mux.Handle("GET "+strings.TrimSuffix(dochtml.DevPrefix, "/")+"/{path...}", a.runtime.devProxy)
+	}
 	mux.Handle("GET "+dochtml.AssetPrefix+"{path...}", &assetHandler{assets: a.runtime.assets, files: a.runtime.files, headers: a.hooks.assetHeaders})
 	publicURLs := make([]string, 0, len(a.runtime.public))
 	for publicURL := range a.runtime.public {
@@ -194,6 +212,8 @@ type productionRenderer struct {
 	environment []string
 	workDir     string
 	cleanupRoot string
+	devRoutes   string
+	attach      bool
 	admission   chan struct{}
 	idle        chan *rendererWorker
 	workers     []*rendererWorker
@@ -273,7 +293,33 @@ func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency
 	return renderer, nil
 }
 
-func newDevelopmentRenderer(sourceRoot, devDir string, port, _ int, queue int, logger *slog.Logger, queueHooks []QueueHook) (*productionRenderer, error) {
+// writeDevelopmentRoutesFile publishes the route table for the development
+// bridge's virtual routes module.
+func writeDevelopmentRoutesFile(routes []protocol.RouteSpec) (string, error) {
+	if len(routes) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(routes)
+	if err != nil {
+		return "", err
+	}
+	file, err := os.CreateTemp("", "bifrost-routes-*.json")
+	if err != nil {
+		return "", err
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(file.Name())
+		return "", err
+	}
+	return file.Name(), nil
+}
+
+func newDevelopmentRenderer(sourceRoot, devDir string, port int, routesFile string, _ int, queue int, logger *slog.Logger, queueHooks []QueueHook) (*productionRenderer, error) {
 	bun, err := exec.LookPath("bun")
 	if err != nil {
 		return nil, errors.New("bifrost: Bun is required for development")
@@ -286,6 +332,10 @@ func newDevelopmentRenderer(sourceRoot, devDir string, port, _ int, queue int, l
 		"BIFROST_VITE_ROOT=" + sourceRoot,
 		fmt.Sprintf("BIFROST_VITE_PORT=%d", port),
 	}
+	if routesFile != "" {
+		environment = append(environment, "BIFROST_ROUTES_FILE="+routesFile)
+	}
+	environment = append(environment, "BIFROST_DEV_ENTRIES="+filepath.Join(devDir, "entries"))
 	process, err := renderproc.StartCommand(bun, []string{"run", script}, sourceRoot, environment...)
 	if err != nil {
 		return nil, fmt.Errorf("bifrost: start Vite development bridge: %w", err)
@@ -298,11 +348,33 @@ func newDevelopmentRenderer(sourceRoot, devDir string, port, _ int, queue int, l
 		args:        []string{"run", script},
 		environment: environment,
 		workDir:     sourceRoot,
+		devRoutes:   routesFile,
 		admission:   make(chan struct{}, 1+queue),
 		idle:        idle,
 		workers:     []*rendererWorker{worker},
 		logger:      logger,
 		queueHooks:  slices.Clone(queueHooks),
+	}, nil
+}
+
+// newAttachedDevelopmentRenderer connects to a Vite bridge that outlives this
+// process and is owned by the bifrost dev command. Restart policy belongs to
+// the owner.
+func newAttachedDevelopmentRenderer(socket string, queue int, logger *slog.Logger, queueHooks []QueueHook) (*productionRenderer, error) {
+	process, err := renderproc.Attach(socket)
+	if err != nil {
+		return nil, fmt.Errorf("bifrost: attach Vite development bridge: %w", err)
+	}
+	worker := &rendererWorker{process: process}
+	idle := make(chan *rendererWorker, 1)
+	idle <- worker
+	return &productionRenderer{
+		attach:     true,
+		admission:  make(chan struct{}, 1+queue),
+		idle:       idle,
+		workers:    []*rendererWorker{worker},
+		logger:     logger,
+		queueHooks: slices.Clone(queueHooks),
 	}, nil
 }
 
@@ -402,7 +474,11 @@ func (r *productionRenderer) Render(ctx context.Context, request renderRequest, 
 	err := process.Render(ctx, entry, request.Props, sink)
 	var unavailable *renderproc.UnavailableError
 	if errors.As(err, &unavailable) {
-		r.restart(worker, process)
+		if r.attach {
+			process.Recover()
+		} else {
+			r.restart(worker, process)
+		}
 	}
 	return err
 }
@@ -505,6 +581,9 @@ func (r *productionRenderer) Close(ctx context.Context) error {
 
 		if err := r.closeWorkers(ctx); result == nil {
 			result = err
+		}
+		if r.devRoutes != "" {
+			_ = os.Remove(r.devRoutes)
 		}
 		if r.cleanupRoot != "" {
 			if err := os.RemoveAll(r.cleanupRoot); result == nil {
