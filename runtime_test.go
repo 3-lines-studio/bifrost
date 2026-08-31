@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
+
+	"github.com/3-lines-studio/bifrost/internal/protocol"
 )
 
 type fakeRenderer struct {
@@ -426,5 +429,59 @@ func TestAssetHandlerUsesETag(t *testing.T) {
 	handler.ServeHTTP(second, request)
 	if second.Code != http.StatusNotModified || second.Body.Len() != 0 {
 		t.Fatalf("conditional response = %d %q", second.Code, second.Body.String())
+	}
+}
+
+func TestPublicWebManifestHeaders(t *testing.T) {
+	data := []byte(`{"name":"app"}`)
+	handler := &publicAssetHandler{
+		assets: fstest.MapFS{"public/app.webmanifest": {Data: data}},
+		file: protocol.FileRef{
+			Path: "public/app.webmanifest",
+			Hash: "hash",
+			Size: int64(len(data)),
+		},
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/app.webmanifest", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if got := response.Header().Get("Content-Type"); got != "application/manifest+json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/manifest+json")
+	}
+	if got := response.Header().Get("Cache-Control"); got != "public, max-age=3600" {
+		t.Fatalf("Cache-Control = %q, want %q", got, "public, max-age=3600")
+	}
+}
+
+func TestPublicAssetHeadersCanOverrideDefaults(t *testing.T) {
+	data := []byte(`{"name":"app"}`)
+	handler := &publicAssetHandler{
+		assets: fstest.MapFS{"public/app.webmanifest": {Data: data}},
+		file: protocol.FileRef{
+			Path: "public/app.webmanifest",
+			Hash: "hash",
+			Size: int64(len(data)),
+		},
+		headers: func(header http.Header, public bool) {
+			if !public {
+				t.Fatal("asset is not public")
+			}
+			header.Set("Content-Type", "application/json")
+			header.Set("Cache-Control", "no-store")
+		},
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/app.webmanifest", nil))
+
+	if got := response.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/json")
+	}
+	if got := response.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want %q", got, "no-store")
 	}
 }

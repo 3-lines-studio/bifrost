@@ -381,11 +381,15 @@ type publicAssetHandler struct {
 }
 
 func (h *publicAssetHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
-	contentType := mime.TypeByExtension(path.Ext(h.file.Path))
+	extension := path.Ext(h.file.Path)
+	contentType := mime.TypeByExtension(extension)
+	if extension == ".webmanifest" {
+		contentType = "application/manifest+json"
+	}
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	serveArtifact(w, request, h.assets, h.file, contentType, "no-cache", h.headers, true)
+	serveArtifact(w, request, h.assets, h.file, contentType, "public, max-age=3600", h.headers, true)
 }
 
 type assetHandler struct {
