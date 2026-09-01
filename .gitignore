@@ -6,6 +6,8 @@ node_modules/
 !/example/plugin/.bifrost/embed.placeholder
 /example/structured/cmd/server/.bifrost/*
 !/example/structured/cmd/server/.bifrost/embed.placeholder
+/example/modular/cmd/server/.bifrost/*
+!/example/modular/cmd/server/.bifrost/embed.placeholder
 /example/wails/.bifrost/*
 !/example/wails/.bifrost/embed.placeholder
 /example/wails/bin/

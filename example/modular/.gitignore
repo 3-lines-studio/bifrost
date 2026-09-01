@@ -1,0 +1,4 @@
+.bifrost/*
+!.bifrost/embed.placeholder
+node_modules/
+/server
