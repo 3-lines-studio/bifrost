@@ -43,55 +43,58 @@ type conventionGoDir struct {
 	HTTPMethods []string
 }
 
-func conventionDirectory(dir, packagePath string) bool {
-	root := packagePath
-	if !filepath.IsAbs(root) {
-		root = filepath.Join(dir, root)
+func conventionRoots(dir, packagePath string) (string, string, bool, error) {
+	projectRoot := packagePath
+	if !filepath.IsAbs(projectRoot) {
+		projectRoot = filepath.Join(dir, projectRoot)
 	}
-	info, err := os.Stat(filepath.Join(root, "page.tsx"))
-	return err == nil && !info.IsDir()
-}
-
-func conventionRoot(dir, packagePath string) string {
-	if filepath.IsAbs(packagePath) {
-		return packagePath
+	projectRoot, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return "", "", false, err
 	}
-	return filepath.Join(dir, packagePath)
+	rootPage := fileExists(filepath.Join(projectRoot, "page.tsx"))
+	appPage := fileExists(filepath.Join(projectRoot, "app", "page.tsx"))
+	if rootPage && appPage {
+		return "", "", false, errors.New("bifrost: both page.tsx and app/page.tsx define the route root")
+	}
+	if rootPage {
+		return projectRoot, projectRoot, true, nil
+	}
+	if appPage {
+		return projectRoot, filepath.Join(projectRoot, "app"), true, nil
+	}
+	return projectRoot, "", false, nil
 }
 
 type conventionApp struct {
-	Root       string
-	WorkDir    string
-	Package    string
-	Output     string
-	Executable string
+	ProjectRoot string
+	WorkDir     string
+	Package     string
+	Output      string
+	Executable  string
 }
 
-func prepareConventionApp(ctx context.Context, dir string) (conventionApp, error) {
-	root, err := filepath.Abs(dir)
-	if err != nil {
-		return conventionApp{}, err
-	}
-	routes, err := discoverConventionRoutes(root)
+func prepareConventionApp(ctx context.Context, projectRoot, routeRoot string) (conventionApp, error) {
+	routes, err := discoverConventionRoutes(routeRoot)
 	if err != nil {
 		return conventionApp{}, err
 	}
 	if len(routes) == 0 {
-		return conventionApp{}, fmt.Errorf("bifrost: no page.tsx found under %s", root)
+		return conventionApp{}, fmt.Errorf("bifrost: no page.tsx found under %s", routeRoot)
 	}
-	routes, err = appendNotFoundRoutes(root, routes)
+	routes, err = appendNotFoundRoutes(routeRoot, routes)
 	if err != nil {
 		return conventionApp{}, err
 	}
-	goDirs, err := discoverConventionGo(root)
+	goDirs, err := discoverConventionGo(routeRoot)
 	if err != nil {
 		return conventionApp{}, err
 	}
-	modulePath, moduleDir, err := conventionModule(ctx, root, routes, len(goDirs) > 0)
+	modulePath, moduleDir, err := conventionModule(ctx, routeRoot, routes, len(goDirs) > 0)
 	if err != nil {
 		return conventionApp{}, err
 	}
-	generated := filepath.Join(root, ".bifrost", "app")
+	generated := filepath.Join(projectRoot, ".bifrost", "app")
 	if err := os.MkdirAll(generated, 0o755); err != nil {
 		return conventionApp{}, err
 	}
@@ -146,10 +149,10 @@ func prepareConventionApp(ctx context.Context, dir string) (conventionApp, error
 			}
 		}
 	}
-	if err := writeConventionViews(root, routes); err != nil {
+	if err := writeConventionViews(projectRoot, routeRoot, routes); err != nil {
 		return conventionApp{}, err
 	}
-	if err := writeConventionMain(root, generated, routes, goDirs); err != nil {
+	if err := writeConventionMain(projectRoot, generated, routes, goDirs); err != nil {
 		return conventionApp{}, err
 	}
 	if err := writeConventionModule(generated, moduleDir); err != nil {
@@ -168,7 +171,7 @@ func prepareConventionApp(ctx context.Context, dir string) (conventionApp, error
 	if err := command.Run(); err != nil {
 		return conventionApp{}, fmt.Errorf("bifrost: prepare generated module: %w", err)
 	}
-	return conventionApp{Root: root, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(root, ".bifrost", "bifrost-app")}, nil
+	return conventionApp{ProjectRoot: projectRoot, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(projectRoot, ".bifrost", "bifrost-app")}, nil
 }
 
 func discoverConventionRoutes(root string) ([]conventionRoute, error) {
@@ -286,8 +289,8 @@ func discoverConventionGo(root string) ([]conventionGoDir, error) {
 	return items, nil
 }
 
-func writeConventionViews(root string, routes []conventionRoute) error {
-	views := filepath.Join(root, ".bifrost", "views")
+func writeConventionViews(projectRoot, routeRoot string, routes []conventionRoute) error {
+	views := filepath.Join(projectRoot, ".bifrost", "views")
 	if err := os.RemoveAll(views); err != nil {
 		return err
 	}
@@ -295,9 +298,9 @@ func writeConventionViews(root string, routes []conventionRoute) error {
 		return err
 	}
 	for index := range routes {
-		layouts := inheritedFiles(root, routes[index].Directory, "layout.tsx")
-		errors := inheritedFiles(root, routes[index].Directory, "error.tsx")
-		notFound := inheritedFiles(root, routes[index].Directory, "not-found.tsx")
+		layouts := inheritedFiles(routeRoot, routes[index].Directory, "layout.tsx")
+		errors := inheritedFiles(routeRoot, routes[index].Directory, "error.tsx")
+		notFound := inheritedFiles(routeRoot, routes[index].Directory, "not-found.tsx")
 		if routes[index].NotFoundPage {
 			errors = nil
 			notFound = nil
@@ -307,6 +310,9 @@ func writeConventionViews(root string, routes []conventionRoute) error {
 			routes[index].NotFoundView = notFound[len(notFound)-1]
 		}
 		if len(layouts) == 0 && len(errors) == 0 && len(notFound) == 0 && !routes[index].NotFoundPage {
+			routePath := filepath.Join(routeRoot, filepath.FromSlash(routes[index].View))
+			routes[index].View, _ = filepath.Rel(projectRoot, routePath)
+			routes[index].View = filepath.ToSlash(routes[index].View)
 			continue
 		}
 		var imports strings.Builder
@@ -314,7 +320,7 @@ func writeConventionViews(root string, routes []conventionRoute) error {
 		if routes[index].NotFoundPage {
 			export = "NotFound"
 		}
-		fmt.Fprintf(&imports, "import { %s as RoutePage } from %s;\n", export, strconv.Quote(filepath.Join(root, filepath.FromSlash(routes[index].View))))
+		fmt.Fprintf(&imports, "import { %s as RoutePage } from %s;\n", export, strconv.Quote(filepath.Join(routeRoot, filepath.FromSlash(routes[index].View))))
 		for layoutIndex, layout := range layouts {
 			fmt.Fprintf(&imports, "import { Layout as Layout%d } from %s;\n", layoutIndex, strconv.Quote(layout))
 		}
@@ -342,7 +348,7 @@ func writeConventionViews(root string, routes []conventionRoute) error {
 		}
 		head := ""
 		if routes[index].HasHead && !routes[index].NotFoundPage {
-			head = "export { Head } from " + strconv.Quote(filepath.Join(root, filepath.FromSlash(routes[index].View))) + ";\n"
+			head = "export { Head } from " + strconv.Quote(filepath.Join(routeRoot, filepath.FromSlash(routes[index].View))) + ";\n"
 		}
 		source := imports.String() + head + "export function Page(props: Record<string, unknown>) {\n  return " + body + ";\n}\n"
 		name := fmt.Sprintf("page-%d.tsx", index)

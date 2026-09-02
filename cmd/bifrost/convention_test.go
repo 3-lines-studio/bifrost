@@ -32,6 +32,51 @@ func TestDiscoverConventionRoutes(t *testing.T) {
 	}
 }
 
+func TestConventionRoots(t *testing.T) {
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.Mkdir(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project, routes, ok, err := conventionRoots(".", projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || project != projectRoot || routes != appRoot {
+		t.Fatalf("roots = %q, %q, %t", project, routes, ok)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "page.tsx"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := conventionRoots(".", projectRoot); err == nil {
+		t.Fatal("ambiguous route roots were accepted")
+	}
+}
+
+func TestNestedConventionViewUsesProjectRelativePath(t *testing.T) {
+	projectRoot := t.TempDir()
+	routeRoot := filepath.Join(projectRoot, "app")
+	if err := os.Mkdir(routeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(routeRoot, "page.tsx"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := discoverConventionRoutes(routeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(projectRoot, routeRoot, routes); err != nil {
+		t.Fatal(err)
+	}
+	if routes[0].View != "app/page.tsx" {
+		t.Fatalf("view = %q", routes[0].View)
+	}
+}
+
 func TestConventionPatternRejectsInvalidDynamicSegment(t *testing.T) {
 	if _, err := conventionPattern("posts/_"); err == nil {
 		t.Fatal("empty dynamic segment was accepted")
@@ -60,7 +105,7 @@ func TestConventionLayoutsComposeOuterToInner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeConventionViews(root, routes); err != nil {
+	if err := writeConventionViews(root, root, routes); err != nil {
 		t.Fatal(err)
 	}
 	view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", "page-0.tsx"))

@@ -43,14 +43,18 @@ func runDev(args []string) error {
 	}
 	var convention *conventionApp
 	buildDir := *dir
-	if conventionDirectory(*dir, packagePath) {
-		app, err := prepareConventionApp(context.Background(), conventionRoot(*dir, packagePath))
+	projectRoot, routeRoot, isConvention, err := conventionRoots(*dir, packagePath)
+	if err != nil {
+		return err
+	}
+	if isConvention {
+		app, err := prepareConventionApp(context.Background(), projectRoot, routeRoot)
 		if err != nil {
 			return err
 		}
 		convention = &app
 		packagePath = app.Package
-		*dir = app.Root
+		*dir = app.ProjectRoot
 		buildDir = app.WorkDir
 	}
 	if *vitePort < 0 || *vitePort > 65535 {

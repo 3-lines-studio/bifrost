@@ -60,8 +60,12 @@ func runBuild(args []string) error {
 		return fmt.Errorf("build accepts one package path")
 	}
 	options := builder.Options{Package: packagePath, Dir: *dir, Output: *output, StaticWorkers: *staticWorkers, SourceMaps: *sourceMaps, ViteConfig: *viteConfig, OnDescribe: printRouteTable, Version: bifrost.Version}
-	if conventionDirectory(*dir, packagePath) {
-		app, err := prepareConventionApp(context.Background(), conventionRoot(*dir, packagePath))
+	projectRoot, routeRoot, convention, err := conventionRoots(*dir, packagePath)
+	if err != nil {
+		return err
+	}
+	if convention {
+		app, err := prepareConventionApp(context.Background(), projectRoot, routeRoot)
 		if err != nil {
 			return err
 		}
