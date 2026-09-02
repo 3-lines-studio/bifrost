@@ -41,6 +41,7 @@ type Options struct {
 	SourceMaps          bool
 	ViteConfig          string
 	OnDescribe          func(protocol.DescribeResult)
+	OnBeforeOutputSwap  func()
 	OnOutput            func(string)
 	Version             string
 }
@@ -281,6 +282,9 @@ func Build(ctx context.Context, options Options) error {
 		_ = os.RemoveAll(filepath.Join(temporary, "entries"))
 	}
 
+	if options.OnBeforeOutputSwap != nil {
+		options.OnBeforeOutputSwap()
+	}
 	backup := output + ".old"
 	_ = os.RemoveAll(backup)
 	if _, err := os.Stat(output); err == nil {

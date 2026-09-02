@@ -197,6 +197,16 @@ func runDev(args []string) error {
 			if err := writeRoutesFile(filepath.Join(socketDir, "routes.json"), description.Spec.Routes); err != nil {
 				fmt.Fprintln(os.Stderr, "bifrost: write development routes:", err)
 			}
+		}, OnBeforeOutputSwap: func() {
+			if bridge == nil || bridge.Process == nil {
+				return
+			}
+			_ = syscall.Kill(-bridge.Process.Pid, syscall.SIGTERM)
+			if bridgeDone != nil {
+				<-bridgeDone
+			}
+			bridge = nil
+			bridgeDone = nil
 		}, OnOutput: func(output string) { devDir = output }, Version: bifrost.Version}
 		if convention != nil {
 			options.Output = convention.Output
