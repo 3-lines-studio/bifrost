@@ -152,23 +152,21 @@ func prepareConventionApp(ctx context.Context, dir string) (conventionApp, error
 	if err := writeConventionMain(root, generated, routes, goDirs); err != nil {
 		return conventionApp{}, err
 	}
-	if moduleDir == "" {
-		if err := writeConventionModule(generated); err != nil {
-			return conventionApp{}, err
-		}
-		if err := os.MkdirAll(filepath.Join(generated, "build"), 0o755); err != nil {
-			return conventionApp{}, err
-		}
-		if err := os.WriteFile(filepath.Join(generated, "build", "embed.placeholder"), nil, 0o644); err != nil {
-			return conventionApp{}, err
-		}
-		command := exec.CommandContext(ctx, "go", "mod", "tidy")
-		command.Dir = generated
-		command.Stdout = os.Stdout
-		command.Stderr = os.Stderr
-		if err := command.Run(); err != nil {
-			return conventionApp{}, fmt.Errorf("bifrost: prepare generated module: %w", err)
-		}
+	if err := writeConventionModule(generated, moduleDir); err != nil {
+		return conventionApp{}, err
+	}
+	if err := os.MkdirAll(filepath.Join(generated, "build"), 0o755); err != nil {
+		return conventionApp{}, err
+	}
+	if err := os.WriteFile(filepath.Join(generated, "build", "embed.placeholder"), nil, 0o644); err != nil {
+		return conventionApp{}, err
+	}
+	command := exec.CommandContext(ctx, "go", "mod", "tidy")
+	command.Dir = generated
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	if err := command.Run(); err != nil {
+		return conventionApp{}, fmt.Errorf("bifrost: prepare generated module: %w", err)
 	}
 	return conventionApp{Root: root, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(root, ".bifrost", "bifrost-app")}, nil
 }
@@ -569,23 +567,51 @@ func writeConventionMain(root, generated string, routes []conventionRoute, goDir
 	return os.WriteFile(path, formatted, 0o644)
 }
 
-func writeConventionModule(generated string) error {
+func writeConventionModule(generated, userModuleDir string) error {
 	version := bifrost.Version
-	if strings.HasPrefix(version, "v") && !strings.HasPrefix(version, "v0.0.0-") {
-		module := "module bifrost.local/app\n\ngo 1.25.0\n\nrequire github.com/3-lines-studio/bifrost " + version + "\n"
-		return os.WriteFile(filepath.Join(generated, "go.mod"), []byte(module), 0o644)
+	bifrostModuleDir := ""
+	if !strings.HasPrefix(version, "v") || strings.HasPrefix(version, "v0.0.0-") {
+		_, source, _, ok := runtime.Caller(0)
+		if !ok {
+			return errors.New("bifrost: cannot locate the development module")
+		}
+		bifrostModuleDir = filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
+		version = "v0.0.0"
 	}
-	_, source, _, ok := runtime.Caller(0)
-	if !ok {
-		return errors.New("bifrost: cannot locate the development module")
+
+	var module strings.Builder
+	module.WriteString("module bifrost.local/app\n\ngo 1.25.0\n\nrequire github.com/3-lines-studio/bifrost ")
+	module.WriteString(version)
+	module.WriteString("\n")
+
+	if userModuleDir != "" {
+		data, err := os.ReadFile(filepath.Join(userModuleDir, "go.mod"))
+		if err != nil {
+			return err
+		}
+		fields := strings.Fields(string(data))
+		if len(fields) < 2 || fields[0] != "module" {
+			return fmt.Errorf("bifrost: cannot read module path from %s", filepath.Join(userModuleDir, "go.mod"))
+		}
+		userModulePath := fields[1]
+		if userModulePath == "github.com/3-lines-studio/bifrost" {
+			bifrostModuleDir = userModuleDir
+		} else {
+			module.WriteString("require ")
+			module.WriteString(userModulePath)
+			module.WriteString(" v0.0.0\n\nreplace ")
+			module.WriteString(userModulePath)
+			module.WriteString(" => ")
+			module.WriteString(strconv.Quote(filepath.ToSlash(userModuleDir)))
+			module.WriteString("\n")
+		}
 	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
-	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
-	if err != nil || !strings.HasPrefix(string(data), "module github.com/3-lines-studio/bifrost\n") {
-		return errors.New("bifrost: development build cannot locate the Bifrost module")
+	if bifrostModuleDir != "" {
+		module.WriteString("\nreplace github.com/3-lines-studio/bifrost => ")
+		module.WriteString(strconv.Quote(filepath.ToSlash(bifrostModuleDir)))
+		module.WriteString("\n")
 	}
-	module := "module bifrost.local/app\n\ngo 1.25.0\n\nrequire github.com/3-lines-studio/bifrost v0.0.0\n\nreplace github.com/3-lines-studio/bifrost => " + filepath.ToSlash(root) + "\n"
-	return os.WriteFile(filepath.Join(generated, "go.mod"), []byte(module), 0o644)
+	return os.WriteFile(filepath.Join(generated, "go.mod"), []byte(module.String()), 0o644)
 }
 
 func buildConvention(ctx context.Context, app conventionApp, options builder.Options, buildExecutable bool) error {
