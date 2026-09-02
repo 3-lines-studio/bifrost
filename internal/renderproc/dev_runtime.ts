@@ -69,6 +69,9 @@ const vite = await createServer({
     strictPort: true,
     cors: false,
     ws: { clientPort: 0 },
+    watch: devEntries
+      ? { ignored: [devEntries, path.join(devEntries, "**")] }
+      : undefined,
   },
   resolve: {
     dedupe: ["react", "react-dom"],
