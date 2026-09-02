@@ -59,7 +59,16 @@ func runBuild(args []string) error {
 	if flags.NArg() > 1 {
 		return fmt.Errorf("build accepts one package path")
 	}
-	if err := builder.Build(context.Background(), builder.Options{Package: packagePath, Dir: *dir, Output: *output, StaticWorkers: *staticWorkers, SourceMaps: *sourceMaps, ViteConfig: *viteConfig, OnDescribe: printRouteTable, Version: bifrost.Version}); err != nil {
+	options := builder.Options{Package: packagePath, Dir: *dir, Output: *output, StaticWorkers: *staticWorkers, SourceMaps: *sourceMaps, ViteConfig: *viteConfig, OnDescribe: printRouteTable, Version: bifrost.Version}
+	if conventionDirectory(*dir, packagePath) {
+		app, err := prepareConventionApp(context.Background(), conventionRoot(*dir, packagePath))
+		if err != nil {
+			return err
+		}
+		if err := buildConvention(context.Background(), app, options, true); err != nil {
+			return err
+		}
+	} else if err := builder.Build(context.Background(), options); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintln(os.Stdout, "Bifrost build complete")

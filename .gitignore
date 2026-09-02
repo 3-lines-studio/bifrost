@@ -1,6 +1,7 @@
 node_modules/
 /example/basic/.bifrost/*
 !/example/basic/.bifrost/embed.placeholder
+/example/convention/.bifrost/
 /example/plugin/.bifrost/*
 !/example/plugin/.bifrost/embed.placeholder
 /example/structured/cmd/server/.bifrost/*
@@ -12,3 +13,5 @@ node_modules/
 /example/wails/frontend/bindings/
 /example/wails/frontend/node_modules/
 *.tmp
+
+/example/convention-minimal/.bifrost/

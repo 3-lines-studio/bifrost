@@ -207,7 +207,7 @@ func TestWriteEntriesPassesAbortSignalToReact(t *testing.T) {
 		t.Fatal(err)
 	}
 	generated := string(data)
-	if !strings.Contains(generated, "render(props, signal)") || !strings.Contains(generated, "{ signal }") {
+	if !strings.Contains(generated, "render(props, signal)") || !strings.Contains(generated, "{ signal, onError") {
 		t.Fatalf("generated SSR entry does not propagate cancellation:\n%s", generated)
 	}
 }

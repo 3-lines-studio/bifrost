@@ -24,8 +24,10 @@ type Document struct {
 // PageData lets a Server loader return props and root document attributes.
 // A loader may still return plain props when it needs no document attributes.
 type PageData struct {
-	Props    any
-	Document Document
+	Props          any
+	Document       Document
+	Status         int
+	ErrorFallbacks int
 }
 
 // StaticPage describes one document emitted by a static route.

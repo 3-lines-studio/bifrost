@@ -213,6 +213,18 @@ func (h *serverPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 		props = loaded
 	}
 
+	status := http.StatusOK
+	errorFallbacks := 0
+	if data, ok := props.(PageData); ok {
+		errorFallbacks = data.ErrorFallbacks
+		if data.Status != 0 {
+			status = data.Status
+			if status < 200 || status > 599 {
+				h.serveError(w, request, fmt.Errorf("invalid page status %d", status))
+				return
+			}
+		}
+	}
 	props, document, err := splitPageData(props)
 	if err != nil {
 		h.serveError(w, request, fmt.Errorf("encode document metadata: %w", err))
@@ -227,15 +239,15 @@ func (h *serverPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	h.renderProps(w, request, propsJSON, document)
+	h.renderProps(w, request, propsJSON, document, status, errorFallbacks)
 }
 
-func (h *serverPageHandler) renderProps(w http.ResponseWriter, request *http.Request, propsJSON json.RawMessage, document Document) {
+func (h *serverPageHandler) renderProps(w http.ResponseWriter, request *http.Request, propsJSON json.RawMessage, document Document, status, errorFallbacks int) {
 	var sink pageRenderSink
 	if markdownRequested(request.Context()) {
 		sink = &markdownRenderSink{writer: w, limits: h.limits}
 	} else {
-		sink = &httpRenderSink{writer: w, shell: h.shell, props: propsJSON, document: document, limits: h.limits}
+		sink = &httpRenderSink{writer: w, shell: h.shell, props: propsJSON, document: document, status: status, limits: h.limits}
 	}
 	var started time.Time
 	if len(h.hooks.renderHooks) > 0 {
@@ -252,12 +264,45 @@ func (h *serverPageHandler) renderProps(w http.ResponseWriter, request *http.Req
 		}
 	}
 	if err != nil {
+		if !sink.committed() && errorFallbacks > 0 {
+			if h.renderError(w, request, document, err, errorFallbacks) {
+				return
+			}
+		}
 		if !sink.committed() {
 			h.serveError(w, request, err)
 		} else if h.logger != nil {
 			h.logger.Error("bifrost render failed after response commit", "pattern", h.pattern, "error", err)
 		}
 	}
+}
+
+func (h *serverPageHandler) renderError(w http.ResponseWriter, request *http.Request, document Document, renderErr error, fallbacks int) bool {
+	message := http.StatusText(http.StatusInternalServerError)
+	if os.Getenv("BIFROST_DEV_DIR") != "" {
+		message = renderErr.Error()
+	}
+	for level := fallbacks - 1; level >= 0; level-- {
+		props, err := marshalProps(map[string]any{"__bifrostError": message, "__bifrostErrorLevel": level})
+		if err != nil {
+			return false
+		}
+		sink := &httpRenderSink{writer: w, shell: h.shell, props: props, document: document, status: http.StatusInternalServerError, limits: h.limits}
+		err = h.render.Render(request.Context(), renderRequest{Pattern: h.pattern, Entry: h.entry, Props: props}, sink)
+		if err == nil {
+			err = sink.finish()
+		}
+		if err == nil {
+			return true
+		}
+		if sink.committed() {
+			if h.logger != nil {
+				h.logger.Error("bifrost error page failed after response commit", "pattern", h.pattern, "error", err)
+			}
+			return true
+		}
+	}
+	return false
 }
 
 type developmentStaticPage struct {
@@ -276,7 +321,7 @@ func (h *developmentStaticHandler) ServeHTTP(w http.ResponseWriter, request *htt
 		http.NotFound(w, request)
 		return
 	}
-	h.page.renderProps(w, request, page.props, page.document)
+	h.page.renderProps(w, request, page.props, page.document, http.StatusOK, 0)
 }
 
 func (h *serverPageHandler) serveError(w http.ResponseWriter, request *http.Request, err error) {
@@ -292,6 +337,7 @@ type httpRenderSink struct {
 	shell    dochtml.Shell
 	props    json.RawMessage
 	document Document
+	status   int
 	started  bool
 	finished bool
 	limits   Limits
@@ -306,7 +352,7 @@ func (s *httpRenderSink) Head(head []byte) error {
 	}
 	s.writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 	s.writer.Header().Set("Cache-Control", "no-store")
-	s.writer.WriteHeader(http.StatusOK)
+	s.writer.WriteHeader(s.status)
 	s.started = true
 	if err := s.shell.WritePreamble(s.writer, head, protocolDocument(s.document)); err != nil {
 		return err

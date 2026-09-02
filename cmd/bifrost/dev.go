@@ -38,6 +38,21 @@ func runDev(args []string) error {
 	if flags.NArg() > 0 {
 		packagePath = flags.Arg(0)
 	}
+	if flags.NArg() > 1 {
+		return fmt.Errorf("dev accepts one package path")
+	}
+	var convention *conventionApp
+	buildDir := *dir
+	if conventionDirectory(*dir, packagePath) {
+		app, err := prepareConventionApp(context.Background(), conventionRoot(*dir, packagePath))
+		if err != nil {
+			return err
+		}
+		convention = &app
+		packagePath = app.Package
+		*dir = app.Root
+		buildDir = app.WorkDir
+	}
 	if *vitePort < 0 || *vitePort > 65535 {
 		return fmt.Errorf("invalid Vite port %d", *vitePort)
 	}
@@ -52,7 +67,11 @@ func runDev(args []string) error {
 		}
 	}
 	if *prepareOnly {
-		return builder.Build(context.Background(), builder.Options{Package: packagePath, Dir: *dir, Development: true, ExternalDevelopment: true, SourceMaps: false, ViteConfig: *viteConfig, OnDescribe: printRouteTable, Version: bifrost.Version})
+		options := builder.Options{Package: packagePath, Dir: buildDir, Development: true, ExternalDevelopment: true, SourceMaps: false, ViteConfig: *viteConfig, OnDescribe: printRouteTable, Version: bifrost.Version}
+		if convention != nil {
+			options.Output = convention.Output
+		}
+		return builder.Build(context.Background(), options)
 	}
 	if _, err := exec.LookPath("bun"); err != nil {
 		return errors.New("bifrost: Bun is required for development; install it from https://bun.sh")
@@ -172,13 +191,17 @@ func runDev(args []string) error {
 	}
 
 	buildAndStart := func() error {
-		if err := builder.Build(ctx, builder.Options{Package: packagePath, Dir: *dir, Development: true, SourceMaps: false, ViteConfig: *viteConfig, OnDescribe: func(description protocol.DescribeResult) {
+		options := builder.Options{Package: packagePath, Dir: buildDir, Development: true, SourceMaps: false, ViteConfig: *viteConfig, OnDescribe: func(description protocol.DescribeResult) {
 			printRouteTable(description)
 			sourceRoot = description.SourceRoot
 			if err := writeRoutesFile(filepath.Join(socketDir, "routes.json"), description.Spec.Routes); err != nil {
 				fmt.Fprintln(os.Stderr, "bifrost: write development routes:", err)
 			}
-		}, OnOutput: func(output string) { devDir = output }, Version: bifrost.Version}); err != nil {
+		}, OnOutput: func(output string) { devDir = output }, Version: bifrost.Version}
+		if convention != nil {
+			options.Output = convention.Output
+		}
+		if err := builder.Build(ctx, options); err != nil {
 			return err
 		}
 		if err := ensureBridge(); err != nil {
@@ -186,7 +209,7 @@ func runDev(args []string) error {
 		}
 		stopProcess(child)
 		child = exec.Command("go", "run", packagePath)
-		child.Dir = *dir
+		child.Dir = buildDir
 		child.Stdout = os.Stdout
 		child.Stderr = os.Stderr
 		child.Stdin = os.Stdin

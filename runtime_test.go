@@ -84,6 +84,78 @@ func TestServerHandlerStreamsDocument(t *testing.T) {
 	}
 }
 
+func TestServerHandlerUsesErrorFallbackBeforeCommit(t *testing.T) {
+	calls := 0
+	render := &fakeRenderer{render: func(_ context.Context, request renderRequest, sink renderSink) error {
+		calls++
+		if calls == 1 {
+			return errors.New("secret render failure")
+		}
+		if !strings.Contains(string(request.Props), `"__bifrostError":"Internal Server Error"`) {
+			t.Fatalf("fallback props = %s", request.Props)
+		}
+		if err := sink.Head(nil); err != nil {
+			return err
+		}
+		return sink.Body([]byte("<main>fallback</main>"))
+	}}
+	_, state := runtimeFixture(t, render)
+	handler := state.handlers["/server"].(*serverPageHandler)
+	handler.load = func(*http.Request) (any, error) {
+		return PageData{ErrorFallbacks: 1}, nil
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/server", nil))
+	if response.Code != http.StatusInternalServerError || calls != 2 || !strings.Contains(response.Body.String(), "fallback") {
+		t.Fatalf("response = %d calls = %d body = %q", response.Code, calls, response.Body.String())
+	}
+}
+
+func TestServerHandlerFallsBackToPlainError(t *testing.T) {
+	calls := 0
+	render := &fakeRenderer{render: func(context.Context, renderRequest, renderSink) error {
+		calls++
+		return errors.New("secret render failure")
+	}}
+	_, state := runtimeFixture(t, render)
+	handler := state.handlers["/server"].(*serverPageHandler)
+	handler.load = func(*http.Request) (any, error) {
+		return PageData{ErrorFallbacks: 2}, nil
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/server", nil))
+	if response.Code != http.StatusInternalServerError || calls != 3 {
+		t.Fatalf("response = %d calls = %d", response.Code, calls)
+	}
+	if response.Body.String() != "Internal Server Error\n" {
+		t.Fatalf("body = %q", response.Body.String())
+	}
+}
+
+func TestServerHandlerDoesNotReplaceCommittedStream(t *testing.T) {
+	calls := 0
+	render := &fakeRenderer{render: func(_ context.Context, _ renderRequest, sink renderSink) error {
+		calls++
+		if err := sink.Head(nil); err != nil {
+			return err
+		}
+		if err := sink.Body([]byte("partial")); err != nil {
+			return err
+		}
+		return errors.New("late render failure")
+	}}
+	_, state := runtimeFixture(t, render)
+	handler := state.handlers["/server"].(*serverPageHandler)
+	handler.load = func(*http.Request) (any, error) {
+		return PageData{ErrorFallbacks: 1}, nil
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/server", nil))
+	if response.Code != http.StatusOK || calls != 1 || !strings.Contains(response.Body.String(), "partial") {
+		t.Fatalf("response = %d calls = %d body = %q", response.Code, calls, response.Body.String())
+	}
+}
+
 func TestServerHandlerUsesRequestDocumentAttributes(t *testing.T) {
 	files, app, wireManifest := validManifestFixture(t)
 	for i := range app.routes {

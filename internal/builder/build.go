@@ -434,7 +434,7 @@ func writeEntries(sourceRoot, output string, plans []viewPlan, buildID string) e
 			return err
 		}
 		if plan.ServerFile != "" {
-			server := "import React from 'react';\nimport { renderToReadableStream, renderToString } from 'react-dom/server';\nimport * as M from " + quoted + ";\nexport async function render(props, signal) { const head = typeof M.Head === 'function' ? renderToString(React.createElement(M.Head, props)) : ''; const body = await renderToReadableStream(React.createElement(M.Page, props), { signal }); return { head, body }; }\n"
+			server := "import React from 'react';\nimport { renderToReadableStream, renderToString } from 'react-dom/server';\nimport * as M from " + quoted + ";\nexport async function render(props, signal) { let renderError; const head = typeof M.Head === 'function' ? renderToString(React.createElement(M.Head, props)) : ''; const source = await renderToReadableStream(React.createElement(M.Page, props), { signal, onError(error) { renderError = error instanceof Error ? error : new Error(String(error)); } }); const reader = source.getReader(); const body = new ReadableStream({ async pull(controller) { try { const result = await reader.read(); if (renderError) throw renderError; if (result.done) controller.close(); else controller.enqueue(result.value); } catch (error) { controller.error(error); } }, cancel(reason) { return reader.cancel(reason); } }); return { head, body }; }\n"
 			if err := os.WriteFile(plan.ServerFile, []byte(server), 0o644); err != nil {
 				return err
 			}
@@ -1028,7 +1028,7 @@ func validatePublicOwnership(spec protocol.Spec, assets []protocol.PublicAsset) 
 	for _, asset := range assets {
 		request := &http.Request{Method: http.MethodGet, URL: &url.URL{Path: asset.URL}}
 		_, pattern := mux.Handler(request)
-		if pattern != "" {
+		if pattern != "" && !strings.Contains(pattern, "{path...}") {
 			return fmt.Errorf("bifrost: public URL %q conflicts with page pattern %q", asset.URL, strings.TrimPrefix(pattern, "GET "))
 		}
 	}
