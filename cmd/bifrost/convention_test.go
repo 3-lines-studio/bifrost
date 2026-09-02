@@ -42,7 +42,7 @@ func TestConventionLayoutsComposeOuterToInner(t *testing.T) {
 	files := map[string]string{
 		"layout.tsx":                   "export function Layout({ children }) { return children }",
 		"dashboard/layout.tsx":         "export function Layout({ children }) { return children }",
-		"dashboard/settings/page.tsx":  "export function Page() { return null }",
+		"dashboard/settings/page.tsx":  "export function Head() { return null } export function Page() { return null }",
 		"dashboard/settings/error.tsx": "export function Error() { return null }",
 		"dashboard/not-found.tsx":      "export function NotFound() { return null }",
 	}
@@ -67,7 +67,7 @@ func TestConventionLayoutsComposeOuterToInner(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(view)
-	if !strings.Contains(text, "<Layout0><Layout1>") || !strings.Contains(text, "props.__bifrostError") || !strings.Contains(text, "props.__bifrostNotFound") {
+	if !strings.Contains(text, "<Layout0><Layout1>") || !strings.Contains(text, "props.__bifrostError") || !strings.Contains(text, "props.__bifrostNotFound") || !strings.Contains(text, "export { Head }") {
 		t.Fatalf("generated view is incomplete:\n%s", text)
 	}
 }

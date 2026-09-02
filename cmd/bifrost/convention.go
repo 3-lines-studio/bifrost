@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -26,6 +27,7 @@ type conventionRoute struct {
 	Alias        string
 	PageGo       bool
 	HasLoader    bool
+	HasHead      bool
 	ErrorViews   []string
 	NotFoundView string
 	NotFoundPage bool
@@ -197,7 +199,7 @@ func discoverConventionRoutes(root string) ([]conventionRoute, error) {
 			return fmt.Errorf("bifrost: duplicate route %q from %s and %s", pattern, previous, filepath.ToSlash(relative))
 		}
 		patterns[pattern] = filepath.ToSlash(relative)
-		route := conventionRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator)))}
+		route := conventionRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), HasHead: hasHeadExport(filePath)}
 		if _, err := os.Stat(filepath.Join(directory, "page.go")); err == nil {
 			route.PageGo = true
 			route.ImportPath = filepath.ToSlash(relative)
@@ -340,7 +342,11 @@ func writeConventionViews(root string, routes []conventionRoute) error {
 		for layoutIndex := len(layouts) - 1; layoutIndex >= 0; layoutIndex-- {
 			body = fmt.Sprintf("<Layout%d>%s</Layout%d>", layoutIndex, body, layoutIndex)
 		}
-		source := imports.String() + "export function Page(props: Record<string, unknown>) {\n  return " + body + ";\n}\n"
+		head := ""
+		if routes[index].HasHead && !routes[index].NotFoundPage {
+			head = "export { Head } from " + strconv.Quote(filepath.Join(root, filepath.FromSlash(routes[index].View))) + ";\n"
+		}
+		source := imports.String() + head + "export function Page(props: Record<string, unknown>) {\n  return " + body + ";\n}\n"
 		name := fmt.Sprintf("page-%d.tsx", index)
 		if err := os.WriteFile(filepath.Join(views, name), []byte(source), 0o644); err != nil {
 			return err
@@ -348,6 +354,13 @@ func writeConventionViews(root string, routes []conventionRoute) error {
 		routes[index].View = ".bifrost/views/" + name
 	}
 	return nil
+}
+
+var headExportPattern = regexp.MustCompile(`(?m)^\s*export\s+(?:function|const|let|var)\s+Head\b`)
+
+func hasHeadExport(filePath string) bool {
+	data, err := os.ReadFile(filePath)
+	return err == nil && headExportPattern.Match(data)
 }
 
 func inheritedFiles(root, directory, name string) []string {
