@@ -109,7 +109,8 @@ func runDev(args []string) error {
 	var bridge *exec.Cmd
 	var bridgeDone chan struct{}
 	var sourceRoot string
-	var devDir string
+	var buildOutput string
+	devDir := filepath.Join(socketDir, "dev")
 
 	stopProcess := func(process *exec.Cmd) {
 		if process == nil || process.Process == nil {
@@ -211,11 +212,20 @@ func runDev(args []string) error {
 			}
 			bridge = nil
 			bridgeDone = nil
-		}, OnOutput: func(output string) { devDir = output }, Version: bifrost.Version}
+		}, OnOutput: func(output string) { buildOutput = output }, Version: bifrost.Version}
 		if convention != nil {
 			options.Output = convention.Output
 		}
 		if err := builder.Build(ctx, options); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(devDir); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(devDir, 0o700); err != nil {
+			return err
+		}
+		if err := os.CopyFS(filepath.Join(devDir, "entries"), os.DirFS(filepath.Join(buildOutput, "entries"))); err != nil {
 			return err
 		}
 		if err := ensureBridge(); err != nil {
