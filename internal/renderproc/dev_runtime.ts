@@ -49,6 +49,9 @@ function bifrostRoutesPlugin(): Plugin {
   return {
     name: "bifrost:routes",
     resolveId(source) {
+      if (source === "virtual:bifrost/navigation" && devEntries) {
+        return path.join(devEntries, "navigation-api.ts");
+      }
       return source === id ? resolved : null;
     },
     load(source) {

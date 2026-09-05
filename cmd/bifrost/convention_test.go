@@ -72,8 +72,15 @@ func TestNestedConventionViewUsesProjectRelativePath(t *testing.T) {
 	if err := writeConventionViews(projectRoot, routeRoot, routes); err != nil {
 		t.Fatal(err)
 	}
-	if routes[0].View != "app/page.tsx" {
+	if routes[0].View != ".bifrost/views/page-0.tsx" {
 		t.Fatalf("view = %q", routes[0].View)
+	}
+	source, err := os.ReadFile(filepath.Join(projectRoot, routes[0].View))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), filepath.Join(routeRoot, "page.tsx")) {
+		t.Fatalf("wrapper = %s", source)
 	}
 }
 
@@ -113,7 +120,13 @@ func TestConventionLayoutsComposeOuterToInner(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(view)
-	if !strings.Contains(text, "<Layout0><Layout1>") || !strings.Contains(text, "props.__bifrostError") || !strings.Contains(text, "props.__bifrostNotFound") || !strings.Contains(text, "export { Head }") {
+	if !strings.Contains(text, "export function renderPage") || !strings.Contains(text, `"use no memo";`) {
+		t.Fatalf("generated tree factory is not hook-free:\n%s", text)
+	}
+	if !strings.Contains(text, "pageKey?: string") || !strings.Contains(text, "<Fragment key={pageKey}>") {
+		t.Fatalf("generated page branch is not keyed:\n%s", text)
+	}
+	if !strings.Contains(text, `<Layout0 key={"layout.tsx"}><Layout1 key={"dashboard/layout.tsx"}>`) || !strings.Contains(text, "props.__bifrostError") || !strings.Contains(text, "props.__bifrostNotFound") || !strings.Contains(text, "export { Head }") {
 		t.Fatalf("generated view is incomplete:\n%s", text)
 	}
 }

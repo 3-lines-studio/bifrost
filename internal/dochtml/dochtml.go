@@ -26,8 +26,9 @@ const (
 // streaming runtime uses WritePreamble and WriteSuffix around body frames;
 // the build command uses Render to assemble a complete static document.
 type Shell struct {
-	afterHead string
-	suffix    string
+	navigationBuild string
+	afterHead       string
+	suffix          string
 }
 
 // NewShell builds the shell for the given client assets.
@@ -105,8 +106,18 @@ func (s Shell) WritePreamble(w io.Writer, head []byte, document protocol.Documen
 	if _, err := io.WriteString(w, opening); err != nil {
 		return err
 	}
+	if s.navigationBuild != "" {
+		if _, err := io.WriteString(w, `<meta name="bifrost-build" content="`+html.EscapeString(s.navigationBuild)+`" data-document-class="`+html.EscapeString(document.Class)+`"><meta name="bifrost-head-start">`); err != nil {
+			return err
+		}
+	}
 	if len(head) > 0 {
 		if _, err := w.Write(head); err != nil {
+			return err
+		}
+	}
+	if s.navigationBuild != "" {
+		if _, err := io.WriteString(w, `<meta name="bifrost-head-end">`); err != nil {
 			return err
 		}
 	}
@@ -150,4 +161,9 @@ func (s Shell) ClientDocument(props json.RawMessage) ([]byte, error) {
 		return nil, err
 	}
 	return output.Bytes(), nil
+}
+
+func (s Shell) WithNavigation(build string) Shell {
+	s.navigationBuild = build
+	return s
 }

@@ -50,6 +50,9 @@ function bifrostRoutes(routes: RouteSpec[]): Plugin {
   return {
     name: "bifrost:routes",
     resolveId(source) {
+      if (source === "virtual:bifrost/navigation") {
+        return path.join(import.meta.dirname, "navigation-api.ts");
+      }
       return source === id ? resolved : null;
     },
     load(source) {

@@ -199,6 +199,10 @@ func validateRoutes(sourceRoot string, routes []Route) ([]Route, error) {
 		}
 		route.view = view
 
+		if route.navigation && route.kind != routeServer {
+			return nil, fmt.Errorf("bifrost: navigation requires a server route: %q", route.pattern)
+		}
+
 		if route.kind == routeStatic && patternIsDynamic(route.pattern) && route.generate == nil {
 			return nil, fmt.Errorf("bifrost: dynamic static route %q requires a generator", route.pattern)
 		}
@@ -288,9 +292,10 @@ func makeBuildSpec(routes []Route) (protocol.Spec, string, error) {
 	}
 	for i, route := range routes {
 		spec.Routes[i] = protocol.RouteSpec{
-			Pattern: route.pattern,
-			View:    route.view,
-			Kind:    route.kind.String(),
+			Pattern:    route.pattern,
+			View:       route.view,
+			Kind:       route.kind.String(),
+			Navigation: route.navigation,
 		}
 	}
 

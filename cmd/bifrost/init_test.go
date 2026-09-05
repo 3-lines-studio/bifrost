@@ -28,6 +28,15 @@ func TestRunInitCreatesFormattedScaffoldAndRefusesOverwrite(t *testing.T) {
 	if !strings.Contains(string(viteData), "@tailwindcss/vite") || !strings.Contains(string(viteData), "@vitejs/plugin-react") {
 		t.Fatalf("vite.config.ts is incomplete:\n%s", viteData)
 	}
+	types, err := os.ReadFile(filepath.Join(target, "bifrost.d.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"virtual:bifrost/navigation", "navigate(href: string): Promise<void>", "refresh(): Promise<void>"} {
+		if !strings.Contains(string(types), expected) {
+			t.Fatalf("bifrost.d.ts does not contain %q", expected)
+		}
+	}
 	if err := runInit([]string{"--no-install", target}); err == nil || !strings.Contains(err.Error(), "refusing to overwrite") {
 		t.Fatalf("second init error = %v", err)
 	}

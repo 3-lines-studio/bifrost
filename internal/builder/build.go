@@ -54,6 +54,7 @@ type packageInfo struct {
 }
 
 type viewPlan struct {
+	Navigation bool
 	ID         string
 	Source     string
 	Mode       string
@@ -402,8 +403,12 @@ func planViews(describe protocol.DescribeResult, output string) ([]viewPlan, map
 		if route.Kind == "client" {
 			mode = "mount"
 		}
-		id := digest(route.View + "\x00" + mode)
-		plan := viewPlan{ID: id, Source: route.View, Mode: mode, ClientFile: filepath.Join(output, "entries", id+"-client.tsx")}
+		key := route.View + "\x00" + mode
+		if route.Navigation {
+			key += "\x00navigation"
+		}
+		id := digest(key)
+		plan := viewPlan{Navigation: route.Navigation, ID: id, Source: route.View, Mode: mode, ClientFile: filepath.Join(output, "entries", id+"-client.tsx")}
 		if mode == "hydrate" {
 			plan.ServerFile = filepath.Join(output, "entries", id+"-server.tsx")
 		}
@@ -419,6 +424,9 @@ func planViews(describe protocol.DescribeResult, output string) ([]viewPlan, map
 }
 
 func writeEntries(sourceRoot, output string, plans []viewPlan, buildID string) error {
+	if err := writeNavigation(sourceRoot, output, plans); err != nil {
+		return err
+	}
 	for _, plan := range plans {
 		source, err := resolveSourceFile(sourceRoot, plan.Source)
 		if err != nil {
@@ -430,6 +438,9 @@ func writeEntries(sourceRoot, output string, plans []viewPlan, buildID string) e
 			client = "import React from 'react';\nimport { createRoot } from 'react-dom/client';\nimport { Page } from " + quoted + ";\nconst root=document.getElementById('app'); if(!root) throw new Error('missing #app'); createRoot(root).render(React.createElement(Page, {}));\n"
 		} else {
 			client = "import React from 'react';\nimport { hydrateRoot } from 'react-dom/client';\nimport { Page } from " + quoted + ";\nconst node=document.getElementById('__BIFROST_PROPS__'); const props=node?.textContent ? JSON.parse(node.textContent) : {}; const root=document.getElementById('app'); if(!root) throw new Error('missing #app'); hydrateRoot(root, React.createElement(Page, props));\n"
+		}
+		if plan.Navigation {
+			client = "import * as page from " + quoted + ";\nimport { start } from './navigation.tsx';\nstart(page);\n"
 		}
 		if buildID != "" {
 			client += "const bifrostBuild=" + strconv.Quote(buildID) + ";async function bifrostPoll(){try{const r=await fetch('/_bifrost/build-id?wait='+bifrostBuild,{cache:'no-store'});if(r.ok){if((await r.text())!==bifrostBuild){location.reload();return;}setTimeout(bifrostPoll,0);}else{setTimeout(bifrostPoll,500);}}catch{setTimeout(bifrostPoll,500);}}bifrostPoll();\n"

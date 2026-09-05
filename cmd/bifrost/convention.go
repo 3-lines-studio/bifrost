@@ -309,13 +309,8 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 		if len(notFound) > 0 {
 			routes[index].NotFoundView = notFound[len(notFound)-1]
 		}
-		if len(layouts) == 0 && len(errors) == 0 && len(notFound) == 0 && !routes[index].NotFoundPage {
-			routePath := filepath.Join(routeRoot, filepath.FromSlash(routes[index].View))
-			routes[index].View, _ = filepath.Rel(projectRoot, routePath)
-			routes[index].View = filepath.ToSlash(routes[index].View)
-			continue
-		}
 		var imports strings.Builder
+		imports.WriteString("import { Fragment } from 'react';\n")
 		export := "Page"
 		if routes[index].NotFoundPage {
 			export = "NotFound"
@@ -340,17 +335,16 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 		if routes[index].NotFoundView != "" {
 			body = "props.__bifrostNotFound ? <NotFound /> : " + body
 		}
-		if len(layouts) > 0 && strings.Contains(body, " ? ") {
-			body = "{" + body + "}"
-		}
+		body = "<Fragment key={pageKey}>{" + body + "}</Fragment>"
 		for layoutIndex := len(layouts) - 1; layoutIndex >= 0; layoutIndex-- {
-			body = fmt.Sprintf("<Layout%d>%s</Layout%d>", layoutIndex, body, layoutIndex)
+			layoutKey := strings.TrimPrefix(filepath.ToSlash(layouts[layoutIndex]), filepath.ToSlash(routeRoot)+"/")
+			body = fmt.Sprintf("<Layout%d key={%s}>%s</Layout%d>", layoutIndex, strconv.Quote(layoutKey), body, layoutIndex)
 		}
 		head := ""
 		if routes[index].HasHead && !routes[index].NotFoundPage {
 			head = "export { Head } from " + strconv.Quote(filepath.Join(routeRoot, filepath.FromSlash(routes[index].View))) + ";\n"
 		}
-		source := imports.String() + head + "export function Page(props: Record<string, unknown>) {\n  return " + body + ";\n}\n"
+		source := imports.String() + head + "export function renderPage(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + body + ";\n}\nexport function Page(props: Record<string, unknown>) {\n  return renderPage(props);\n}\n"
 		name := fmt.Sprintf("page-%d.tsx", index)
 		if err := os.WriteFile(filepath.Join(views, name), []byte(source), 0o644); err != nil {
 			return err
@@ -513,7 +507,7 @@ func writeConventionMain(root, generated string, routes []conventionRoute, goDir
 			loader = fmt.Sprintf("load%d", index)
 			fmt.Fprintf(&loaders, "func %s(*http.Request) (any, error) {\n\treturn bifrost.PageData{ErrorFallbacks: %d}, nil\n}\n\n", loader, len(route.ErrorViews))
 		}
-		fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, %s),\n", strconv.Quote(route.Pattern), strconv.Quote(route.View), loader)
+		fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, %s).WithNavigation(),\n", strconv.Quote(route.Pattern), strconv.Quote(route.View), loader)
 	}
 	if hasNotFoundPage {
 		fmt.Fprintf(&loaders, "func loadNotFound(*http.Request) (any, error) {\n\treturn bifrost.PageData{Status: http.StatusNotFound}, nil\n}\n\n")

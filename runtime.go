@@ -126,7 +126,7 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 				return nil, fmt.Errorf("bifrost: server route %q has no renderer", pattern)
 			}
 			state.serverPatterns["GET "+pattern] = struct{}{}
-			handler = &serverPageHandler{
+			page := &serverPageHandler{
 				pattern: pattern,
 				load:    declaration.load,
 				entry:   serverEntry,
@@ -136,6 +136,12 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 				limits:  app.limits,
 				logger:  app.logger,
 			}
+			if declaration.navigation {
+				page.navigationView = view.ID
+				page.navigationBuild = manifest.manifest.BuildID
+				page.shell = shell.WithNavigation(page.navigationBuild)
+			}
+			handler = page
 		case routeStatic:
 			if devDir != "" {
 				if render == nil || serverEntry == "" {
@@ -182,17 +188,22 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 }
 
 type serverPageHandler struct {
-	pattern string
-	load    Loader
-	entry   string
-	shell   dochtml.Shell
-	render  renderer
-	hooks   registeredHooks
-	limits  Limits
-	logger  *slog.Logger
+	navigationView  string
+	navigationBuild string
+	pattern         string
+	load            Loader
+	entry           string
+	shell           dochtml.Shell
+	render          renderer
+	hooks           registeredHooks
+	limits          Limits
+	logger          *slog.Logger
 }
 
 func (h *serverPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
+	if h.navigationView != "" {
+		w.Header().Add("Vary", "Accept")
+	}
 	props := any(nil)
 	if h.load != nil {
 		var started time.Time
@@ -247,7 +258,7 @@ func (h *serverPageHandler) renderProps(w http.ResponseWriter, request *http.Req
 	if markdownRequested(request.Context()) {
 		sink = &markdownRenderSink{writer: w, limits: h.limits}
 	} else {
-		sink = &httpRenderSink{writer: w, shell: h.shell, props: propsJSON, document: document, status: status, limits: h.limits}
+		sink = h.newSink(w, request, propsJSON, document, status)
 	}
 	var started time.Time
 	if len(h.hooks.renderHooks) > 0 {
@@ -287,7 +298,7 @@ func (h *serverPageHandler) renderError(w http.ResponseWriter, request *http.Req
 		if err != nil {
 			return false
 		}
-		sink := &httpRenderSink{writer: w, shell: h.shell, props: props, document: document, status: http.StatusInternalServerError, limits: h.limits}
+		sink := h.newSink(w, request, props, document, http.StatusInternalServerError)
 		err = h.render.Render(request.Context(), renderRequest{Pattern: h.pattern, Entry: h.entry, Props: props}, sink)
 		if err == nil {
 			err = sink.finish()

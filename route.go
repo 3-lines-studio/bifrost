@@ -65,11 +65,12 @@ func (k routeKind) String() string {
 // Route is an immutable page declaration. Use Server, Static, or Client to
 // construct one.
 type Route struct {
-	pattern  string
-	view     string
-	kind     routeKind
-	load     Loader
-	generate Generator
+	pattern    string
+	view       string
+	kind       routeKind
+	load       Loader
+	generate   Generator
+	navigation bool
 }
 
 // Server declares a page rendered on each request. A nil loader supplies empty
@@ -101,4 +102,9 @@ func Client(pattern, view string) Route {
 		view:    view,
 		kind:    routeClient,
 	}
+}
+
+func (r Route) WithNavigation() Route {
+	r.navigation = true
+	return r
 }

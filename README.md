@@ -139,7 +139,51 @@ export function Nav() {
 
 `href(pattern, params)` interpolates `http.ServeMux` patterns such as `/post/{slug}` and `/files/{path...}`. `bifrost init` writes the matching `bifrost.d.ts` declarations; add them manually to other projects.
 
-The module is read-only metadata. Client-side navigation remains a user concern.
+The module is read-only metadata. Explicitly wired apps own their client-side navigation. Convention apps include it automatically.
+
+## Convention navigation
+
+Use normal `<a href="/posts/hello">` links. After the first server render, convention apps fetch the next route through the same Go middleware and loader, lazy-load its Vite module, and update one React root. Shared layouts stay mounted. Back/forward, scroll, hash links, focus, page head, and root document attributes update with the route.
+
+Page-local state resets when the pathname changes, including dynamic parameters such as `/posts/one` → `/posts/two`. Query changes keep page state but reload props. Hash-only changes keep state without running the loader. Shared layouts keep state while they remain in the tree; leaving a layout discards its state. Back/forward restores scroll, not previously unmounted page state.
+
+The current page stays visible with `aria-busy="true"` on `#app` while navigation runs. A newer navigation or refresh cancels the previous request. There is no prefetch or route-data cache; loaders run on route navigation and refresh, including back/forward between paths or queries.
+
+External links, downloads, new tabs, and modified clicks keep browser behavior. Add `data-bifrost-reload` to a link to force a document load. Unsupported responses, incompatible builds, and heads with scripts, base tags, or HTTP-equivalent metadata fall back to document navigation. Direct visits and links without JavaScript still use SSR.
+
+Navigation responses contain props and server-rendered head metadata, not page HTML. Bifrost still runs SSR to preserve render-error boundaries, discarding body chunks without buffering them. This saves document reloads, not SSR work. Custom middleware must preserve the navigation `Accept` header and `Vary: Accept`; do not cache these responses.
+
+Generated convention routes use `Route.WithNavigation()`. Its view must export a hook-free `renderPage(props, pageKey?)` tree factory and an SSR `Page` component that renders the same tree. The factory keys the page branch by `pageKey` while keeping layout keys stable. The generated factory opts out of React Compiler memoization; hooks belong in the page and layout components inside it. Ordinary `Server`, `Static`, and `Client` declarations keep their existing behavior.
+
+### Programmatic navigation and refresh
+
+Convention apps can import `navigate` and `refresh` from `virtual:bifrost/navigation`. Call them from browser event handlers or effects, not during rendering:
+
+```tsx
+import { navigate, refresh } from "virtual:bifrost/navigation";
+
+export function Actions() {
+  return <>
+    <button onClick={() => navigate("/posts")}>Posts</button>
+    <button onClick={() => refresh()}>Refresh</button>
+  </>;
+}
+```
+
+- `navigate(href)` follows the same path as an internal link and adds a history entry. Relative URLs resolve against the current browser URL. External HTTP(S) URLs use a document load; other URL schemes reject with `TypeError`.
+- `refresh()` reruns the current URL's middleware and loader without adding a history entry. It updates props and head metadata while keeping page/layout state, focus, and scroll. Call `await refresh()` after a successful mutation to display fresh server data. If the server redirects, Bifrost replaces the current history entry and applies normal route state and focus rules.
+- Both return `Promise<void>`. They resolve after the client update, a superseding request, or initiation of a document fallback; they do not wait for a fallback document to load. Importing them during SSR is safe, but calling them without a mounted client router rejects.
+
+`bifrost init` includes the types. Existing convention apps can add this to `bifrost.d.ts`:
+
+```ts
+declare module "virtual:bifrost/navigation" {
+  export function navigate(href: string): Promise<void>;
+  export function refresh(): Promise<void>;
+}
+```
+
+Run `bash scripts/navigation-integration.sh` for production and development browser checks (requires Chromium).
 
 ## Browser performance
 
