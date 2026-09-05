@@ -232,7 +232,15 @@ func runDev(args []string) error {
 			return err
 		}
 		stopProcess(child)
-		child = exec.Command("go", "run", packagePath)
+		childBinary := filepath.Join(socketDir, "app")
+		build := exec.Command("go", "build", "-o", childBinary, packagePath)
+		build.Dir = buildDir
+		build.Stdout = os.Stdout
+		build.Stderr = os.Stderr
+		if err := build.Run(); err != nil {
+			return fmt.Errorf("bifrost: build dev app: %w", err)
+		}
+		child = exec.Command(childBinary)
 		child.Dir = buildDir
 		child.Stdout = os.Stdout
 		child.Stderr = os.Stderr
