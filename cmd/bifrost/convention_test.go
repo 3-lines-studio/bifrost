@@ -169,13 +169,24 @@ func TestGeneratedServerLifecycleAndEscapeHatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, expected := range []string{"signal.NotifyContext", "ReadHeaderTimeout", "BIFROST_ADDR", `flag.StringVar(&addr, "addr"`, "route0.Serve(ctx, mux)", "server.Shutdown"} {
+	for _, expected := range []string{"signal.NotifyContext", "ReadHeaderTimeout", "BIFROST_ADDR", `flag.StringVar(&addr, "addr"`, "route0.Serve(ctx, app.ResolveMarkdown(mux))", "server.Shutdown"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("generated main does not contain %q", expected)
 		}
 	}
 	if strings.Contains(text, "WriteTimeout") {
 		t.Fatal("generated server sets WriteTimeout")
+	}
+	goDirs[0].Serve = false
+	if err := writeConventionMain(root, generated, routes, goDirs); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "return serve(ctx, app.ResolveMarkdown(mux))") {
+		t.Fatal("generated main does not apply markdown resolution")
 	}
 }
 

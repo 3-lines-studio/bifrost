@@ -547,10 +547,10 @@ func writeConventionMain(root, generated string, routes []conventionRoute, goDir
 			fmt.Fprintf(&registrations, "\tmux.Handle(%s, %s)\n", strconv.Quote(strings.ToUpper(method)+" "+directory.Pattern), handler)
 		}
 	}
-	serve := "return serve(ctx, mux)"
+	serve := "return serve(ctx, app.ResolveMarkdown(mux))"
 	for _, directory := range goDirs {
 		if directory.Serve {
-			serve = "return " + directory.Alias + ".Serve(ctx, mux)"
+			serve = "return " + directory.Alias + ".Serve(ctx, app.ResolveMarkdown(mux))"
 			break
 		}
 	}

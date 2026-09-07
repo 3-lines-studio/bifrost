@@ -227,6 +227,14 @@ grep -q 'posts-layout' <<<"$post"
 grep -q 'hello' <<<"$post"
 grep -q 'root,posts' <<<"$post"
 grep -q 'vite-ok' <<<"$post"
+test "$(curl -fsS -o /dev/null -w '%{content_type}' http://127.0.0.1:18102/posts/hello.md)" = "text/markdown; charset=utf-8"
+markdown=$(curl -fsS http://127.0.0.1:18102/posts/hello.md)
+grep -q 'post:hello:root,posts:vite-ok' <<<"$markdown"
+grep -q 'posts-layout' <<<"$markdown"
+! grep -q '<main' <<<"$markdown"
+test "$(curl -fsS -H 'Accept: text/markdown' -o /dev/null -w '%{content_type}' http://127.0.0.1:18102/posts/hello)" = "text/markdown; charset=utf-8"
+rest_md=$(curl -fsS http://127.0.0.1:18102/posts/api/value.md)
+grep -q '"slug":"value.md"' <<<"$rest_md"
 for method in GET POST PUT PATCH DELETE OPTIONS; do
   body=$(curl -fsS -X "$method" http://127.0.0.1:18102/posts/api/value)
   grep -q "\"method\":\"$method\"" <<<"$body"
@@ -278,6 +286,7 @@ dev_pid=$!
 for _ in $(seq 1 600); do curl -fsS http://127.0.0.1:18103/posts/dev >"$tmp/dev.html" 2>/dev/null && break; sleep 0.05; done
 grep -q dev "$tmp/dev.html"
 grep -q 'root,posts' "$tmp/dev.html"
+test "$(curl -fsS -o /dev/null -w '%{content_type}' http://127.0.0.1:18103/posts/dev.md)" = "text/markdown; charset=utf-8"
 baseline=$(descendants "$dev_pid")
 baseline_count=$(wc -w <<<"$baseline")
 for value in one two three; do
