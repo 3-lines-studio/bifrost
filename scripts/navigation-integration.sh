@@ -9,7 +9,6 @@ stop_server() {
   if [[ -z "$pid" ]]; then
     return
   fi
-  pkill -TERM -P "$pid" 2>/dev/null || true
   kill -TERM "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
   pid=""
