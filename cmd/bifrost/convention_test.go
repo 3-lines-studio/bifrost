@@ -100,7 +100,7 @@ func TestConventionPatternNextSyntax(t *testing.T) {
 		{"about", "/about", nil},
 		{"posts/slug_", "/posts/{slug}", []conventionParam{{Name: "slug", Value: "slug"}}},
 		{"posts/post-id_", "/posts/{post_id}", []conventionParam{{Name: "post-id", Value: "post_id"}}},
-		{"docs/slug__", "/docs/{slug...}", []conventionParam{{Name: "slug", Value: "slug"}}},
+		{"docs/slug__", "/docs/{slug...}", []conventionParam{{Name: "slug", Value: "slug", Segments: true}}},
 		{"marketing~/about", "/about", nil},
 		{"marketing~", "/{$}", nil},
 	}
@@ -240,6 +240,39 @@ func TestConventionNotFoundRoutesUseTheURLPrefix(t *testing.T) {
 	}
 }
 
+func TestGeneratedMainInjectsRequestProps(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	routes := []conventionRoute{
+		{Pattern: "/posts/{post_id}", Params: []conventionParam{{Name: "post-id", Value: "post_id"}}, View: "page.tsx", HasLoader: true, ImportPath: "example.com/app/posts", Alias: "route0", ErrorViews: []string{"error.tsx"}},
+		{Pattern: "/docs/{slug...}", Params: []conventionParam{{Name: "slug", Value: "slug", Segments: true}}, View: "page.tsx"},
+	}
+	if err := writeConventionMain(root, generated, routes, nil); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, expected := range []string{
+		`requestPage(r, map[string]any{"post-id": r.PathValue("post_id")}, props, 1)`,
+		`return requestPage(r, map[string]any{"slug": requestSegments(r.PathValue("slug"))}, nil, 0)`,
+		`values["params"] = params`,
+		`values["searchParams"] = requestSearchParams(r)`,
+		`"strings"`,
+		`reflect.ValueOf(props)`,
+		`a page loader must return a map with string keys, or bifrost.PageData with one`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("generated main does not contain %q:\n%s", expected, text)
+		}
+	}
+}
+
 func TestGeneratedMainRenamesPathValuesForGo(t *testing.T) {
 	root := t.TempDir()
 	generated := filepath.Join(root, ".bifrost", "app")
@@ -295,7 +328,7 @@ func TestConventionLayoutsComposeOuterToInner(t *testing.T) {
 	if !strings.Contains(text, "pageKey?: string") || !strings.Contains(text, "<Fragment key={pageKey}>") {
 		t.Fatalf("generated page branch is not keyed:\n%s", text)
 	}
-	if !strings.Contains(text, `<Layout0 key={"layout.tsx"}><Layout1 key={"dashboard/layout.tsx"}>`) || !strings.Contains(text, "props.__bifrostError") || !strings.Contains(text, "props.__bifrostNotFound") || !strings.Contains(text, "export { Head }") {
+	if !strings.Contains(text, `<Layout0 key={"layout.tsx"} params={props.params}><Layout1 key={"dashboard/layout.tsx"} params={props.params}>`) || !strings.Contains(text, "props.__bifrostError") || !strings.Contains(text, "props.__bifrostNotFound") || !strings.Contains(text, "export { Head }") {
 		t.Fatalf("generated view is incomplete:\n%s", text)
 	}
 }

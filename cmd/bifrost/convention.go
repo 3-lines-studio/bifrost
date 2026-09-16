@@ -20,8 +20,9 @@ import (
 )
 
 type conventionParam struct {
-	Name  string
-	Value string
+	Name     string
+	Value    string
+	Segments bool
 }
 
 type conventionRoute struct {
@@ -357,7 +358,7 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 		body = "<Fragment key={pageKey}>{" + body + "}</Fragment>"
 		for layoutIndex := len(layouts) - 1; layoutIndex >= 0; layoutIndex-- {
 			layoutKey := strings.TrimPrefix(filepath.ToSlash(layouts[layoutIndex]), filepath.ToSlash(routeRoot)+"/")
-			body = fmt.Sprintf("<Layout%d key={%s}>%s</Layout%d>", layoutIndex, strconv.Quote(layoutKey), body, layoutIndex)
+			body = fmt.Sprintf("<Layout%d key={%s} params={props.params}>%s</Layout%d>", layoutIndex, strconv.Quote(layoutKey), body, layoutIndex)
 		}
 		head := ""
 		if routes[index].HasHead && !routes[index].NotFoundPage {
@@ -511,7 +512,7 @@ func conventionSegment(part string, last bool) (string, *conventionParam, error)
 	if trailing == 2 {
 		suffix = "..."
 	}
-	return "{" + value + suffix + "}", &conventionParam{Name: name, Value: value}, nil
+	return "{" + value + suffix + "}", &conventionParam{Name: name, Value: value, Segments: trailing == 2}, nil
 }
 
 func appendConventionParam(params *[]conventionParam, param conventionParam) error {
@@ -646,6 +647,36 @@ func hasSymbol(ctx context.Context, dir, importPath, name string) bool {
 	return command.Run() == nil
 }
 
+func conventionStandardImports(segments bool) string {
+	imports := "\t\"context\"\n\t\"embed\"\n\t\"errors\"\n\t\"flag\"\n\t\"io/fs\"\n\t\"log\"\n\t\"net/http\"\n\t\"os\"\n\t\"os/signal\"\n\t\"reflect\"\n"
+	if segments {
+		imports += "\t\"strings\"\n"
+	}
+	return imports + "\t\"syscall\"\n\t\"time\"\n"
+}
+
+func conventionParams(params []conventionParam) string {
+	values := make([]string, 0, len(params))
+	for _, param := range params {
+		value := "r.PathValue(" + strconv.Quote(param.Value) + ")"
+		if param.Segments {
+			value = "requestSegments(" + value + ")"
+		}
+		values = append(values, strconv.Quote(param.Name)+": "+value)
+	}
+	return "map[string]any{" + strings.Join(values, ", ") + "}"
+}
+
+func writeConventionRequestProps(loaders *strings.Builder, segments bool) {
+	loaders.WriteString("func requestPage(r *http.Request, params map[string]any, props any, fallbacks int) (any, error) {\n\tdata, ok := props.(bifrost.PageData)\n\tif !ok {\n\t\tdata = bifrost.PageData{Props: props}\n\t}\n\tvalues, err := requestProps(data.Props)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tvalues[\"params\"] = params\n\tvalues[\"searchParams\"] = requestSearchParams(r)\n\tvalues[\"pathname\"] = r.URL.EscapedPath()\n\tdata.Props = values\n\tdata.ErrorFallbacks = fallbacks\n\treturn data, nil\n}\n\n")
+	loaders.WriteString("func requestProps(props any) (map[string]any, error) {\n\tif props == nil {\n\t\treturn map[string]any{}, nil\n\t}\n\tvalue := reflect.ValueOf(props)\n\tif value.Kind() != reflect.Map || value.Type().Key().Kind() != reflect.String {\n\t\treturn nil, errors.New(\"bifrost: a page loader must return a map with string keys, or bifrost.PageData with one\")\n\t}\n\tvalues := make(map[string]any, value.Len())\n\titer := value.MapRange()\n\tfor iter.Next() {\n\t\tvalues[iter.Key().String()] = iter.Value().Interface()\n\t}\n\treturn values, nil\n}\n\n")
+	loaders.WriteString("func requestSearchParams(r *http.Request) map[string]any {\n\tquery := r.URL.Query()\n\tvalues := make(map[string]any, len(query))\n\tfor key, items := range query {\n\t\tif len(items) == 1 {\n\t\t\tvalues[key] = items[0]\n\t\t\tcontinue\n\t\t}\n\t\tvalues[key] = items\n\t}\n\treturn values\n}\n\n")
+	if !segments {
+		return
+	}
+	loaders.WriteString("func requestSegments(value string) []string {\n\tif value == \"\" {\n\t\treturn []string{}\n\t}\n\treturn strings.Split(value, \"/\")\n}\n\n")
+}
+
 func conventionPathValues(builder *strings.Builder, name, handler string, params []conventionParam) string {
 	var renamed strings.Builder
 	for _, param := range params {
@@ -670,24 +701,23 @@ func writeConventionMain(root, generated string, routes []conventionRoute, goDir
 	var declarations strings.Builder
 	var loaders strings.Builder
 	hasNotFoundPage := false
+	hasSegments := false
 	for index, route := range routes {
-		loader := "nil"
 		if route.NotFoundPage {
-			loader = "loadNotFound"
 			hasNotFoundPage = true
+			fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, loadNotFound).WithNavigation(),\n", strconv.Quote(route.Pattern), strconv.Quote(route.View))
+			continue
 		}
+		hasSegments = hasSegments || slices.ContainsFunc(route.Params, func(param conventionParam) bool { return param.Segments })
+		loader := fmt.Sprintf("load%d", index)
+		params := conventionParams(route.Params)
 		if route.HasLoader {
 			importsByPath[route.ImportPath] = route.Alias
-			loader = route.Alias + ".Load"
-			if len(route.ErrorViews) > 0 || route.NotFoundView != "" {
-				loader = fmt.Sprintf("load%d", index)
-				fmt.Fprintf(&loaders, "func %s(r *http.Request) (any, error) {\n\tprops, err := %s.Load(r)\n\tif err == nil {\n", loader, route.Alias)
-				if len(route.ErrorViews) > 0 {
-					fmt.Fprintf(&loaders, "\t\tif data, ok := props.(bifrost.PageData); ok {\n\t\t\tdata.ErrorFallbacks = %d\n\t\t\treturn data, nil\n\t\t}\n\t\treturn bifrost.PageData{Props: props, ErrorFallbacks: %d}, nil\n", len(route.ErrorViews), len(route.ErrorViews))
-				} else {
-					fmt.Fprintf(&loaders, "\t\treturn props, nil\n")
-				}
-				fmt.Fprintf(&loaders, "\t}\n\tif bifrost.IsRedirect(err) {\n\t\treturn nil, err\n\t}\n\tstatus, ok := bifrost.ErrorStatus(err)\n\tif !ok {\n\t\tstatus = http.StatusInternalServerError\n\t}\n")
+			fmt.Fprintf(&loaders, "func %s(r *http.Request) (any, error) {\n\tprops, err := %s.Load(r)\n\tif err == nil {\n\t\treturn requestPage(r, %s, props, %d)\n\t}\n\tif bifrost.IsRedirect(err) {\n\t\treturn nil, err\n\t}\n", loader, route.Alias, params, len(route.ErrorViews))
+			if len(route.ErrorViews) == 0 && route.NotFoundView == "" {
+				fmt.Fprintf(&loaders, "\treturn nil, err\n")
+			} else {
+				fmt.Fprintf(&loaders, "\tstatus, ok := bifrost.ErrorStatus(err)\n\tif !ok {\n\t\tstatus = http.StatusInternalServerError\n\t}\n")
 				if route.NotFoundView != "" {
 					fmt.Fprintf(&loaders, "\tif status == http.StatusNotFound {\n\t\treturn bifrost.PageData{Props: map[string]any{\"__bifrostNotFound\": true}, Status: status, ErrorFallbacks: %d}, nil\n\t}\n", len(route.ErrorViews))
 				}
@@ -696,17 +726,17 @@ func writeConventionMain(root, generated string, routes []conventionRoute, goDir
 				} else {
 					fmt.Fprintf(&loaders, "\treturn nil, err\n")
 				}
-				fmt.Fprintf(&loaders, "}\n\n")
 			}
-		} else if len(route.ErrorViews) > 0 {
-			loader = fmt.Sprintf("load%d", index)
-			fmt.Fprintf(&loaders, "func %s(*http.Request) (any, error) {\n\treturn bifrost.PageData{ErrorFallbacks: %d}, nil\n}\n\n", loader, len(route.ErrorViews))
+			fmt.Fprintf(&loaders, "}\n\n")
+		} else {
+			fmt.Fprintf(&loaders, "func %s(r *http.Request) (any, error) {\n\treturn requestPage(r, %s, nil, %d)\n}\n\n", loader, params, len(route.ErrorViews))
 		}
 		fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, %s).WithNavigation(),\n", strconv.Quote(route.Pattern), strconv.Quote(route.View), loader)
 	}
 	if hasNotFoundPage {
 		fmt.Fprintf(&loaders, "func loadNotFound(*http.Request) (any, error) {\n\treturn bifrost.PageData{Status: http.StatusNotFound}, nil\n}\n\n")
 	}
+	writeConventionRequestProps(&loaders, hasSegments)
 	for _, directory := range goDirs {
 		if directory.Middleware || directory.Serve || len(directory.HTTPMethods) > 0 {
 			importsByPath[directory.ImportPath] = directory.Alias
@@ -752,7 +782,7 @@ func writeConventionMain(root, generated string, routes []conventionRoute, goDir
 			break
 		}
 	}
-	source := "package main\n\nimport (\n\t\"context\"\n\t\"embed\"\n\t\"errors\"\n\t\"flag\"\n\t\"io/fs\"\n\t\"log\"\n\t\"net/http\"\n\t\"os\"\n\t\"os/signal\"\n\t\"syscall\"\n\t\"time\"\n\n\t\"github.com/3-lines-studio/bifrost\"\n" + imports.String() + ")\n\n//go:embed all:build\nvar embedded embed.FS\n\n" + loaders.String() + pathValues.String() + "func main() {\n\tif err := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n\nfunc run() error {\n\tassets, err := fs.Sub(embedded, \"build\")\n\tif err != nil {\n\t\treturn err\n\t}\n\tapp, err := bifrost.New(bifrost.Config{SourceRoot: " + strconv.Quote(root) + ", Assets: assets, Routes: []bifrost.Route{\n" + declarations.String() + "\t}})\n\tif err != nil {\n\t\treturn err\n\t}\n\tif bifrost.Building() {\n\t\treturn nil\n\t}\n\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\tdefer stop()\n\tdefer func() {\n\t\tcloseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\t\tdefer cancel()\n\t\t_ = app.Close(closeCtx)\n\t}()\n\tpageMux := http.NewServeMux()\n\tif err := app.Register(pageMux); err != nil {\n\t\treturn err\n\t}\n\tmux := http.NewServeMux()\n" + registrations.String() + "\tmux.Handle(\"/\", pageMux)\n\t" + serve + "\n}\n\nfunc serve(ctx context.Context, handler http.Handler) error {\n\taddr := os.Getenv(\"BIFROST_ADDR\")\n\tif addr == \"\" {\n\t\taddr = \":8080\"\n\t}\n\tflag.StringVar(&addr, \"addr\", addr, \"HTTP listen address\")\n\tflag.Parse()\n\tserver := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10*time.Second}\n\tdone := make(chan error, 1)\n\tgo func() { done <- server.ListenAndServe() }()\n\tselect {\n\tcase err := <-done:\n\t\tif errors.Is(err, http.ErrServerClosed) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\tcase <-ctx.Done():\n\t}\n\tshutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\tdefer cancel()\n\tif err := server.Shutdown(shutdownCtx); err != nil {\n\t\t_ = server.Close()\n\t\treturn err\n\t}\n\terr := <-done\n\tif errors.Is(err, http.ErrServerClosed) {\n\t\treturn nil\n\t}\n\treturn err\n}\n"
+	source := "package main\n\nimport (\n" + conventionStandardImports(hasSegments) + "\n\t\"github.com/3-lines-studio/bifrost\"\n" + imports.String() + ")\n\n//go:embed all:build\nvar embedded embed.FS\n\n" + loaders.String() + pathValues.String() + "func main() {\n\tif err := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n\nfunc run() error {\n\tassets, err := fs.Sub(embedded, \"build\")\n\tif err != nil {\n\t\treturn err\n\t}\n\tapp, err := bifrost.New(bifrost.Config{SourceRoot: " + strconv.Quote(root) + ", Assets: assets, Routes: []bifrost.Route{\n" + declarations.String() + "\t}})\n\tif err != nil {\n\t\treturn err\n\t}\n\tif bifrost.Building() {\n\t\treturn nil\n\t}\n\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\tdefer stop()\n\tdefer func() {\n\t\tcloseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\t\tdefer cancel()\n\t\t_ = app.Close(closeCtx)\n\t}()\n\tpageMux := http.NewServeMux()\n\tif err := app.Register(pageMux); err != nil {\n\t\treturn err\n\t}\n\tmux := http.NewServeMux()\n" + registrations.String() + "\tmux.Handle(\"/\", pageMux)\n\t" + serve + "\n}\n\nfunc serve(ctx context.Context, handler http.Handler) error {\n\taddr := os.Getenv(\"BIFROST_ADDR\")\n\tif addr == \"\" {\n\t\taddr = \":8080\"\n\t}\n\tflag.StringVar(&addr, \"addr\", addr, \"HTTP listen address\")\n\tflag.Parse()\n\tserver := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10*time.Second}\n\tdone := make(chan error, 1)\n\tgo func() { done <- server.ListenAndServe() }()\n\tselect {\n\tcase err := <-done:\n\t\tif errors.Is(err, http.ErrServerClosed) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\tcase <-ctx.Done():\n\t}\n\tshutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\tdefer cancel()\n\tif err := server.Shutdown(shutdownCtx); err != nil {\n\t\t_ = server.Close()\n\t\treturn err\n\t}\n\terr := <-done\n\tif errors.Is(err, http.ErrServerClosed) {\n\t\treturn nil\n\t}\n\treturn err\n}\n"
 	formatted, err := format.Source([]byte(source))
 	if err != nil {
 		return err

@@ -172,6 +172,8 @@ The other files in a route directory are optional:
 
 Every view accepts a default export instead of the named one, so `export default function Page` and `export default function Layout({ children })` work.
 
+Every page also receives `params` and `searchParams` merged into its loader props, so a page reads `params.slug` and `searchParams.tab` without asking the loader. `params` uses the folder name as the key, and a catch-all parameter is an array of segments. A repeated query key is an array too. Because Bifrost merges them into the props, a loader must return a map or a `bifrost.PageData` whose `Props` is a map.
+
 ## Convention navigation
 
 Use normal `<a href="/posts/hello">` links. After the first server render, convention apps fetch the next route through the same Go middleware and loader, lazy-load its Vite module, and update one React root. Shared layouts stay mounted. Back/forward, scroll, hash links, focus, page head, and root document attributes update with the route.
