@@ -286,6 +286,47 @@ func TestConventionRejectsConflictingMetadata(t *testing.T) {
 	}
 }
 
+func TestConventionTemplatesNestInsideTheirLayouts(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"layout.tsx":             "export function Layout({ children }) { return children }",
+		"template.tsx":           "export default function Template({ children }) { return <div>{children}</div> }",
+		"dashboard/layout.tsx":   "export function Layout({ children }) { return children }",
+		"dashboard/template.tsx": "export function Template({ children }) { return <div>{children}</div> }",
+		"dashboard/page.tsx":     "export function Page() { return null }",
+	}
+	for name, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", "page-0.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(view)
+	for _, expected := range []string{
+		"import Template1 from " + strconv.Quote(filepath.Join(root, "template.tsx")) + ";",
+		"import { Template as Template3 } from " + strconv.Quote(filepath.Join(root, "dashboard", "template.tsx")) + ";",
+		`<Layout0 key={"layout.tsx"} params={props.params}><Template1 key={pageKey} params={props.params}><Layout2 key={"dashboard/layout.tsx"} params={props.params}><Template3 key={pageKey} params={props.params}>`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("generated view does not contain %q:\n%s", expected, text)
+		}
+	}
+}
+
 func TestConventionViewsAcceptDefaultExports(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{

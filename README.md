@@ -163,6 +163,7 @@ The other files in a route directory are optional:
 
 - `page.tsx` exports `Page` and, optionally, `Head`.
 - `layout.tsx` exports `Layout`, wraps every route below it, and stays mounted across navigation.
+- `template.tsx` exports `Template`, wraps everything below it like a layout, and remounts on every navigation.
 - `error.tsx` exports `Error`, and `not-found.tsx` exports `NotFound`.
 - `page.go` exports `Load`, the Go loader for `page.tsx`.
 - `route.go` exports any of `Get`, `Post`, `Put`, `Patch`, `Delete`, `Head`, and `Options`.
