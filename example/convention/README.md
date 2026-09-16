@@ -1,6 +1,6 @@
 # Full convention app
 
-This example exercises pages, loaders, dynamic params, every REST method, nested middleware, layouts, error fallbacks, not-found pages, public files, custom Vite config, streaming failure semantics, and `server.go`.
+This example exercises pages, loaders, dynamic params, every REST method, nested middleware, layouts, loading views, error fallbacks, not-found pages, public files, custom Vite config, streaming failure semantics, and `server.go`.
 
 ```sh
 go run ./cmd/bifrost dev ./example/convention
