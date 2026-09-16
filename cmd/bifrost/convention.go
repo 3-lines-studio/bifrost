@@ -47,6 +47,7 @@ type conventionRoute struct {
 	HasHead      bool
 	ErrorViews   []string
 	NotFoundView string
+	LoadingView  string
 	NotFoundPage bool
 }
 
@@ -117,6 +118,7 @@ type conventionApp struct {
 	Package     string
 	Output      string
 	Executable  string
+	RouteParams map[string][]string
 }
 
 func prepareConventionApp(ctx context.Context, projectRoot, routeRoot string) (conventionApp, error) {
@@ -216,7 +218,22 @@ func prepareConventionApp(ctx context.Context, projectRoot, routeRoot string) (c
 	if err := command.Run(); err != nil {
 		return conventionApp{}, fmt.Errorf("bifrost: prepare generated module: %w", err)
 	}
-	return conventionApp{ProjectRoot: projectRoot, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(projectRoot, ".bifrost", "bifrost-app")}, nil
+	return conventionApp{ProjectRoot: projectRoot, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(projectRoot, ".bifrost", "bifrost-app"), RouteParams: conventionRouteParams(routes)}, nil
+}
+
+func conventionRouteParams(routes []conventionRoute) map[string][]string {
+	params := make(map[string][]string, len(routes))
+	for _, route := range routes {
+		if len(route.Params) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(route.Params))
+		for _, param := range route.Params {
+			names = append(names, param.Name)
+		}
+		params[route.Pattern] = names
+	}
+	return params
 }
 
 func discoverConventionRoutes(root string) ([]conventionRoute, error) {
@@ -357,13 +374,18 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 		}
 		errors := inheritedFiles(routeRoot, routes[index].Directory, "error.tsx")
 		notFound := inheritedFiles(routeRoot, routes[index].Directory, "not-found.tsx")
+		loadings := inheritedFiles(routeRoot, routes[index].Directory, "loading.tsx")
 		if routes[index].NotFoundPage {
 			errors = nil
 			notFound = nil
+			loadings = nil
 		}
 		routes[index].ErrorViews = errors
 		if len(notFound) > 0 {
 			routes[index].NotFoundView = notFound[len(notFound)-1]
+		}
+		if len(loadings) > 0 {
+			routes[index].LoadingView = loadings[len(loadings)-1]
 		}
 		var imports strings.Builder
 		imports.WriteString("import { Fragment } from 'react';\n")
@@ -413,6 +435,11 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 				return err
 			}
 		}
+		if routes[index].LoadingView != "" {
+			if err := writeConventionImport(&imports, routes[index].LoadingView, "Loading", "RouteLoading"); err != nil {
+				return err
+			}
+		}
 		body := "<RoutePage {...props} />"
 		if routes[index].NotFoundPage {
 			body = "<RoutePage />"
@@ -426,16 +453,18 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 		if routes[index].NotFoundView != "" {
 			body = "props.__bifrostNotFound ? <NotFound /> : " + body
 		}
-		body = "<Fragment key={pageKey}>{" + body + "}</Fragment>"
-		for wrapperIndex := len(wrappers) - 1; wrapperIndex >= 0; wrapperIndex-- {
-			name := "Layout"
-			key := strconv.Quote(strings.TrimPrefix(filepath.ToSlash(wrappers[wrapperIndex].Path), filepath.ToSlash(routeRoot)+"/"))
-			if wrappers[wrapperIndex].Template {
-				name, key = "Template", "pageKey"
+		wrap := func(content string) string {
+			wrapped := "<Fragment key={pageKey}>{" + content + "}</Fragment>"
+			for wrapperIndex := len(wrappers) - 1; wrapperIndex >= 0; wrapperIndex-- {
+				name := "Layout"
+				key := strconv.Quote(strings.TrimPrefix(filepath.ToSlash(wrappers[wrapperIndex].Path), filepath.ToSlash(routeRoot)+"/"))
+				if wrappers[wrapperIndex].Template {
+					name, key = "Template", "pageKey"
+				}
+				wrapped = fmt.Sprintf("<%s%d key={%s} params={props.params}>%s</%s%d>", name, wrapperIndex, key, wrapped, name, wrapperIndex)
 			}
-			body = fmt.Sprintf("<%s%d key={%s} params={props.params}>%s</%s%d>", name, wrapperIndex, key, body, name, wrapperIndex)
+			return "<RouteProvider pathname={props.pathname} params={props.params} searchParams={props.searchParams}>" + wrapped + "</RouteProvider>"
 		}
-		body = "<RouteProvider pathname={props.pathname} params={props.params} searchParams={props.searchParams}>" + body + "</RouteProvider>"
 		head := ""
 		switch {
 		case metadataUsesProps(metadata):
@@ -445,7 +474,10 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 		case routes[index].HasHead && !routes[index].NotFoundPage:
 			head = "export { Head } from " + strconv.Quote(pageView) + ";\n"
 		}
-		source := imports.String() + head + "export function renderPage(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + body + ";\n}\nexport function Page(props: Record<string, unknown>) {\n  return renderPage(props);\n}\n"
+		source := imports.String() + head + "export function renderPage(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + wrap(body) + ";\n}\nexport function Page(props: Record<string, unknown>) {\n  return renderPage(props);\n}\n"
+		if routes[index].LoadingView != "" {
+			source += "export function renderPending(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + wrap("<RouteLoading />") + ";\n}\n"
+		}
 		name := fmt.Sprintf("page-%d.tsx", index)
 		if err := os.WriteFile(filepath.Join(views, name), []byte(source), 0o644); err != nil {
 			return err
@@ -1071,6 +1103,7 @@ func buildConvention(ctx context.Context, app conventionApp, options builder.Opt
 	options.Package = app.Package
 	options.Dir = app.WorkDir
 	options.Output = app.Output
+	options.RouteParams = app.RouteParams
 	if err := builder.Build(ctx, options); err != nil {
 		return err
 	}

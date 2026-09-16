@@ -149,8 +149,11 @@ try {
   const slow = page.waitForRequest(request => request.url().endsWith("/posts/slow"));
   await page.getByRole("link", { name: "Slow", exact: true }).click();
   await slow;
-  assert.equal(await page.getByRole("heading", { name: "two", exact: true }).count(), 1);
+  await page.getByRole("heading", { name: "Loading", exact: true }).waitFor();
+  assert.equal(await page.locator("#loading-param").textContent(), "slow");
+  assert.equal(await page.getByRole("heading", { name: "two", exact: true }).count(), 0);
   assert.equal(await page.locator("#app").getAttribute("aria-busy"), "true");
+  await page.getByRole("button", { name: "Posts 1", exact: true }).waitFor();
   await click("One", "one");
   await page.waitForTimeout(2100);
   assert.equal(new URL(page.url()).pathname, "/posts/one");

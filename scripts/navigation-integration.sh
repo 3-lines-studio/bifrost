@@ -66,6 +66,13 @@ export function Error({ error }) {
   return <main><h1>Failed</h1><p>{error.message}</p></main>;
 }
 EOF
+cat >"$app/loading.tsx" <<'EOF'
+import { useParams } from "virtual:bifrost/navigation";
+export default function Loading() {
+  const params = useParams();
+  return <main><h1>Loading</h1><p id="loading-param">{params.slug}</p></main>;
+}
+EOF
 cat >"$app/posts/layout.tsx" <<'EOF'
 import { useState } from "react";
 export function Layout({ children }) {
