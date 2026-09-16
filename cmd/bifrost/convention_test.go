@@ -166,6 +166,89 @@ func TestConventionPrivateDirectoriesAreNotRouted(t *testing.T) {
 	}
 }
 
+func TestConventionViewsGenerateMetadataHead(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"layout.tsx":     "export const metadata = { description: 'site' }",
+		"page.tsx":       "export const metadata = { title: 'home' }",
+		"posts/page.tsx": "export function Page() { return null }",
+	}
+	for name, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".bifrost", "views"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		source, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		generated[entry.Name()] = string(source)
+	}
+	if _, ok := generated["metadata.tsx"]; !ok {
+		t.Fatalf("metadata runtime module was not generated: %v", generated)
+	}
+	var view strings.Builder
+	for name, source := range generated {
+		if name != "metadata.tsx" {
+			view.WriteString(source)
+		}
+	}
+	for _, expected := range []string{
+		"import { metadata as Metadata0 } from " + strconv.Quote(filepath.Join(root, "layout.tsx")) + ";",
+		"import { metadata as Metadata1 } from " + strconv.Quote(filepath.Join(root, "page.tsx")) + ";",
+		"import { Metadata as RouteMetadata } from './metadata.tsx';",
+		"export function Head() {",
+		"values={[Metadata0, Metadata1]}",
+	} {
+		if !strings.Contains(view.String(), expected) {
+			t.Fatalf("generated views do not contain %q:\n%s", expected, view.String())
+		}
+	}
+}
+
+func TestConventionRejectsConflictingMetadata(t *testing.T) {
+	cases := map[string]struct {
+		page string
+		want string
+	}{
+		"head and metadata": {page: "export function Head() { return null }\nexport const metadata = { title: 'x' }", want: "exports both Head and metadata"},
+		"generateMetadata":  {page: "export async function generateMetadata() { return { title: 'x' } }", want: "generateMetadata"},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "page.tsx"), []byte(testCase.page), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			routes, err := discoverConventionRoutes(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = writeConventionViews(root, root, routes)
+			if err == nil || !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("writeConventionViews error = %v, want %q", err, testCase.want)
+			}
+		})
+	}
+}
+
 func TestConventionViewsAcceptDefaultExports(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{

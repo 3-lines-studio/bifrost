@@ -309,6 +309,7 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 	if err := os.MkdirAll(views, 0o755); err != nil {
 		return err
 	}
+	needsMetadata := false
 	for index := range routes {
 		layouts := inheritedFiles(routeRoot, routes[index].Directory, "layout.tsx")
 		errors := inheritedFiles(routeRoot, routes[index].Directory, "error.tsx")
@@ -323,6 +324,31 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 		}
 		var imports strings.Builder
 		imports.WriteString("import { Fragment } from 'react';\n")
+		pageView := filepath.Join(routeRoot, filepath.FromSlash(routes[index].View))
+		metadataViews := make([]string, 0, len(layouts)+1)
+		for _, layout := range layouts {
+			if hasMetadataExport(layout) {
+				metadataViews = append(metadataViews, layout)
+			}
+		}
+		if hasMetadataExport(pageView) {
+			metadataViews = append(metadataViews, pageView)
+		}
+		if routes[index].HasHead && len(metadataViews) > 0 {
+			return fmt.Errorf("bifrost: %s exports both Head and metadata; keep one", filepath.ToSlash(routes[index].View))
+		}
+		for _, view := range append(slices.Clone(layouts), pageView) {
+			if hasGenerateMetadataExport(view) {
+				return fmt.Errorf("bifrost: %s exports generateMetadata, which Bifrost does not support yet; use export const metadata", filepath.ToSlash(view))
+			}
+		}
+		for metadataIndex, view := range metadataViews {
+			fmt.Fprintf(&imports, "import { metadata as Metadata%d } from %s;\n", metadataIndex, strconv.Quote(view))
+		}
+		if len(metadataViews) > 0 {
+			needsMetadata = true
+			imports.WriteString("import { Metadata as RouteMetadata } from './metadata.tsx';\n")
+		}
 		export := "Page"
 		if routes[index].NotFoundPage {
 			export = "NotFound"
@@ -361,8 +387,10 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 			body = fmt.Sprintf("<Layout%d key={%s} params={props.params}>%s</Layout%d>", layoutIndex, strconv.Quote(layoutKey), body, layoutIndex)
 		}
 		head := ""
-		if routes[index].HasHead && !routes[index].NotFoundPage {
-			head = "export { Head } from " + strconv.Quote(filepath.Join(routeRoot, filepath.FromSlash(routes[index].View))) + ";\n"
+		if len(metadataViews) > 0 {
+			head = "export function Head() {\n  return <RouteMetadata values={[" + metadataValues(metadataViews) + "]} />;\n}\n"
+		} else if routes[index].HasHead && !routes[index].NotFoundPage {
+			head = "export { Head } from " + strconv.Quote(pageView) + ";\n"
 		}
 		source := imports.String() + head + "export function renderPage(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + body + ";\n}\nexport function Page(props: Record<string, unknown>) {\n  return renderPage(props);\n}\n"
 		name := fmt.Sprintf("page-%d.tsx", index)
@@ -371,12 +399,103 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 		}
 		routes[index].View = ".bifrost/views/" + name
 	}
+	if needsMetadata {
+		if err := os.WriteFile(filepath.Join(views, "metadata.tsx"), []byte(conventionMetadataSource), 0o644); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func metadataValues(views []string) string {
+	values := make([]string, 0, len(views))
+	for index := range views {
+		values = append(values, fmt.Sprintf("Metadata%d", index))
+	}
+	return strings.Join(values, ", ")
 }
 
 var headExportPattern = regexp.MustCompile(`(?m)^\s*export\s+(?:function|const|let|var)\s+Head\b`)
 
 var defaultExportPattern = regexp.MustCompile(`(?m)^\s*export\s+default\b`)
+
+var metadataExportPattern = regexp.MustCompile(`(?m)^\s*export\s+(?:const|let|var)\s+metadata\b`)
+
+var generateMetadataExportPattern = regexp.MustCompile(`(?m)^\s*export\s+(?:async\s+)?(?:function|const|let|var)\s+generateMetadata\b`)
+
+const conventionMetadataSource = `import type { ReactNode } from 'react';
+
+type Dict = Record<string, unknown>;
+
+const metadataKeys = ['title', 'description', 'keywords', 'alternates', 'robots', 'openGraph'];
+const alternatesKeys = ['canonical'];
+const robotsKeys = ['index', 'follow'];
+const openGraphKeys = ['title', 'description', 'url', 'images'];
+
+function record(value: unknown, where: string, keys: string[]): Dict {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('bifrost: ' + where + ' must be an object');
+	const result = value as Dict;
+	for (const key of Object.keys(result)) {
+		if (result[key] === undefined) continue;
+		if (!keys.includes(key)) throw new Error('bifrost: unsupported ' + where + ' key "' + key + '"; supported keys: ' + keys.join(', '));
+	}
+	return result;
+}
+
+function text(value: unknown, where: string): string {
+	if (typeof value !== 'string') throw new Error('bifrost: ' + where + ' must be a string');
+	return value;
+}
+
+function flag(value: unknown, where: string): boolean {
+	if (typeof value !== 'boolean') throw new Error('bifrost: ' + where + ' must be a boolean');
+	return value;
+}
+
+function list(value: unknown, where: string): string[] {
+	if (typeof value === 'string') return [value];
+	if (Array.isArray(value) && value.every(item => typeof item === 'string')) return value as string[];
+	throw new Error('bifrost: ' + where + ' must be a string or an array of strings');
+}
+
+function merge(values: unknown[]): Dict {
+	const merged: Dict = {};
+	for (const value of values) {
+		if (value === undefined) continue;
+		const source = record(value, 'metadata', metadataKeys);
+		for (const key of Object.keys(source)) {
+			if (source[key] !== undefined) merged[key] = source[key];
+		}
+	}
+	return merged;
+}
+
+export function Metadata({ values }: { values: unknown[] }) {
+	const data = merge(values);
+	const tags: ReactNode[] = [];
+	if (data.title !== undefined) tags.push(<title key="title">{text(data.title, 'metadata.title')}</title>);
+	if (data.description !== undefined) tags.push(<meta key="description" name="description" content={text(data.description, 'metadata.description')} />);
+	if (data.keywords !== undefined) tags.push(<meta key="keywords" name="keywords" content={list(data.keywords, 'metadata.keywords').join(', ')} />);
+	if (data.alternates !== undefined) {
+		const alternates = record(data.alternates, 'metadata.alternates', alternatesKeys);
+		if (alternates.canonical !== undefined) tags.push(<link key="canonical" rel="canonical" href={text(alternates.canonical, 'metadata.alternates.canonical')} />);
+	}
+	if (data.robots !== undefined) {
+		const robots = record(data.robots, 'metadata.robots', robotsKeys);
+		const index = robots.index === undefined ? true : flag(robots.index, 'metadata.robots.index');
+		const follow = robots.follow === undefined ? true : flag(robots.follow, 'metadata.robots.follow');
+		tags.push(<meta key="robots" name="robots" content={(index ? 'index' : 'noindex') + ',' + (follow ? 'follow' : 'nofollow')} />);
+	}
+	if (data.openGraph !== undefined) {
+		const openGraph = record(data.openGraph, 'metadata.openGraph', openGraphKeys);
+		if (openGraph.title !== undefined) tags.push(<meta key="og:title" property="og:title" content={text(openGraph.title, 'metadata.openGraph.title')} />);
+		if (openGraph.description !== undefined) tags.push(<meta key="og:description" property="og:description" content={text(openGraph.description, 'metadata.openGraph.description')} />);
+		if (openGraph.url !== undefined) tags.push(<meta key="og:url" property="og:url" content={text(openGraph.url, 'metadata.openGraph.url')} />);
+		if (openGraph.images !== undefined) list(openGraph.images, 'metadata.openGraph.images').forEach((image, index) => tags.push(<meta key={'og:image:' + index} property="og:image" content={image} />));
+	}
+	return <>{tags}</>;
+}
+`
 
 func writeConventionImport(imports *strings.Builder, filePath, name, local string) error {
 	data, err := os.ReadFile(filePath)
@@ -394,6 +513,16 @@ func writeConventionImport(imports *strings.Builder, filePath, name, local strin
 func hasHeadExport(filePath string) bool {
 	data, err := os.ReadFile(filePath)
 	return err == nil && headExportPattern.Match(data)
+}
+
+func hasMetadataExport(filePath string) bool {
+	data, err := os.ReadFile(filePath)
+	return err == nil && metadataExportPattern.Match(data)
+}
+
+func hasGenerateMetadataExport(filePath string) bool {
+	data, err := os.ReadFile(filePath)
+	return err == nil && generateMetadataExportPattern.Match(data)
 }
 
 func inheritedFiles(root, directory, name string) []string {
