@@ -24,6 +24,8 @@ func main() {
 		err = runDev(os.Args[2:])
 	case "init":
 		err = runInit(os.Args[2:])
+	case "routes":
+		err = runRoutes(os.Args[2:])
 	case "version":
 		fmt.Println(bifrost.Version)
 	case "help", "-h", "--help":
@@ -39,7 +41,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: bifrost <build|dev|init|version> [options]")
+	fmt.Fprintln(os.Stderr, "usage: bifrost <build|dev|init|routes|version> [options]")
 }
 
 func runBuild(args []string) error {
@@ -73,7 +75,7 @@ func runBuild(args []string) error {
 			return err
 		}
 	} else if err := builder.Build(context.Background(), options); err != nil {
-		return err
+		return conventionHint(projectRoot, err)
 	}
 	_, _ = fmt.Fprintln(os.Stdout, "Bifrost build complete")
 	return nil
