@@ -57,6 +57,41 @@ func TestConventionRoots(t *testing.T) {
 	}
 }
 
+func TestConventionRootsFollowNestedPages(t *testing.T) {
+	projectRoot := t.TempDir()
+	postsRoot := filepath.Join(projectRoot, "posts")
+	if err := os.Mkdir(postsRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(postsRoot, "page.tsx"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project, routes, ok, err := conventionRoots(".", projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || project != projectRoot || routes != projectRoot {
+		t.Fatalf("roots without a root page = %q, %q, %t", project, routes, ok)
+	}
+	if err := os.Remove(filepath.Join(postsRoot, "page.tsx")); err != nil {
+		t.Fatal(err)
+	}
+	appRoot := filepath.Join(projectRoot, "app", "posts")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project, routes, ok, err = conventionRoots(".", projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || project != projectRoot || routes != filepath.Join(projectRoot, "app") {
+		t.Fatalf("roots with an app directory = %q, %q, %t", project, routes, ok)
+	}
+}
+
 func TestNestedConventionViewUsesProjectRelativePath(t *testing.T) {
 	projectRoot := t.TempDir()
 	routeRoot := filepath.Join(projectRoot, "app")

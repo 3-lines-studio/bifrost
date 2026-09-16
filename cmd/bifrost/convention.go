@@ -81,7 +81,34 @@ func conventionRoots(dir, packagePath string) (string, string, bool, error) {
 	if appPage {
 		return projectRoot, filepath.Join(projectRoot, "app"), true, nil
 	}
+	if hasConventionPage(filepath.Join(projectRoot, "app")) {
+		return projectRoot, filepath.Join(projectRoot, "app"), true, nil
+	}
+	if hasConventionPage(projectRoot) {
+		return projectRoot, projectRoot, true, nil
+	}
 	return projectRoot, "", false, nil
+}
+
+func hasConventionPage(root string) bool {
+	found := false
+	_ = filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			if entry.Name() == ".bifrost" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.Name() != "page.tsx" {
+			return nil
+		}
+		found = true
+		return filepath.SkipAll
+	})
+	return found
 }
 
 type conventionApp struct {
