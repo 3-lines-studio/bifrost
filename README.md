@@ -174,7 +174,7 @@ Every view accepts a default export instead of the named one, so `export default
 
 Every page also receives `params` and `searchParams` merged into its loader props, so a page reads `params.slug` and `searchParams.tab` without asking the loader. `params` uses the folder name as the key, and a catch-all parameter is an array of segments. A repeated query key is an array too. Because Bifrost merges them into the props, a loader must return a map or a `bifrost.PageData` whose `Props` is a map.
 
-A layout or a page can export `metadata` instead of a `Head` component. Bifrost merges the objects from the outer layouts down to the page, so a page overrides one key and inherits the rest. It renders `title`, `description`, `keywords`, `alternates.canonical`, `robots.index`, `robots.follow`, and `openGraph` (`title`, `description`, `url`, `images`).
+A layout or a page can export `metadata` instead of a `Head` component. Bifrost merges the objects from the outer layouts down to the page, so a page overrides one key and inherits the rest. It renders `title`, `description`, `keywords`, `alternates.canonical`, `robots.index`, `robots.follow`, and `openGraph` (`title`, `description`, `url`, `images`). `generateMetadata(props)` covers what depends on the request: it receives the page props, may be async, and its result merges the same way.
 
 ## Convention navigation
 

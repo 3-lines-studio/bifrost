@@ -223,13 +223,50 @@ func TestConventionViewsGenerateMetadataHead(t *testing.T) {
 	}
 }
 
+func TestConventionViewsGenerateAsyncMetadataHead(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"layout.tsx": "export const metadata = { description: 'site' }",
+		"page.tsx":   "export async function generateMetadata() { return { title: 'dynamic' } }",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", "page-0.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(view)
+	for _, expected := range []string{
+		"import { generateMetadata as GenerateMetadata1 } from " + strconv.Quote(filepath.Join(root, "page.tsx")) + ";",
+		"export async function renderHead(props: Record<string, unknown>) {",
+		"values={[Metadata0, await GenerateMetadata1(props)]}",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("generated view does not contain %q:\n%s", expected, text)
+		}
+	}
+	if strings.Contains(text, "export function Head()") {
+		t.Fatalf("generated view should not export a sync Head:\n%s", text)
+	}
+}
+
 func TestConventionRejectsConflictingMetadata(t *testing.T) {
 	cases := map[string]struct {
 		page string
 		want string
 	}{
-		"head and metadata": {page: "export function Head() { return null }\nexport const metadata = { title: 'x' }", want: "exports both Head and metadata"},
-		"generateMetadata":  {page: "export async function generateMetadata() { return { title: 'x' } }", want: "generateMetadata"},
+		"head and metadata":             {page: "export function Head() { return null }\nexport const metadata = { title: 'x' }", want: "exports both Head and metadata"},
+		"metadata and generateMetadata": {page: "export const metadata = { title: 'x' }\nexport function generateMetadata() { return { title: 'y' } }", want: "exports both metadata and generateMetadata"},
 	}
 	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {

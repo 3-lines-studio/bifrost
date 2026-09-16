@@ -25,6 +25,11 @@ type conventionParam struct {
 	Segments bool
 }
 
+type conventionMetadata struct {
+	View     string
+	Generate bool
+}
+
 type conventionRoute struct {
 	Directory    string
 	Pattern      string
@@ -325,27 +330,21 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 		var imports strings.Builder
 		imports.WriteString("import { Fragment } from 'react';\n")
 		pageView := filepath.Join(routeRoot, filepath.FromSlash(routes[index].View))
-		metadataViews := make([]string, 0, len(layouts)+1)
-		for _, layout := range layouts {
-			if hasMetadataExport(layout) {
-				metadataViews = append(metadataViews, layout)
-			}
+		metadata, err := conventionMetadataSources(append(slices.Clone(layouts), pageView))
+		if err != nil {
+			return err
 		}
-		if hasMetadataExport(pageView) {
-			metadataViews = append(metadataViews, pageView)
-		}
-		if routes[index].HasHead && len(metadataViews) > 0 {
+		if routes[index].HasHead && len(metadata) > 0 {
 			return fmt.Errorf("bifrost: %s exports both Head and metadata; keep one", filepath.ToSlash(routes[index].View))
 		}
-		for _, view := range append(slices.Clone(layouts), pageView) {
-			if hasGenerateMetadataExport(view) {
-				return fmt.Errorf("bifrost: %s exports generateMetadata, which Bifrost does not support yet; use export const metadata", filepath.ToSlash(view))
+		for metadataIndex, source := range metadata {
+			name, local := "metadata", fmt.Sprintf("Metadata%d", metadataIndex)
+			if source.Generate {
+				name, local = "generateMetadata", fmt.Sprintf("GenerateMetadata%d", metadataIndex)
 			}
+			fmt.Fprintf(&imports, "import { %s as %s } from %s;\n", name, local, strconv.Quote(source.View))
 		}
-		for metadataIndex, view := range metadataViews {
-			fmt.Fprintf(&imports, "import { metadata as Metadata%d } from %s;\n", metadataIndex, strconv.Quote(view))
-		}
-		if len(metadataViews) > 0 {
+		if len(metadata) > 0 {
 			needsMetadata = true
 			imports.WriteString("import { Metadata as RouteMetadata } from './metadata.tsx';\n")
 		}
@@ -387,9 +386,12 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 			body = fmt.Sprintf("<Layout%d key={%s} params={props.params}>%s</Layout%d>", layoutIndex, strconv.Quote(layoutKey), body, layoutIndex)
 		}
 		head := ""
-		if len(metadataViews) > 0 {
-			head = "export function Head() {\n  return <RouteMetadata values={[" + metadataValues(metadataViews) + "]} />;\n}\n"
-		} else if routes[index].HasHead && !routes[index].NotFoundPage {
+		switch {
+		case metadataUsesProps(metadata):
+			head = "export async function renderHead(props: Record<string, unknown>) {\n  return <RouteMetadata values={[" + metadataValues(metadata) + "]} />;\n}\n"
+		case len(metadata) > 0:
+			head = "export function Head() {\n  return <RouteMetadata values={[" + metadataValues(metadata) + "]} />;\n}\n"
+		case routes[index].HasHead && !routes[index].NotFoundPage:
 			head = "export { Head } from " + strconv.Quote(pageView) + ";\n"
 		}
 		source := imports.String() + head + "export function renderPage(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + body + ";\n}\nexport function Page(props: Record<string, unknown>) {\n  return renderPage(props);\n}\n"
@@ -407,12 +409,20 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 	return nil
 }
 
-func metadataValues(views []string) string {
-	values := make([]string, 0, len(views))
-	for index := range views {
+func metadataValues(sources []conventionMetadata) string {
+	values := make([]string, 0, len(sources))
+	for index, source := range sources {
+		if source.Generate {
+			values = append(values, fmt.Sprintf("await GenerateMetadata%d(props)", index))
+			continue
+		}
 		values = append(values, fmt.Sprintf("Metadata%d", index))
 	}
 	return strings.Join(values, ", ")
+}
+
+func metadataUsesProps(sources []conventionMetadata) bool {
+	return slices.ContainsFunc(sources, func(source conventionMetadata) bool { return source.Generate })
 }
 
 var headExportPattern = regexp.MustCompile(`(?m)^\s*export\s+(?:function|const|let|var)\s+Head\b`)
@@ -523,6 +533,20 @@ func hasMetadataExport(filePath string) bool {
 func hasGenerateMetadataExport(filePath string) bool {
 	data, err := os.ReadFile(filePath)
 	return err == nil && generateMetadataExportPattern.Match(data)
+}
+
+func conventionMetadataSources(views []string) ([]conventionMetadata, error) {
+	sources := make([]conventionMetadata, 0, len(views))
+	for _, view := range views {
+		static, generated := hasMetadataExport(view), hasGenerateMetadataExport(view)
+		if static && generated {
+			return nil, fmt.Errorf("bifrost: %s exports both metadata and generateMetadata; keep one", filepath.ToSlash(view))
+		}
+		if static || generated {
+			sources = append(sources, conventionMetadata{View: view, Generate: generated})
+		}
+	}
+	return sources, nil
 }
 
 func inheritedFiles(root, directory, name string) []string {
