@@ -1,3 +1,3 @@
-export function Error({ error }: { error: string }) {
-  return <main><h1>Posts error</h1><p>{error}</p></main>;
+export function Error({ error, reset }: { error: Error; reset: () => void }) {
+  return <main><h1>Posts error</h1><p>{error.message}</p><button onClick={reset}>Retry</button></main>;
 }
