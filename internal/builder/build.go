@@ -360,6 +360,8 @@ func runGenerate(ctx context.Context, dir, packagePath string) (protocol.Generat
 	return result, err
 }
 
+const phaseExitGrace = 5 * time.Second
+
 func runPhase(ctx context.Context, dir, packagePath, phase string, result any) error {
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -379,10 +381,7 @@ func runPhase(ctx context.Context, dir, packagePath, phase string, result any) e
 	}
 	_ = writer.Close()
 	decodeErr := json.NewDecoder(reader).Decode(result)
-	if command.Process != nil {
-		_ = syscall.Kill(-command.Process.Pid, syscall.SIGTERM)
-	}
-	waitErr := command.Wait()
+	waitErr := waitForPhase(command, phaseExitGrace)
 	if decodeErr != nil {
 		if waitErr != nil {
 			return fmt.Errorf("bifrost: %s phase: %w", phase, waitErr)
@@ -390,6 +389,22 @@ func runPhase(ctx context.Context, dir, packagePath, phase string, result any) e
 		return fmt.Errorf("bifrost: decode %s phase: %w", phase, decodeErr)
 	}
 	return nil
+}
+
+func waitForPhase(command *exec.Cmd, grace time.Duration) error {
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+	}
+	if command.Process != nil {
+		_ = syscall.Kill(-command.Process.Pid, syscall.SIGTERM)
+	}
+	return <-done
 }
 
 func planViews(describe protocol.DescribeResult, output string, routeParams map[string][]string) ([]viewPlan, map[string]string, []clientRoute, error) {
