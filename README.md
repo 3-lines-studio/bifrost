@@ -164,6 +164,7 @@ The other files in a route directory are optional:
 - `page.tsx` exports `Page` and, optionally, `Head`.
 - `layout.tsx` exports `Layout`, wraps every route below it, and stays mounted across navigation.
 - `template.tsx` exports `Template`, wraps everything below it like a layout, and remounts on every navigation.
+- `loading.tsx` exports `Loading`, and shows while a navigation to that route runs. It covers a route and everything below it, like `layout.tsx`, and the deepest one wins.
 - `error.tsx` exports `Error`, and `not-found.tsx` exports `NotFound`. `Error` receives an `error` object and a `reset` function that re-fetches the route.
 - `page.go` exports `Load`, the Go loader for `page.tsx`.
 - `route.go` exports any of `Get`, `Post`, `Put`, `Patch`, `Delete`, `Head`, and `Options`.
@@ -183,13 +184,13 @@ Use normal `<a href="/posts/hello">` links. After the first server render, conve
 
 Page-local state resets when the pathname changes, including dynamic parameters such as `/posts/one` → `/posts/two`. Query changes keep page state but reload props. Hash-only changes keep state without running the loader. Shared layouts keep state while they remain in the tree; leaving a layout discards its state. Back/forward restores scroll, not previously unmounted page state.
 
-The current page stays visible with `aria-busy="true"` on `#app` while navigation runs. A newer navigation or refresh cancels the previous request. There is no prefetch or route-data cache; loaders run on route navigation and refresh, including back/forward between paths or queries.
+The current page stays visible with `aria-busy="true"` on `#app` while navigation runs. When the target route is covered by a `loading.tsx`, the client renders the target tree with the loading view in place of the page instead, and swaps in the page when the props arrive. A navigation that keeps the pathname, such as a query or hash change, never shows the loading view, so page state survives it. A newer navigation or refresh cancels the previous request. There is no prefetch or route-data cache; loaders run on route navigation and refresh, including back/forward between paths or queries.
 
 External links, downloads, new tabs, and modified clicks keep browser behavior. Add `data-bifrost-reload` to a link to force a document load. Unsupported responses, incompatible builds, and heads with scripts, base tags, or HTTP-equivalent metadata fall back to document navigation. Direct visits and links without JavaScript still use SSR.
 
 Navigation responses contain props and server-rendered head metadata, not page HTML. Bifrost still runs SSR to preserve render-error boundaries, discarding body chunks without buffering them. This saves document reloads, not SSR work. Custom middleware must preserve the navigation `Accept` header and `Vary: Accept`; do not cache these responses.
 
-Generated convention routes use `Route.WithNavigation()`. Its view must export a hook-free `renderPage(props, pageKey?)` tree factory and an SSR `Page` component that renders the same tree. The factory keys the page branch by `pageKey` while keeping layout keys stable. The generated factory opts out of React Compiler memoization; hooks belong in the page and layout components inside it. Ordinary `Server`, `Static`, and `Client` declarations keep their existing behavior.
+Generated convention routes use `Route.WithNavigation()`. Its view must export a hook-free `renderPage(props, pageKey?)` tree factory, an SSR `Page` component that renders the same tree, and, when a `loading.tsx` covers the route, a `renderPending(props, pageKey?)` factory that renders the same tree with the loading view instead of the page. The factory keys the page branch by `pageKey` while keeping layout keys stable. The generated factory opts out of React Compiler memoization; hooks belong in the page and layout components inside it. Ordinary `Server`, `Static`, and `Client` declarations keep their existing behavior.
 
 ### Programmatic navigation and refresh
 

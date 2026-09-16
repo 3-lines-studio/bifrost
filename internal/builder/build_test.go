@@ -15,7 +15,7 @@ func TestPlanViewsDeduplicatesSharedViews(t *testing.T) {
 		{Pattern: "/b", View: "pages/shared.tsx", Kind: "static"},
 		{Pattern: "/client", View: "pages/shared.tsx", Kind: "client"},
 	}}}
-	plans, routes, err := planViews(describe, t.TempDir())
+	plans, routes, _, err := planViews(describe, t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestWriteEntriesPassesAbortSignalToReact(t *testing.T) {
 		ClientFile: filepath.Join(root, "entries", "client.tsx"),
 		ServerFile: filepath.Join(root, "entries", "server.tsx"),
 	}
-	if err := writeEntries(root, root, []viewPlan{plan}, ""); err != nil {
+	if err := writeEntries(root, root, []viewPlan{plan}, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(plan.ServerFile)
@@ -229,7 +229,7 @@ func TestWriteEntriesAddsReloadOnlyInDevelopment(t *testing.T) {
 		Mode:       "mount",
 		ClientFile: filepath.Join(root, "entries", "client.tsx"),
 	}
-	if err := writeEntries(root, root, []viewPlan{plan}, digest("build")); err != nil {
+	if err := writeEntries(root, root, []viewPlan{plan}, nil, digest("build")); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(plan.ClientFile)
@@ -240,7 +240,7 @@ func TestWriteEntriesAddsReloadOnlyInDevelopment(t *testing.T) {
 		t.Fatal("development entry has no reload polling")
 	}
 
-	if err := writeEntries(root, root, []viewPlan{plan}, ""); err != nil {
+	if err := writeEntries(root, root, []viewPlan{plan}, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	data, _ = os.ReadFile(plan.ClientFile)

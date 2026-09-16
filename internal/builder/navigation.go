@@ -1,13 +1,23 @@
 package builder
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
 
-func writeNavigation(sourceRoot, output string, plans []viewPlan) error {
+type clientRoute struct {
+	ID     string
+	Regexp string
+	Params []string
+	Rank   []int
+}
+
+func writeNavigation(sourceRoot, output string, plans []viewPlan, routes []clientRoute) error {
 	var modules strings.Builder
 	for _, plan := range plans {
 		if !plan.Navigation {
@@ -25,13 +35,146 @@ func writeNavigation(sourceRoot, output string, plans []viewPlan) error {
 	if err := os.WriteFile(filepath.Join(output, "entries", "navigation-api.ts"), []byte(navigationAPI), 0o644); err != nil {
 		return err
 	}
-	source := "const modules = {\n" + modules.String() + "};\n" + navigationClient
+	var table strings.Builder
+	for _, route := range routes {
+		params := make([]string, 0, len(route.Params))
+		for _, name := range route.Params {
+			params = append(params, strconv.Quote(name))
+		}
+		fmt.Fprintf(&table, "{ pattern: new RegExp(%s), params: [%s], id: %s },\n", strconv.Quote(route.Regexp), strings.Join(params, ", "), strconv.Quote(route.ID))
+	}
+	source := "const routes = [\n" + table.String() + "];\nconst modules = {\n" + modules.String() + "};\n" + navigationClient
 	return os.WriteFile(filepath.Join(output, "entries", "navigation.tsx"), []byte(source), 0o644)
+}
+
+func clientRoutes(navigationViews map[string]string, routeParams map[string][]string) []clientRoute {
+	routes := make([]clientRoute, 0, len(navigationViews))
+	for pattern, id := range navigationViews {
+		expression, params, ok := clientPattern(pattern)
+		if !ok {
+			continue
+		}
+		if names, exists := routeParams[pattern]; exists {
+			params = names
+		}
+		routes = append(routes, clientRoute{ID: id, Regexp: expression, Params: params, Rank: patternRank(pattern)})
+	}
+	slices.SortFunc(routes, func(a, b clientRoute) int { return slices.Compare(a.Rank, b.Rank) })
+	return routes
+}
+
+func clientPattern(pattern string) (string, []string, bool) {
+	if !strings.HasPrefix(pattern, "/") {
+		return "", nil, false
+	}
+	var expression strings.Builder
+	var params []string
+	expression.WriteString("^")
+	segments := strings.Split(pattern, "/")
+	for index, segment := range segments {
+		if index > 0 {
+			expression.WriteString("/")
+		}
+		if segment == "" {
+			continue
+		}
+		if strings.ContainsAny(segment, "{}") {
+			if !strings.HasPrefix(segment, "{") || !strings.HasSuffix(segment, "}") {
+				return "", nil, false
+			}
+			body := segment[1 : len(segment)-1]
+			if body == "$" {
+				continue
+			}
+			if strings.HasSuffix(body, "...") {
+				params = append(params, strings.TrimSuffix(body, "..."))
+				expression.WriteString("(.*)")
+				continue
+			}
+			if body == "" || !isIdentifier(body) {
+				return "", nil, false
+			}
+			params = append(params, body)
+			expression.WriteString("([^/]+)")
+			continue
+		}
+		expression.WriteString(regexp.QuoteMeta(segment))
+	}
+	expression.WriteString("$")
+	return expression.String(), params, true
+}
+
+func patternRank(pattern string) []int {
+	ranks := make([]int, 0, len(strings.Split(pattern, "/")))
+	for _, segment := range strings.Split(pattern, "/") {
+		if !strings.HasPrefix(segment, "{") || !strings.HasSuffix(segment, "}") || segment == "{$}" {
+			ranks = append(ranks, 0)
+			continue
+		}
+		if strings.HasSuffix(segment, "...}") {
+			ranks = append(ranks, 2)
+			continue
+		}
+		ranks = append(ranks, 1)
+	}
+	return ranks
+}
+
+func isIdentifier(value string) bool {
+	for index, character := range value {
+		if character == '_' || character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' {
+			continue
+		}
+		if index > 0 && character >= '0' && character <= '9' {
+			continue
+		}
+		return false
+	}
+	return value != ""
 }
 
 const navigationClient = `import { hydrateRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { setRouter } from "./navigation-api";
+
+function decode(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function matchRoute(pathname) {
+  for (const route of routes) {
+    const match = route.pattern.exec(pathname);
+    if (!match) {
+      continue;
+    }
+    const params = {};
+    route.params.forEach((name, index) => {
+      params[name] = decode(match[index + 1] || "");
+    });
+    return { id: route.id, params };
+  }
+  return undefined;
+}
+
+function searchParamsOf(url) {
+  const values = {};
+  for (const [key, value] of url.searchParams) {
+    if (!Object.hasOwn(values, key)) {
+      values[key] = value;
+      continue;
+    }
+    if (Array.isArray(values[key])) {
+      values[key].push(value);
+      continue;
+    }
+    values[key] = [values[key], value];
+  }
+  return values;
+}
 
 export function start(page) {
   const app = document.getElementById("app");
@@ -116,12 +259,26 @@ export function start(page) {
           throw new Error("Head requires document navigation");
         }
       }
-      const response = await fetch(url, {
+      const responsePromise = fetch(url, {
         headers: { Accept: "application/vnd.bifrost.navigation+json" },
         credentials: "same-origin",
         cache: "no-store",
         signal: controller.signal,
       });
+      if (mode !== "refresh" && url.pathname !== renderedURL.pathname) {
+        const route = matchRoute(url.pathname);
+        const view = route && modules[route.id];
+        if (view) {
+          const nextPending = await view();
+          if (controller.signal.aborted) {
+            return;
+          }
+          if (typeof nextPending.renderPending === "function") {
+            flushSync(() => root.render(nextPending.renderPending({ params: route.params, pathname: url.pathname, searchParams: searchParamsOf(url) }, url.pathname)));
+          }
+        }
+      }
+      const response = await responsePromise;
       if (controller.signal.aborted) {
         return;
       }
