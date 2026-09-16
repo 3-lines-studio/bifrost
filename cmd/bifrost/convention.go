@@ -25,6 +25,16 @@ type conventionParam struct {
 	Segments bool
 }
 
+type conventionMetadata struct {
+	View     string
+	Generate bool
+}
+
+type conventionWrapper struct {
+	Path     string
+	Template bool
+}
+
 type conventionRoute struct {
 	Directory    string
 	Pattern      string
@@ -37,6 +47,7 @@ type conventionRoute struct {
 	HasHead      bool
 	ErrorViews   []string
 	NotFoundView string
+	LoadingView  string
 	NotFoundPage bool
 }
 
@@ -71,7 +82,34 @@ func conventionRoots(dir, packagePath string) (string, string, bool, error) {
 	if appPage {
 		return projectRoot, filepath.Join(projectRoot, "app"), true, nil
 	}
+	if hasConventionPage(filepath.Join(projectRoot, "app")) {
+		return projectRoot, filepath.Join(projectRoot, "app"), true, nil
+	}
+	if hasConventionPage(projectRoot) {
+		return projectRoot, projectRoot, true, nil
+	}
 	return projectRoot, "", false, nil
+}
+
+func hasConventionPage(root string) bool {
+	found := false
+	_ = filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			if entry.Name() == ".bifrost" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.Name() != "page.tsx" {
+			return nil
+		}
+		found = true
+		return filepath.SkipAll
+	})
+	return found
 }
 
 type conventionApp struct {
@@ -80,6 +118,7 @@ type conventionApp struct {
 	Package     string
 	Output      string
 	Executable  string
+	RouteParams map[string][]string
 }
 
 func prepareConventionApp(ctx context.Context, projectRoot, routeRoot string) (conventionApp, error) {
@@ -179,7 +218,22 @@ func prepareConventionApp(ctx context.Context, projectRoot, routeRoot string) (c
 	if err := command.Run(); err != nil {
 		return conventionApp{}, fmt.Errorf("bifrost: prepare generated module: %w", err)
 	}
-	return conventionApp{ProjectRoot: projectRoot, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(projectRoot, ".bifrost", "bifrost-app")}, nil
+	return conventionApp{ProjectRoot: projectRoot, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(projectRoot, ".bifrost", "bifrost-app"), RouteParams: conventionRouteParams(routes)}, nil
+}
+
+func conventionRouteParams(routes []conventionRoute) map[string][]string {
+	params := make(map[string][]string, len(routes))
+	for _, route := range routes {
+		if len(route.Params) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(route.Params))
+		for _, param := range route.Params {
+			names = append(names, param.Name)
+		}
+		params[route.Pattern] = names
+	}
+	return params
 }
 
 func discoverConventionRoutes(root string) ([]conventionRoute, error) {
@@ -311,41 +365,47 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 	}
 	needsMetadata := false
 	for index := range routes {
-		layouts := inheritedFiles(routeRoot, routes[index].Directory, "layout.tsx")
+		wrappers := inheritedWrappers(routeRoot, routes[index].Directory)
+		layouts := make([]string, 0, len(wrappers))
+		for _, wrapper := range wrappers {
+			if !wrapper.Template {
+				layouts = append(layouts, wrapper.Path)
+			}
+		}
 		errors := inheritedFiles(routeRoot, routes[index].Directory, "error.tsx")
 		notFound := inheritedFiles(routeRoot, routes[index].Directory, "not-found.tsx")
+		loadings := inheritedFiles(routeRoot, routes[index].Directory, "loading.tsx")
 		if routes[index].NotFoundPage {
 			errors = nil
 			notFound = nil
+			loadings = nil
 		}
 		routes[index].ErrorViews = errors
 		if len(notFound) > 0 {
 			routes[index].NotFoundView = notFound[len(notFound)-1]
 		}
+		if len(loadings) > 0 {
+			routes[index].LoadingView = loadings[len(loadings)-1]
+		}
 		var imports strings.Builder
 		imports.WriteString("import { Fragment } from 'react';\n")
+		imports.WriteString("import { RouteProvider } from 'virtual:bifrost/navigation';\n")
 		pageView := filepath.Join(routeRoot, filepath.FromSlash(routes[index].View))
-		metadataViews := make([]string, 0, len(layouts)+1)
-		for _, layout := range layouts {
-			if hasMetadataExport(layout) {
-				metadataViews = append(metadataViews, layout)
-			}
+		metadata, err := conventionMetadataSources(append(slices.Clone(layouts), pageView))
+		if err != nil {
+			return err
 		}
-		if hasMetadataExport(pageView) {
-			metadataViews = append(metadataViews, pageView)
-		}
-		if routes[index].HasHead && len(metadataViews) > 0 {
+		if routes[index].HasHead && len(metadata) > 0 {
 			return fmt.Errorf("bifrost: %s exports both Head and metadata; keep one", filepath.ToSlash(routes[index].View))
 		}
-		for _, view := range append(slices.Clone(layouts), pageView) {
-			if hasGenerateMetadataExport(view) {
-				return fmt.Errorf("bifrost: %s exports generateMetadata, which Bifrost does not support yet; use export const metadata", filepath.ToSlash(view))
+		for metadataIndex, source := range metadata {
+			name, local := "metadata", fmt.Sprintf("Metadata%d", metadataIndex)
+			if source.Generate {
+				name, local = "generateMetadata", fmt.Sprintf("GenerateMetadata%d", metadataIndex)
 			}
+			fmt.Fprintf(&imports, "import { %s as %s } from %s;\n", name, local, strconv.Quote(source.View))
 		}
-		for metadataIndex, view := range metadataViews {
-			fmt.Fprintf(&imports, "import { metadata as Metadata%d } from %s;\n", metadataIndex, strconv.Quote(view))
-		}
-		if len(metadataViews) > 0 {
+		if len(metadata) > 0 {
 			needsMetadata = true
 			imports.WriteString("import { Metadata as RouteMetadata } from './metadata.tsx';\n")
 		}
@@ -356,8 +416,12 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 		if err := writeConventionImport(&imports, filepath.Join(routeRoot, filepath.FromSlash(routes[index].View)), export, "RoutePage"); err != nil {
 			return err
 		}
-		for layoutIndex, layout := range layouts {
-			if err := writeConventionImport(&imports, layout, "Layout", fmt.Sprintf("Layout%d", layoutIndex)); err != nil {
+		for wrapperIndex, wrapper := range wrappers {
+			name := "Layout"
+			if wrapper.Template {
+				name = "Template"
+			}
+			if err := writeConventionImport(&imports, wrapper.Path, name, fmt.Sprintf("%s%d", name, wrapperIndex)); err != nil {
 				return err
 			}
 		}
@@ -371,28 +435,49 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 				return err
 			}
 		}
+		if routes[index].LoadingView != "" {
+			if err := writeConventionImport(&imports, routes[index].LoadingView, "Loading", "RouteLoading"); err != nil {
+				return err
+			}
+		}
 		body := "<RoutePage {...props} />"
 		if routes[index].NotFoundPage {
 			body = "<RoutePage />"
 		}
+		if len(routes[index].ErrorViews) > 0 {
+			imports.WriteString("import { refresh } from 'virtual:bifrost/navigation';\n")
+		}
 		for errorIndex := range routes[index].ErrorViews {
-			body = fmt.Sprintf("props.__bifrostError && props.__bifrostErrorLevel === %d ? <ErrorPage%d error={String(props.__bifrostError)} /> : %s", errorIndex, errorIndex, body)
+			body = fmt.Sprintf("props.__bifrostError && props.__bifrostErrorLevel === %d ? <ErrorPage%d error={new Error(String(props.__bifrostError))} reset={() => void refresh()} /> : %s", errorIndex, errorIndex, body)
 		}
 		if routes[index].NotFoundView != "" {
 			body = "props.__bifrostNotFound ? <NotFound /> : " + body
 		}
-		body = "<Fragment key={pageKey}>{" + body + "}</Fragment>"
-		for layoutIndex := len(layouts) - 1; layoutIndex >= 0; layoutIndex-- {
-			layoutKey := strings.TrimPrefix(filepath.ToSlash(layouts[layoutIndex]), filepath.ToSlash(routeRoot)+"/")
-			body = fmt.Sprintf("<Layout%d key={%s} params={props.params}>%s</Layout%d>", layoutIndex, strconv.Quote(layoutKey), body, layoutIndex)
+		wrap := func(content string) string {
+			wrapped := "<Fragment key={pageKey}>{" + content + "}</Fragment>"
+			for wrapperIndex := len(wrappers) - 1; wrapperIndex >= 0; wrapperIndex-- {
+				name := "Layout"
+				key := strconv.Quote(strings.TrimPrefix(filepath.ToSlash(wrappers[wrapperIndex].Path), filepath.ToSlash(routeRoot)+"/"))
+				if wrappers[wrapperIndex].Template {
+					name, key = "Template", "pageKey"
+				}
+				wrapped = fmt.Sprintf("<%s%d key={%s} params={props.params}>%s</%s%d>", name, wrapperIndex, key, wrapped, name, wrapperIndex)
+			}
+			return "<RouteProvider pathname={props.pathname} params={props.params} searchParams={props.searchParams}>" + wrapped + "</RouteProvider>"
 		}
 		head := ""
-		if len(metadataViews) > 0 {
-			head = "export function Head() {\n  return <RouteMetadata values={[" + metadataValues(metadataViews) + "]} />;\n}\n"
-		} else if routes[index].HasHead && !routes[index].NotFoundPage {
+		switch {
+		case metadataUsesProps(metadata):
+			head = "export async function renderHead(props: Record<string, unknown>) {\n  return <RouteMetadata values={[" + metadataValues(metadata) + "]} />;\n}\n"
+		case len(metadata) > 0:
+			head = "export function Head() {\n  return <RouteMetadata values={[" + metadataValues(metadata) + "]} />;\n}\n"
+		case routes[index].HasHead && !routes[index].NotFoundPage:
 			head = "export { Head } from " + strconv.Quote(pageView) + ";\n"
 		}
-		source := imports.String() + head + "export function renderPage(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + body + ";\n}\nexport function Page(props: Record<string, unknown>) {\n  return renderPage(props);\n}\n"
+		source := imports.String() + head + "export function renderPage(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + wrap(body) + ";\n}\nexport function Page(props: Record<string, unknown>) {\n  return renderPage(props);\n}\n"
+		if routes[index].LoadingView != "" {
+			source += "export function renderPending(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + wrap("<RouteLoading />") + ";\n}\n"
+		}
 		name := fmt.Sprintf("page-%d.tsx", index)
 		if err := os.WriteFile(filepath.Join(views, name), []byte(source), 0o644); err != nil {
 			return err
@@ -407,12 +492,20 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 	return nil
 }
 
-func metadataValues(views []string) string {
-	values := make([]string, 0, len(views))
-	for index := range views {
+func metadataValues(sources []conventionMetadata) string {
+	values := make([]string, 0, len(sources))
+	for index, source := range sources {
+		if source.Generate {
+			values = append(values, fmt.Sprintf("await GenerateMetadata%d(props)", index))
+			continue
+		}
 		values = append(values, fmt.Sprintf("Metadata%d", index))
 	}
 	return strings.Join(values, ", ")
+}
+
+func metadataUsesProps(sources []conventionMetadata) bool {
+	return slices.ContainsFunc(sources, func(source conventionMetadata) bool { return source.Generate })
 }
 
 var headExportPattern = regexp.MustCompile(`(?m)^\s*export\s+(?:function|const|let|var)\s+Head\b`)
@@ -523,6 +616,41 @@ func hasMetadataExport(filePath string) bool {
 func hasGenerateMetadataExport(filePath string) bool {
 	data, err := os.ReadFile(filePath)
 	return err == nil && generateMetadataExportPattern.Match(data)
+}
+
+func conventionMetadataSources(views []string) ([]conventionMetadata, error) {
+	sources := make([]conventionMetadata, 0, len(views))
+	for _, view := range views {
+		static, generated := hasMetadataExport(view), hasGenerateMetadataExport(view)
+		if static && generated {
+			return nil, fmt.Errorf("bifrost: %s exports both metadata and generateMetadata; keep one", filepath.ToSlash(view))
+		}
+		if static || generated {
+			sources = append(sources, conventionMetadata{View: view, Generate: generated})
+		}
+	}
+	return sources, nil
+}
+
+func inheritedWrappers(root, directory string) []conventionWrapper {
+	var wrappers []conventionWrapper
+	appendDirectory := func(current string) {
+		for _, name := range []string{"layout.tsx", "template.tsx"} {
+			path := filepath.Join(root, current, name)
+			if fileExists(path) {
+				wrappers = append(wrappers, conventionWrapper{Path: path, Template: name == "template.tsx"})
+			}
+		}
+	}
+	appendDirectory(".")
+	if directory != "." {
+		current := "."
+		for _, part := range strings.Split(directory, "/") {
+			current = filepath.Join(current, part)
+			appendDirectory(current)
+		}
+	}
+	return wrappers
 }
 
 func inheritedFiles(root, directory, name string) []string {
@@ -863,7 +991,7 @@ func writeConventionMain(root, generated string, routes []conventionRoute, goDir
 		fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, %s).WithNavigation(),\n", strconv.Quote(route.Pattern), strconv.Quote(route.View), loader)
 	}
 	if hasNotFoundPage {
-		fmt.Fprintf(&loaders, "func loadNotFound(*http.Request) (any, error) {\n\treturn bifrost.PageData{Status: http.StatusNotFound}, nil\n}\n\n")
+		fmt.Fprintf(&loaders, "func loadNotFound(r *http.Request) (any, error) {\n\treturn bifrost.PageData{Props: map[string]any{\"pathname\": r.URL.EscapedPath()}, Status: http.StatusNotFound}, nil\n}\n\n")
 	}
 	writeConventionRequestProps(&loaders, hasSegments)
 	for _, directory := range goDirs {
@@ -975,6 +1103,7 @@ func buildConvention(ctx context.Context, app conventionApp, options builder.Opt
 	options.Package = app.Package
 	options.Dir = app.WorkDir
 	options.Output = app.Output
+	options.RouteParams = app.RouteParams
 	if err := builder.Build(ctx, options); err != nil {
 		return err
 	}
