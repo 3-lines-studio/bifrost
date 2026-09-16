@@ -637,12 +637,10 @@ func collectExternalDevelopmentViews(output string, plans []viewPlan) ([]protoco
 func collectBuiltViews(output string, plans []viewPlan, development bool) ([]protocol.BuiltView, []protocol.FileRef, error) {
 	clientManifestPath := filepath.Join(output, "dist", "client-manifest.json")
 	clientManifest, err := readViteManifest(clientManifestPath)
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, nil, err
 	}
-	if err := os.Remove(clientManifestPath); err != nil {
-		return nil, nil, err
-	}
+	_ = os.Remove(clientManifestPath)
 	var serverManifest viteManifest
 	serverManifestPath := filepath.Join(output, "ssr", "server-manifest.json")
 	if !development {

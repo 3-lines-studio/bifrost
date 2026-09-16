@@ -73,7 +73,7 @@ func runBuild(args []string) error {
 			return err
 		}
 	} else if err := builder.Build(context.Background(), options); err != nil {
-		return err
+		return conventionHint(projectRoot, err)
 	}
 	_, _ = fmt.Fprintln(os.Stdout, "Bifrost build complete")
 	return nil

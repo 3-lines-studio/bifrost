@@ -82,34 +82,70 @@ func conventionRoots(dir, packagePath string) (string, string, bool, error) {
 	if appPage {
 		return projectRoot, filepath.Join(projectRoot, "app"), true, nil
 	}
-	if hasConventionPage(filepath.Join(projectRoot, "app")) {
+	if hasConventionPage(filepath.Join(projectRoot, "app")) || hasConventionGo(filepath.Join(projectRoot, "app")) || hasConventionMarker(filepath.Join(projectRoot, "app")) {
 		return projectRoot, filepath.Join(projectRoot, "app"), true, nil
 	}
-	if hasConventionPage(projectRoot) {
+	if hasConventionPage(projectRoot) || hasConventionMarker(projectRoot) {
 		return projectRoot, projectRoot, true, nil
 	}
 	return projectRoot, "", false, nil
 }
 
-func hasConventionPage(root string) bool {
+func conventionHint(projectRoot string, err error) error {
+	if hasConventionPage(projectRoot) || hasConventionMarker(projectRoot) || !hasConventionGo(projectRoot) {
+		return err
+	}
+	return fmt.Errorf("%w\nbifrost: %s has route.go but no page.tsx and no app directory; a convention app needs one of them", err, filepath.ToSlash(projectRoot))
+}
+
+func conventionWalk(root string, match func(path string, entry os.DirEntry) bool) bool {
 	found := false
 	_ = filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
 		}
-		if entry.IsDir() {
-			if entry.Name() == ".bifrost" {
-				return filepath.SkipDir
-			}
-			return nil
+		if entry.IsDir() && entry.Name() == ".bifrost" {
+			return filepath.SkipDir
 		}
-		if entry.Name() != "page.tsx" {
-			return nil
+		if filePath != root && match(filePath, entry) {
+			found = true
+			return filepath.SkipAll
 		}
-		found = true
-		return filepath.SkipAll
+		return nil
 	})
 	return found
+}
+
+func hasConventionPage(root string) bool {
+	return conventionWalk(root, func(_ string, entry os.DirEntry) bool {
+		return !entry.IsDir() && entry.Name() == "page.tsx"
+	})
+}
+
+func hasConventionGo(root string) bool {
+	return conventionWalk(root, func(_ string, entry os.DirEntry) bool {
+		return !entry.IsDir() && conventionGoFile(entry.Name())
+	})
+}
+
+func hasConventionMarker(root string) bool {
+	return conventionWalk(root, func(_ string, entry os.DirEntry) bool {
+		return entry.IsDir() && conventionMarkerName(entry.Name())
+	})
+}
+
+func conventionGoFile(name string) bool {
+	return name == "route.go" || name == "middleware.go" || name == "server.go"
+}
+
+func conventionMarkerName(name string) bool {
+	if strings.HasPrefix(name, "_") {
+		return true
+	}
+	if strings.HasSuffix(name, "~") {
+		return true
+	}
+	return strings.TrimRight(name, "_") != name
 }
 
 type conventionApp struct {
@@ -126,14 +162,14 @@ func prepareConventionApp(ctx context.Context, projectRoot, routeRoot string) (c
 	if err != nil {
 		return conventionApp{}, err
 	}
-	if len(routes) == 0 {
-		return conventionApp{}, fmt.Errorf("bifrost: no page.tsx found under %s", routeRoot)
-	}
-	routes, err = appendNotFoundRoutes(routeRoot, routes)
+	goDirs, err := discoverConventionGo(routeRoot)
 	if err != nil {
 		return conventionApp{}, err
 	}
-	goDirs, err := discoverConventionGo(routeRoot)
+	if len(routes) == 0 && len(goDirs) == 0 {
+		return conventionApp{}, fmt.Errorf("bifrost: no page.tsx or route.go found under %s", routeRoot)
+	}
+	routes, err = appendNotFoundRoutes(routeRoot, routes)
 	if err != nil {
 		return conventionApp{}, err
 	}
@@ -325,7 +361,7 @@ func discoverConventionGo(root string) ([]conventionGoDir, error) {
 		} else if skip {
 			return filepath.SkipDir
 		}
-		if entry.IsDir() || entry.Name() != "route.go" && entry.Name() != "middleware.go" && entry.Name() != "server.go" {
+		if entry.IsDir() || !conventionGoFile(entry.Name()) {
 			return nil
 		}
 		relative, err := filepath.Rel(root, filepath.Dir(filePath))

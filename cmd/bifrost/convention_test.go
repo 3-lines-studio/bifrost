@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -771,5 +772,93 @@ func TestGeneratedServerLifecycleAndEscapeHatch(t *testing.T) {
 func TestDirectoryContains(t *testing.T) {
 	if !directoryContains(".", "dashboard/settings") || !directoryContains("dashboard", "dashboard/settings") || directoryContains("dash", "dashboard") {
 		t.Fatal("unexpected middleware ancestry")
+	}
+}
+
+func TestConventionRootsAcceptAPIOnlyApps(t *testing.T) {
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app", "api", "hello_")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "route.go"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project, routes, ok, err := conventionRoots(".", projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || project != projectRoot || routes != filepath.Join(projectRoot, "app") {
+		t.Fatalf("routes without pages = %q, %q, %t", project, routes, ok)
+	}
+}
+
+func TestConventionRootsAcceptMarkerDirectoriesWithoutPages(t *testing.T) {
+	projectRoot := t.TempDir()
+	marker := filepath.Join(projectRoot, "posts", "slug_")
+	if err := os.MkdirAll(marker, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(marker, "route.go"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project, routes, ok, err := conventionRoots(".", projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || project != projectRoot || routes != projectRoot {
+		t.Fatalf("roots with a marker directory = %q, %q, %t", project, routes, ok)
+	}
+}
+
+func TestConventionRootsIgnorePlainGoFiles(t *testing.T) {
+	projectRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectRoot, "internal", "api"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "main.go"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "internal", "api", "route.go"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok, err := conventionRoots(".", projectRoot); err != nil || ok {
+		t.Fatalf("plain Go files were taken as a convention app: ok=%t err=%v", ok, err)
+	}
+}
+
+func TestPrepareConventionAppAcceptsRoutesWithoutPages(t *testing.T) {
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	routeRoot := filepath.Join(appRoot, "api", "hello_")
+	if err := os.MkdirAll(routeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "go.mod"), []byte("module api.test/app\n\ngo 1.25.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(routeRoot, "route.go"), []byte("package api\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	app, err := prepareConventionApp(context.Background(), projectRoot, appRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if app.Executable != filepath.Join(projectRoot, ".bifrost", "bifrost-app") {
+		t.Fatalf("executable = %q", app.Executable)
+	}
+	if _, err := os.Stat(filepath.Join(app.WorkDir, "main.go")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPrepareConventionAppRejectsEmptyTrees(t *testing.T) {
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepareConventionApp(context.Background(), projectRoot, appRoot); err == nil {
+		t.Fatal("an empty route root was accepted")
 	}
 }
