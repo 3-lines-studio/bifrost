@@ -62,7 +62,14 @@ type viewPlan struct {
 	ServerFile string
 }
 
-func Build(ctx context.Context, options Options) error {
+func Describe(ctx context.Context, options Options) (protocol.DescribeResult, error) {
+	if _, _, err := prepareApp(ctx, options); err != nil {
+		return protocol.DescribeResult{}, err
+	}
+	return runDescribe(ctx, options.Dir, options.Package)
+}
+
+func prepareApp(ctx context.Context, options Options) (packageInfo, string, error) {
 	if options.Package == "" {
 		options.Package = "."
 	}
@@ -71,10 +78,10 @@ func Build(ctx context.Context, options Options) error {
 	}
 	info, err := inspectPackage(ctx, options.Dir, options.Package)
 	if err != nil {
-		return err
+		return packageInfo{}, "", err
 	}
 	if info.Name != "main" {
-		return fmt.Errorf("bifrost: package %s is %q, want main", info.ImportPath, info.Name)
+		return packageInfo{}, "", fmt.Errorf("bifrost: package %s is %q, want main", info.ImportPath, info.Name)
 	}
 	output := options.Output
 	if output == "" {
@@ -83,6 +90,14 @@ func Build(ctx context.Context, options Options) error {
 		output = filepath.Join(info.Dir, output)
 	}
 	if err := ensureGeneratedEmbed(info.Dir, info.Name, output); err != nil {
+		return packageInfo{}, "", err
+	}
+	return info, output, nil
+}
+
+func Build(ctx context.Context, options Options) error {
+	_, output, err := prepareApp(ctx, options)
+	if err != nil {
 		return err
 	}
 
