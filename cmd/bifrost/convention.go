@@ -326,15 +326,23 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 		if routes[index].NotFoundPage {
 			export = "NotFound"
 		}
-		fmt.Fprintf(&imports, "import { %s as RoutePage } from %s;\n", export, strconv.Quote(filepath.Join(routeRoot, filepath.FromSlash(routes[index].View))))
+		if err := writeConventionImport(&imports, filepath.Join(routeRoot, filepath.FromSlash(routes[index].View)), export, "RoutePage"); err != nil {
+			return err
+		}
 		for layoutIndex, layout := range layouts {
-			fmt.Fprintf(&imports, "import { Layout as Layout%d } from %s;\n", layoutIndex, strconv.Quote(layout))
+			if err := writeConventionImport(&imports, layout, "Layout", fmt.Sprintf("Layout%d", layoutIndex)); err != nil {
+				return err
+			}
 		}
 		for errorIndex, errorView := range routes[index].ErrorViews {
-			fmt.Fprintf(&imports, "import { Error as ErrorPage%d } from %s;\n", errorIndex, strconv.Quote(errorView))
+			if err := writeConventionImport(&imports, errorView, "Error", fmt.Sprintf("ErrorPage%d", errorIndex)); err != nil {
+				return err
+			}
 		}
 		if routes[index].NotFoundView != "" {
-			fmt.Fprintf(&imports, "import { NotFound } from %s;\n", strconv.Quote(routes[index].NotFoundView))
+			if err := writeConventionImport(&imports, routes[index].NotFoundView, "NotFound", "NotFound"); err != nil {
+				return err
+			}
 		}
 		body := "<RoutePage {...props} />"
 		if routes[index].NotFoundPage {
@@ -366,6 +374,21 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 }
 
 var headExportPattern = regexp.MustCompile(`(?m)^\s*export\s+(?:function|const|let|var)\s+Head\b`)
+
+var defaultExportPattern = regexp.MustCompile(`(?m)^\s*export\s+default\b`)
+
+func writeConventionImport(imports *strings.Builder, filePath, name, local string) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+	if defaultExportPattern.Match(data) {
+		fmt.Fprintf(imports, "import %s from %s;\n", local, strconv.Quote(filePath))
+		return nil
+	}
+	fmt.Fprintf(imports, "import { %s as %s } from %s;\n", name, local, strconv.Quote(filePath))
+	return nil
+}
 
 func hasHeadExport(filePath string) bool {
 	data, err := os.ReadFile(filePath)

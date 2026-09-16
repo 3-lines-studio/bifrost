@@ -166,6 +166,56 @@ func TestConventionPrivateDirectoriesAreNotRouted(t *testing.T) {
 	}
 }
 
+func TestConventionViewsAcceptDefaultExports(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"page.tsx":           "export default function Page() { return null }",
+		"layout.tsx":         "export default function Layout({ children }) { return children }",
+		"error.tsx":          "export default function Error() { return null }",
+		"not-found.tsx":      "export default function NotFound() { return null }",
+		"dashboard/page.tsx": "export function Page() { return null }",
+	}
+	for name, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".bifrost", "views"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var generated strings.Builder
+	for _, entry := range entries {
+		source, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		generated.Write(source)
+	}
+	for _, expected := range []string{
+		"import RoutePage from " + strconv.Quote(filepath.Join(root, "page.tsx")) + ";",
+		"import Layout0 from " + strconv.Quote(filepath.Join(root, "layout.tsx")) + ";",
+		"import ErrorPage0 from " + strconv.Quote(filepath.Join(root, "error.tsx")) + ";",
+		"import NotFound from " + strconv.Quote(filepath.Join(root, "not-found.tsx")) + ";",
+		"import { Page as RoutePage } from " + strconv.Quote(filepath.Join(root, "dashboard", "page.tsx")) + ";",
+	} {
+		if !strings.Contains(generated.String(), expected) {
+			t.Fatalf("generated views do not contain %q:\n%s", expected, generated.String())
+		}
+	}
+}
+
 func TestConventionNotFoundRoutesUseTheURLPrefix(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"posts/not-found.tsx", "marketing~/not-found.tsx", "posts/api/not-found.tsx"} {

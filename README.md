@@ -170,6 +170,8 @@ The other files in a route directory are optional:
 - `server.go` exports `Serve` and is only valid at the route root.
 - `public/` holds files served as they are.
 
+Every view accepts a default export instead of the named one, so `export default function Page` and `export default function Layout({ children })` work.
+
 ## Convention navigation
 
 Use normal `<a href="/posts/hello">` links. After the first server render, convention apps fetch the next route through the same Go middleware and loader, lazy-load its Vite module, and update one React root. Shared layouts stay mounted. Back/forward, scroll, hash links, focus, page head, and root document attributes update with the route.
