@@ -389,8 +389,11 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 		if routes[index].NotFoundPage {
 			body = "<RoutePage />"
 		}
+		if len(routes[index].ErrorViews) > 0 {
+			imports.WriteString("import { refresh } from 'virtual:bifrost/navigation';\n")
+		}
 		for errorIndex := range routes[index].ErrorViews {
-			body = fmt.Sprintf("props.__bifrostError && props.__bifrostErrorLevel === %d ? <ErrorPage%d error={String(props.__bifrostError)} /> : %s", errorIndex, errorIndex, body)
+			body = fmt.Sprintf("props.__bifrostError && props.__bifrostErrorLevel === %d ? <ErrorPage%d error={new Error(String(props.__bifrostError))} reset={() => void refresh()} /> : %s", errorIndex, errorIndex, body)
 		}
 		if routes[index].NotFoundView != "" {
 			body = "props.__bifrostNotFound ? <NotFound /> : " + body

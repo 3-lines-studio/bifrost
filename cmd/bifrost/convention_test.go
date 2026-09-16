@@ -286,6 +286,39 @@ func TestConventionRejectsConflictingMetadata(t *testing.T) {
 	}
 }
 
+func TestConventionErrorViewsReceiveAnErrorAndReset(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"page.tsx":  "export function Page() { return null }",
+		"error.tsx": "export function Error() { return null }",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", "page-0.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(view)
+	for _, expected := range []string{
+		"import { refresh } from 'virtual:bifrost/navigation';",
+		"error={new Error(String(props.__bifrostError))} reset={() => void refresh()}",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("generated view does not contain %q:\n%s", expected, text)
+		}
+	}
+}
+
 func TestConventionTemplatesNestInsideTheirLayouts(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{

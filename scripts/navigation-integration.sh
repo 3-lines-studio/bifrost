@@ -63,7 +63,7 @@ export function NotFound() {
 EOF
 cat >"$app/error.tsx" <<'EOF'
 export function Error({ error }) {
-  return <main><h1>Failed</h1><p>{error}</p></main>;
+  return <main><h1>Failed</h1><p>{error.message}</p></main>;
 }
 EOF
 cat >"$app/posts/layout.tsx" <<'EOF'
