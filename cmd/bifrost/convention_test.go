@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -57,6 +58,41 @@ func TestConventionRoots(t *testing.T) {
 	}
 }
 
+func TestConventionRootsFollowNestedPages(t *testing.T) {
+	projectRoot := t.TempDir()
+	postsRoot := filepath.Join(projectRoot, "posts")
+	if err := os.Mkdir(postsRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(postsRoot, "page.tsx"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project, routes, ok, err := conventionRoots(".", projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || project != projectRoot || routes != projectRoot {
+		t.Fatalf("roots without a root page = %q, %q, %t", project, routes, ok)
+	}
+	if err := os.Remove(filepath.Join(postsRoot, "page.tsx")); err != nil {
+		t.Fatal(err)
+	}
+	appRoot := filepath.Join(projectRoot, "app", "posts")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project, routes, ok, err = conventionRoots(".", projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || project != projectRoot || routes != filepath.Join(projectRoot, "app") {
+		t.Fatalf("roots with an app directory = %q, %q, %t", project, routes, ok)
+	}
+}
+
 func TestNestedConventionViewUsesProjectRelativePath(t *testing.T) {
 	projectRoot := t.TempDir()
 	routeRoot := filepath.Join(projectRoot, "app")
@@ -100,7 +136,7 @@ func TestConventionPatternNextSyntax(t *testing.T) {
 		{"about", "/about", nil},
 		{"posts/slug_", "/posts/{slug}", []conventionParam{{Name: "slug", Value: "slug"}}},
 		{"posts/post-id_", "/posts/{post_id}", []conventionParam{{Name: "post-id", Value: "post_id"}}},
-		{"docs/slug__", "/docs/{slug...}", []conventionParam{{Name: "slug", Value: "slug"}}},
+		{"docs/slug__", "/docs/{slug...}", []conventionParam{{Name: "slug", Value: "slug", Segments: true}}},
 		{"marketing~/about", "/about", nil},
 		{"marketing~", "/{$}", nil},
 	}
@@ -166,6 +202,395 @@ func TestConventionPrivateDirectoriesAreNotRouted(t *testing.T) {
 	}
 }
 
+func TestConventionRouteParamsUseFolderNames(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "posts", "post-id_", "page.tsx")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("export function Page() { return null }"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := conventionRouteParams(routes)
+	if names := params["/posts/{post_id}"]; len(names) != 1 || names[0] != "post-id" {
+		t.Fatalf("params = %v", params)
+	}
+}
+
+func TestConventionViewsRenderPendingTrees(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"page.tsx":           "export function Page() { return null }",
+		"loading.tsx":        "export default function Loading() { return null }",
+		"dashboard/page.tsx": "export function Page() { return null }",
+	}
+	for name, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	for index, route := range routes {
+		if route.LoadingView != filepath.Join(root, "loading.tsx") {
+			t.Fatalf("route %d loading view = %q", index, route.LoadingView)
+		}
+		view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", fmt.Sprintf("page-%d.tsx", index)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(view)
+		for _, expected := range []string{
+			"import RouteLoading from",
+			"export function renderPending(props: Record<string, unknown>, pageKey?: string) {",
+			"<RouteProvider pathname={props.pathname} params={props.params} searchParams={props.searchParams}><Fragment key={pageKey}>{<RouteLoading />}</Fragment></RouteProvider>;",
+		} {
+			if !strings.Contains(text, expected) {
+				t.Fatalf("generated view does not contain %q:\n%s", expected, text)
+			}
+		}
+	}
+}
+
+func TestConventionNestedLoadingViewsWin(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"page.tsx":                    "export function Page() { return null }",
+		"loading.tsx":                 "export default function Loading() { return null }",
+		"dashboard/loading.tsx":       "export function Loading() { return null }",
+		"dashboard/page.tsx":          "export function Page() { return null }",
+		"dashboard/settings/page.tsx": "export function Page() { return null }",
+		"other/page.tsx":              "export function Page() { return null }",
+	}
+	for name, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	expected := map[string]string{
+		"/{$}":                "loading.tsx",
+		"/dashboard":          filepath.Join("dashboard", "loading.tsx"),
+		"/dashboard/settings": filepath.Join("dashboard", "loading.tsx"),
+		"/other":              "loading.tsx",
+	}
+	for _, route := range routes {
+		if route.NotFoundPage {
+			if route.LoadingView != "" {
+				t.Fatalf("not found route loading view = %q", route.LoadingView)
+			}
+			continue
+		}
+		want := expected[route.Pattern]
+		if want == "" {
+			t.Fatalf("unexpected route %q", route.Pattern)
+		}
+		if filepath.ToSlash(route.LoadingView) != filepath.ToSlash(filepath.Join(root, want)) {
+			t.Fatalf("route %s loading view = %q, want %q", route.Pattern, route.LoadingView, want)
+		}
+	}
+}
+
+func TestConventionViewsWrapTheTreeInTheRouteProvider(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"layout.tsx": "export function Layout({ children }) { return children }",
+		"page.tsx":   "export function Page() { return null }",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", "page-0.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(view)
+	for _, expected := range []string{
+		"import { RouteProvider } from 'virtual:bifrost/navigation';",
+		"return <RouteProvider pathname={props.pathname} params={props.params} searchParams={props.searchParams}><Layout0 key={\"layout.tsx\"}",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("generated view does not contain %q:\n%s", expected, text)
+		}
+	}
+}
+
+func TestConventionViewsGenerateMetadataHead(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"layout.tsx":     "export const metadata = { description: 'site' }",
+		"page.tsx":       "export const metadata = { title: 'home' }",
+		"posts/page.tsx": "export function Page() { return null }",
+	}
+	for name, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".bifrost", "views"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		source, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		generated[entry.Name()] = string(source)
+	}
+	if _, ok := generated["metadata.tsx"]; !ok {
+		t.Fatalf("metadata runtime module was not generated: %v", generated)
+	}
+	var view strings.Builder
+	for name, source := range generated {
+		if name != "metadata.tsx" {
+			view.WriteString(source)
+		}
+	}
+	for _, expected := range []string{
+		"import { metadata as Metadata0 } from " + strconv.Quote(filepath.Join(root, "layout.tsx")) + ";",
+		"import { metadata as Metadata1 } from " + strconv.Quote(filepath.Join(root, "page.tsx")) + ";",
+		"import { Metadata as RouteMetadata } from './metadata.tsx';",
+		"export function Head() {",
+		"values={[Metadata0, Metadata1]}",
+	} {
+		if !strings.Contains(view.String(), expected) {
+			t.Fatalf("generated views do not contain %q:\n%s", expected, view.String())
+		}
+	}
+}
+
+func TestConventionViewsGenerateAsyncMetadataHead(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"layout.tsx": "export const metadata = { description: 'site' }",
+		"page.tsx":   "export async function generateMetadata() { return { title: 'dynamic' } }",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", "page-0.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(view)
+	for _, expected := range []string{
+		"import { generateMetadata as GenerateMetadata1 } from " + strconv.Quote(filepath.Join(root, "page.tsx")) + ";",
+		"export async function renderHead(props: Record<string, unknown>) {",
+		"values={[Metadata0, await GenerateMetadata1(props)]}",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("generated view does not contain %q:\n%s", expected, text)
+		}
+	}
+	if strings.Contains(text, "export function Head()") {
+		t.Fatalf("generated view should not export a sync Head:\n%s", text)
+	}
+}
+
+func TestConventionRejectsConflictingMetadata(t *testing.T) {
+	cases := map[string]struct {
+		page string
+		want string
+	}{
+		"head and metadata":             {page: "export function Head() { return null }\nexport const metadata = { title: 'x' }", want: "exports both Head and metadata"},
+		"metadata and generateMetadata": {page: "export const metadata = { title: 'x' }\nexport function generateMetadata() { return { title: 'y' } }", want: "exports both metadata and generateMetadata"},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "page.tsx"), []byte(testCase.page), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			routes, err := discoverConventionRoutes(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = writeConventionViews(root, root, routes)
+			if err == nil || !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("writeConventionViews error = %v, want %q", err, testCase.want)
+			}
+		})
+	}
+}
+
+func TestConventionErrorViewsReceiveAnErrorAndReset(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"page.tsx":  "export function Page() { return null }",
+		"error.tsx": "export function Error() { return null }",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", "page-0.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(view)
+	for _, expected := range []string{
+		"import { refresh } from 'virtual:bifrost/navigation';",
+		"error={new Error(String(props.__bifrostError))} reset={() => void refresh()}",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("generated view does not contain %q:\n%s", expected, text)
+		}
+	}
+}
+
+func TestConventionTemplatesNestInsideTheirLayouts(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"layout.tsx":             "export function Layout({ children }) { return children }",
+		"template.tsx":           "export default function Template({ children }) { return <div>{children}</div> }",
+		"dashboard/layout.tsx":   "export function Layout({ children }) { return children }",
+		"dashboard/template.tsx": "export function Template({ children }) { return <div>{children}</div> }",
+		"dashboard/page.tsx":     "export function Page() { return null }",
+	}
+	for name, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", "page-0.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(view)
+	for _, expected := range []string{
+		"import Template1 from " + strconv.Quote(filepath.Join(root, "template.tsx")) + ";",
+		"import { Template as Template3 } from " + strconv.Quote(filepath.Join(root, "dashboard", "template.tsx")) + ";",
+		`<Layout0 key={"layout.tsx"} params={props.params}><Template1 key={pageKey} params={props.params}><Layout2 key={"dashboard/layout.tsx"} params={props.params}><Template3 key={pageKey} params={props.params}>`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("generated view does not contain %q:\n%s", expected, text)
+		}
+	}
+}
+
+func TestConventionViewsAcceptDefaultExports(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"page.tsx":           "export default function Page() { return null }",
+		"layout.tsx":         "export default function Layout({ children }) { return children }",
+		"error.tsx":          "export default function Error() { return null }",
+		"not-found.tsx":      "export default function NotFound() { return null }",
+		"dashboard/page.tsx": "export function Page() { return null }",
+	}
+	for name, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".bifrost", "views"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var generated strings.Builder
+	for _, entry := range entries {
+		source, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		generated.Write(source)
+	}
+	for _, expected := range []string{
+		"import RoutePage from " + strconv.Quote(filepath.Join(root, "page.tsx")) + ";",
+		"import Layout0 from " + strconv.Quote(filepath.Join(root, "layout.tsx")) + ";",
+		"import ErrorPage0 from " + strconv.Quote(filepath.Join(root, "error.tsx")) + ";",
+		"import NotFound from " + strconv.Quote(filepath.Join(root, "not-found.tsx")) + ";",
+		"import { Page as RoutePage } from " + strconv.Quote(filepath.Join(root, "dashboard", "page.tsx")) + ";",
+	} {
+		if !strings.Contains(generated.String(), expected) {
+			t.Fatalf("generated views do not contain %q:\n%s", expected, generated.String())
+		}
+	}
+}
+
 func TestConventionNotFoundRoutesUseTheURLPrefix(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"posts/not-found.tsx", "marketing~/not-found.tsx", "posts/api/not-found.tsx"} {
@@ -187,6 +612,40 @@ func TestConventionNotFoundRoutesUseTheURLPrefix(t *testing.T) {
 	}
 	if got := strings.Join(patterns, ","); got != "/posts/api/{path...},/posts/{path...},/{path...}" {
 		t.Fatalf("patterns = %q", got)
+	}
+}
+
+func TestGeneratedMainInjectsRequestProps(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	routes := []conventionRoute{
+		{Pattern: "/posts/{post_id}", Params: []conventionParam{{Name: "post-id", Value: "post_id"}}, View: "page.tsx", HasLoader: true, ImportPath: "example.com/app/posts", Alias: "route0", ErrorViews: []string{"error.tsx"}},
+		{Pattern: "/docs/{slug...}", Params: []conventionParam{{Name: "slug", Value: "slug", Segments: true}}, View: "page.tsx"},
+	}
+	if err := writeConventionMain(root, generated, routes, nil); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, expected := range []string{
+		`requestPage(r, map[string]any{"post-id": r.PathValue("post_id")}, props, 1)`,
+		`return requestPage(r, map[string]any{"slug": requestSegments(r.PathValue("slug"))}, nil, 0)`,
+		`values["params"] = params`,
+		`values["searchParams"] = requestSearchParams(r)`,
+		`values["pathname"] = r.URL.EscapedPath()`,
+		`"strings"`,
+		`reflect.ValueOf(props)`,
+		`a page loader must return a map with string keys, or bifrost.PageData with one`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("generated main does not contain %q:\n%s", expected, text)
+		}
 	}
 }
 
@@ -245,7 +704,7 @@ func TestConventionLayoutsComposeOuterToInner(t *testing.T) {
 	if !strings.Contains(text, "pageKey?: string") || !strings.Contains(text, "<Fragment key={pageKey}>") {
 		t.Fatalf("generated page branch is not keyed:\n%s", text)
 	}
-	if !strings.Contains(text, `<Layout0 key={"layout.tsx"}><Layout1 key={"dashboard/layout.tsx"}>`) || !strings.Contains(text, "props.__bifrostError") || !strings.Contains(text, "props.__bifrostNotFound") || !strings.Contains(text, "export { Head }") {
+	if !strings.Contains(text, `<Layout0 key={"layout.tsx"} params={props.params}><Layout1 key={"dashboard/layout.tsx"} params={props.params}>`) || !strings.Contains(text, "props.__bifrostError") || !strings.Contains(text, "props.__bifrostNotFound") || !strings.Contains(text, "export { Head }") {
 		t.Fatalf("generated view is incomplete:\n%s", text)
 	}
 }
