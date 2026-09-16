@@ -3,11 +3,58 @@ package builder
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/3-lines-studio/bifrost/internal/protocol"
 )
+
+func TestNavigationRouteTableMatchesClientPatterns(t *testing.T) {
+	root := t.TempDir()
+	output := t.TempDir()
+	if err := os.Mkdir(filepath.Join(output, "entries"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a.tsx", "b.tsx", "c.tsx", "d.tsx"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("export function Page() { return null }"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	describe := protocol.DescribeResult{Spec: protocol.Spec{Routes: []protocol.RouteSpec{
+		{Pattern: "/posts/{slug}", View: "a.tsx", Kind: "server", Navigation: true},
+		{Pattern: "/posts/new", View: "b.tsx", Kind: "server", Navigation: true},
+		{Pattern: "/docs/{rest...}", View: "c.tsx", Kind: "server", Navigation: true},
+		{Pattern: "GET /explicit", View: "d.tsx", Kind: "server", Navigation: true},
+	}}}
+	plans, _, client, err := planViews(describe, output, map[string][]string{"/posts/{slug}": {"post-id"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeEntries(root, output, plans, client, ""); err != nil {
+		t.Fatal(err)
+	}
+	router, err := os.ReadFile(filepath.Join(output, "entries", "navigation.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches := regexp.MustCompile(`new RegExp\(("[^"]+")\)`).FindAllStringSubmatch(string(router), -1)
+	patterns := make([]string, 0, len(matches))
+	for _, match := range matches {
+		patterns = append(patterns, match[1])
+	}
+	want := []string{`"^/posts/new$"`, `"^/posts/([^/]+)$"`, `"^/docs/(.*)$"`}
+	if !slices.Equal(patterns, want) {
+		t.Fatalf("patterns = %v, want %v", patterns, want)
+	}
+	if !strings.Contains(string(router), `params: ["post-id"]`) {
+		t.Fatalf("router lost the parameter names: %s", router)
+	}
+	if strings.Contains(string(router), "explicit") {
+		t.Fatalf("router matched an unsupported pattern: %s", router)
+	}
+}
 
 func TestNavigationEntriesShareRouterAndLazyViews(t *testing.T) {
 	root := t.TempDir()
@@ -26,14 +73,14 @@ func TestNavigationEntriesShareRouterAndLazyViews(t *testing.T) {
 		{Pattern: "/plain", View: "plain.tsx", Kind: "server"},
 		{Pattern: "/same-source", View: "a.tsx", Kind: "server"},
 	}}}
-	plans, routes, err := planViews(describe, output)
+	plans, routes, _, err := planViews(describe, output, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if routes["/a"] == routes["/same-source"] {
 		t.Fatal("navigation and document entries shared an ID")
 	}
-	if err := writeEntries(root, output, plans, ""); err != nil {
+	if err := writeEntries(root, output, plans, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	router, err := os.ReadFile(filepath.Join(output, "entries", "navigation.tsx"))
