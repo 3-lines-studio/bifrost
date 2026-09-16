@@ -285,6 +285,9 @@ export function start(page) {
 
   setRouter({
     navigate,
+    replace(href) {
+      return transition(new URL(href, location.href), "replace");
+    },
     refresh() {
       return transition(new URL(location.href), "refresh");
     },
@@ -306,10 +309,22 @@ export function start(page) {
 }
 `
 
-const navigationAPI = `type Router = {
+const navigationAPI = `import { createContext, createElement, useContext } from "react";
+import type { AnchorHTMLAttributes, ReactNode } from "react";
+
+type Router = {
   navigate(href: string): Promise<void>;
+  replace(href: string): Promise<void>;
   refresh(): Promise<void>;
 };
+
+type Route = {
+  pathname: string;
+  params: Record<string, unknown>;
+  searchParams: Record<string, unknown>;
+};
+
+const route = createContext<Route>({ pathname: "", params: {}, searchParams: {} });
 
 let router: Router | undefined;
 
@@ -324,10 +339,63 @@ export async function navigate(href: string): Promise<void> {
   await router.navigate(href);
 }
 
+export async function replace(href: string): Promise<void> {
+  if (!router) {
+    throw new Error("Bifrost navigation requires a mounted convention app");
+  }
+  await router.replace(href);
+}
+
 export async function refresh(): Promise<void> {
   if (!router) {
     throw new Error("Bifrost navigation requires a mounted convention app");
   }
   await router.refresh();
+}
+
+export function RouteProvider({ pathname = "", params = {}, searchParams = {}, children }: {
+  pathname?: string;
+  params?: Record<string, unknown>;
+  searchParams?: Record<string, unknown>;
+  children?: ReactNode;
+}) {
+  return createElement(route.Provider, { value: { pathname, params, searchParams } }, children);
+}
+
+export function usePathname(): string {
+  return useContext(route).pathname;
+}
+
+export function useParams(): Record<string, unknown> {
+  return useContext(route).params;
+}
+
+export function useSearchParams(): URLSearchParams {
+  const { searchParams } = useContext(route);
+  const values = new URLSearchParams();
+  for (const [key, value] of Object.entries(searchParams)) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        values.append(key, String(item));
+      }
+      continue;
+    }
+    values.append(key, String(value));
+  }
+  return values;
+}
+
+export function useRouter() {
+  return {
+    push: (href: string) => navigate(href),
+    replace: (href: string) => replace(href),
+    refresh: () => refresh(),
+    back: () => history.back(),
+    forward: () => history.forward(),
+  };
+}
+
+export function Link({ href, children, ...rest }: { href: string } & AnchorHTMLAttributes<HTMLAnchorElement>) {
+  return createElement("a", { href, ...rest }, children);
 }
 `

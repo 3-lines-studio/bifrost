@@ -32,7 +32,7 @@ func TestRunInitCreatesFormattedScaffoldAndRefusesOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"virtual:bifrost/navigation", "navigate(href: string): Promise<void>", "refresh(): Promise<void>"} {
+	for _, expected := range []string{"virtual:bifrost/navigation", "navigate(href: string): Promise<void>", "replace(href: string): Promise<void>", "usePathname(): string", "useSearchParams(): URLSearchParams", "export function Link"} {
 		if !strings.Contains(string(types), expected) {
 			t.Fatalf("bifrost.d.ts does not contain %q", expected)
 		}

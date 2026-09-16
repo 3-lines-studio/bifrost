@@ -166,6 +166,39 @@ func TestConventionPrivateDirectoriesAreNotRouted(t *testing.T) {
 	}
 }
 
+func TestConventionViewsWrapTheTreeInTheRouteProvider(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"layout.tsx": "export function Layout({ children }) { return children }",
+		"page.tsx":   "export function Page() { return null }",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeConventionViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", "page-0.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(view)
+	for _, expected := range []string{
+		"import { RouteProvider } from 'virtual:bifrost/navigation';",
+		"return <RouteProvider pathname={props.pathname} params={props.params} searchParams={props.searchParams}><Layout0 key={\"layout.tsx\"}",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("generated view does not contain %q:\n%s", expected, text)
+		}
+	}
+}
+
 func TestConventionViewsGenerateMetadataHead(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
@@ -457,6 +490,7 @@ func TestGeneratedMainInjectsRequestProps(t *testing.T) {
 		`return requestPage(r, map[string]any{"slug": requestSegments(r.PathValue("slug"))}, nil, 0)`,
 		`values["params"] = params`,
 		`values["searchParams"] = requestSearchParams(r)`,
+		`values["pathname"] = r.URL.EscapedPath()`,
 		`"strings"`,
 		`reflect.ValueOf(props)`,
 		`a page loader must return a map with string keys, or bifrost.PageData with one`,

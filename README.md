@@ -173,7 +173,7 @@ The other files in a route directory are optional:
 
 Every view accepts a default export instead of the named one, so `export default function Page` and `export default function Layout({ children })` work.
 
-Every page also receives `params` and `searchParams` merged into its loader props, so a page reads `params.slug` and `searchParams.tab` without asking the loader. `params` uses the folder name as the key, and a catch-all parameter is an array of segments. A repeated query key is an array too. Because Bifrost merges them into the props, a loader must return a map or a `bifrost.PageData` whose `Props` is a map.
+Every page also receives `params`, `searchParams`, and `pathname` merged into its loader props, so a page reads `params.slug` and `searchParams.tab` without asking the loader. `params` uses the folder name as the key, and a catch-all parameter is an array of segments. A repeated query key is an array too. Because Bifrost merges them into the props, a loader must return a map or a `bifrost.PageData` whose `Props` is a map.
 
 A layout or a page can export `metadata` instead of a `Head` component. Bifrost merges the objects from the outer layouts down to the page, so a page overrides one key and inherits the rest. It renders `title`, `description`, `keywords`, `alternates.canonical`, `robots.index`, `robots.follow`, and `openGraph` (`title`, `description`, `url`, `images`). `generateMetadata(props)` covers what depends on the request: it receives the page props, may be async, and its result merges the same way.
 
@@ -193,7 +193,7 @@ Generated convention routes use `Route.WithNavigation()`. Its view must export a
 
 ### Programmatic navigation and refresh
 
-Convention apps can import `navigate` and `refresh` from `virtual:bifrost/navigation`. Call them from browser event handlers or effects, not during rendering:
+Convention apps can import `navigate`, `replace`, `refresh`, `Link`, and the navigation hooks from `virtual:bifrost/navigation`. Call `navigate`, `replace`, and `refresh` from browser event handlers or effects, not during rendering:
 
 ```tsx
 import { navigate, refresh } from "virtual:bifrost/navigation";
@@ -207,15 +207,51 @@ export function Actions() {
 ```
 
 - `navigate(href)` follows the same path as an internal link and adds a history entry. Relative URLs resolve against the current browser URL. External HTTP(S) URLs use a document load; other URL schemes reject with `TypeError`.
+- `replace(href)` does the same but replaces the current history entry.
 - `refresh()` reruns the current URL's middleware and loader without adding a history entry. It updates props and head metadata while keeping page/layout state, focus, and scroll. Call `await refresh()` after a successful mutation to display fresh server data. If the server redirects, Bifrost replaces the current history entry and applies normal route state and focus rules.
-- Both return `Promise<void>`. They resolve after the client update, a superseding request, or initiation of a document fallback; they do not wait for a fallback document to load. Importing them during SSR is safe, but calling them without a mounted client router rejects.
+- They return `Promise<void>`. They resolve after the client update, a superseding request, or initiation of a document fallback; they do not wait for a fallback document to load. Importing them during SSR is safe, but calling them without a mounted client router rejects.
+
+The hooks read the current route. Bifrost provides the values on the server and on the client, so a component that renders them hydrates without a mismatch:
+
+```tsx
+import { Link, useParams, usePathname, useSearchParams, useRouter } from "virtual:bifrost/navigation";
+
+export function Nav() {
+  const pathname = usePathname();
+  const params = useParams();
+  const tab = useSearchParams().get("tab");
+  const router = useRouter();
+  return <nav>
+    <Link href="/posts" aria-current={pathname === "/posts" ? "page" : undefined}>{tab}</Link>
+    <button onClick={() => router.push("/posts")}>Posts</button>
+  </nav>;
+}
+```
+
+- `usePathname()` returns the current pathname, percent-encoded as the browser reports it.
+- `useParams()` returns the route parameters, the same object the page receives. In a layout they are the parameters of the page below it.
+- `useSearchParams()` returns a `URLSearchParams` built from the query string.
+- `useRouter()` returns `push`, `replace`, `refresh`, `back`, and `forward`. `back` and `forward` use browser history.
+- `Link` renders an anchor. On click Bifrost navigates in place, exactly like any other internal link, and a document load happens when JavaScript is off.
 
 `bifrost init` includes the types. Existing convention apps can add this to `bifrost.d.ts`:
 
 ```ts
 declare module "virtual:bifrost/navigation" {
   export function navigate(href: string): Promise<void>;
+  export function replace(href: string): Promise<void>;
   export function refresh(): Promise<void>;
+  export function Link(props: { href: string; children?: unknown } & Record<string, unknown>): any;
+  export function usePathname(): string;
+  export function useParams(): Record<string, string | string[]>;
+  export function useSearchParams(): URLSearchParams;
+  export function useRouter(): {
+    push(href: string): Promise<void>;
+    replace(href: string): Promise<void>;
+    refresh(): Promise<void>;
+    back(): void;
+    forward(): void;
+  };
 }
 ```
 

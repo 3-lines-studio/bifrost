@@ -340,6 +340,7 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 		}
 		var imports strings.Builder
 		imports.WriteString("import { Fragment } from 'react';\n")
+		imports.WriteString("import { RouteProvider } from 'virtual:bifrost/navigation';\n")
 		pageView := filepath.Join(routeRoot, filepath.FromSlash(routes[index].View))
 		metadata, err := conventionMetadataSources(append(slices.Clone(layouts), pageView))
 		if err != nil {
@@ -407,6 +408,7 @@ func writeConventionViews(projectRoot, routeRoot string, routes []conventionRout
 			}
 			body = fmt.Sprintf("<%s%d key={%s} params={props.params}>%s</%s%d>", name, wrapperIndex, key, body, name, wrapperIndex)
 		}
+		body = "<RouteProvider pathname={props.pathname} params={props.params} searchParams={props.searchParams}>" + body + "</RouteProvider>"
 		head := ""
 		switch {
 		case metadataUsesProps(metadata):
@@ -930,7 +932,7 @@ func writeConventionMain(root, generated string, routes []conventionRoute, goDir
 		fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, %s).WithNavigation(),\n", strconv.Quote(route.Pattern), strconv.Quote(route.View), loader)
 	}
 	if hasNotFoundPage {
-		fmt.Fprintf(&loaders, "func loadNotFound(*http.Request) (any, error) {\n\treturn bifrost.PageData{Status: http.StatusNotFound}, nil\n}\n\n")
+		fmt.Fprintf(&loaders, "func loadNotFound(r *http.Request) (any, error) {\n\treturn bifrost.PageData{Props: map[string]any{\"pathname\": r.URL.EscapedPath()}, Status: http.StatusNotFound}, nil\n}\n\n")
 	}
 	writeConventionRequestProps(&loaders, hasSegments)
 	for _, directory := range goDirs {
