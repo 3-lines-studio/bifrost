@@ -2,16 +2,29 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+addr=127.0.0.1:18109
 tmp=$(mktemp -d)
 pid=""
-cleanup() {
-  if [[ -n "$pid" ]]; then
-    kill -TERM "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
+stop_server() {
+  if [[ -z "$pid" ]]; then
+    return
   fi
+  pkill -TERM -P "$pid" 2>/dev/null || true
+  kill -TERM "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  pid=""
+}
+cleanup() {
+  stop_server
   rm -rf "$tmp"
 }
 trap cleanup EXIT
+assert_free() {
+  if curl -fsS "http://$addr/" >/dev/null 2>&1; then
+    echo "$addr is already serving; stop the stray process before running this script" >&2
+    exit 1
+  fi
+}
 trap 'cat "$tmp/server.log" "$tmp/build.log" 2>/dev/null' ERR
 
 cd "$root"
@@ -165,16 +178,17 @@ EOF
 printf 'file body\n' >"$app/public/file.txt"
 
 for mode in production development; do
+  assert_free
   if [[ "$mode" = production ]]; then
     "$tmp/bifrost" build "$app" >"$tmp/build.log" 2>&1
-    BIFROST_ADDR=127.0.0.1:18109 "$app/.bifrost/bifrost-app" >"$tmp/server.log" 2>&1 &
+    BIFROST_ADDR="$addr" "$app/.bifrost/bifrost-app" >"$tmp/server.log" 2>&1 &
   else
-    BIFROST_ADDR=127.0.0.1:18109 "$tmp/bifrost" dev "$app" >"$tmp/server.log" 2>&1 &
+    BIFROST_ADDR="$addr" "$tmp/bifrost" dev "$app" >"$tmp/server.log" 2>&1 &
   fi
   pid=$!
   ready=0
   for _ in $(seq 1 600); do
-    if curl -fsS http://127.0.0.1:18109/ >/dev/null 2>&1; then
+    if curl -fsS "http://$addr/" >/dev/null 2>&1; then
       ready=1
       break
     fi
@@ -182,8 +196,6 @@ for mode in production development; do
   done
   test "$ready" = 1
   bun "$root/scripts/navigation-browser.mjs"
-  kill -TERM "$pid"
-  wait "$pid"
-  pid=""
+  stop_server
   echo "$mode navigation passed"
 done
