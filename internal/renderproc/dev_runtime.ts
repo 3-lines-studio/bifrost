@@ -84,12 +84,10 @@ await vite.listen();
 vite.printUrls();
 
 if (devEntries) {
-  try {
-    for (const name of readdirSync(devEntries)) {
-      if (!name.endsWith("-client.tsx")) continue;
-      vite.warmupRequest(`/@fs${path.join(devEntries, name)}`).catch(() => {});
-    }
-  } catch {}
+  for (const name of readdirSync(devEntries)) {
+    if (!name.endsWith("-client.tsx")) continue;
+    await vite.warmupRequest(`/@fs${path.join(devEntries, name)}`);
+  }
 }
 
 if (routesFile) {
