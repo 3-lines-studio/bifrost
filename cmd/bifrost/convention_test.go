@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -85,8 +86,126 @@ func TestNestedConventionViewUsesProjectRelativePath(t *testing.T) {
 }
 
 func TestConventionPatternRejectsInvalidDynamicSegment(t *testing.T) {
-	if _, err := conventionPattern("posts/_"); err == nil {
+	if _, _, err := conventionPattern("posts/_"); err == nil {
 		t.Fatal("empty dynamic segment was accepted")
+	}
+}
+
+func TestConventionPatternNextSyntax(t *testing.T) {
+	cases := []struct {
+		relative string
+		pattern  string
+		params   []conventionParam
+	}{
+		{"about", "/about", nil},
+		{"posts/slug_", "/posts/{slug}", []conventionParam{{Name: "slug", Value: "slug"}}},
+		{"posts/post-id_", "/posts/{post_id}", []conventionParam{{Name: "post-id", Value: "post_id"}}},
+		{"docs/slug__", "/docs/{slug...}", []conventionParam{{Name: "slug", Value: "slug"}}},
+		{"marketing~/about", "/about", nil},
+		{"marketing~", "/{$}", nil},
+	}
+	for _, test := range cases {
+		pattern, params, err := conventionPattern(test.relative)
+		if err != nil {
+			t.Fatalf("%s: %v", test.relative, err)
+		}
+		if pattern != test.pattern {
+			t.Fatalf("%s: pattern = %q, want %q", test.relative, pattern, test.pattern)
+		}
+		if !slices.Equal(params, test.params) {
+			t.Fatalf("%s: params = %v, want %v", test.relative, params, test.params)
+		}
+	}
+}
+
+func TestConventionPatternRejectsNextOnlySyntax(t *testing.T) {
+	cases := map[string]string{
+		"posts/[slug]":    "slug_",
+		"posts/[...slug]": "slug__",
+		"(marketing)":     "marketing~",
+		"@modal":          "parallel route folders are not supported",
+		"posts/slug___":   "one _ for a parameter",
+		"slug__/posts":    "must be the last segment",
+		"posts/post id":   "invalid character",
+	}
+	for relative, expected := range cases {
+		_, _, err := conventionPattern(filepath.FromSlash(relative))
+		if err == nil {
+			t.Fatalf("%s: invalid segment was accepted", relative)
+		}
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("%s: error = %q, want %q", relative, err, expected)
+		}
+	}
+}
+
+func TestConventionPrivateDirectoriesAreNotRouted(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"page.tsx", "_components/Card.tsx"} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverConventionRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || routes[0].Pattern != "/{$}" {
+		t.Fatalf("private directory was routed: %v", routes)
+	}
+	path := filepath.Join(root, "_components", "page.tsx")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := discoverConventionRoutes(root); err == nil {
+		t.Fatal("page.tsx inside a private directory was accepted")
+	}
+}
+
+func TestConventionNotFoundRoutesUseTheURLPrefix(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"posts/not-found.tsx", "marketing~/not-found.tsx", "posts/api/not-found.tsx"} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := appendNotFoundRoutes(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var patterns []string
+	for _, route := range routes {
+		patterns = append(patterns, route.Pattern)
+	}
+	if got := strings.Join(patterns, ","); got != "/posts/api/{path...},/posts/{path...},/{path...}" {
+		t.Fatalf("patterns = %q", got)
+	}
+}
+
+func TestGeneratedMainRenamesPathValuesForGo(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	routes := []conventionRoute{{Pattern: "/posts/{post_id}", Params: []conventionParam{{Name: "post-id", Value: "post_id"}}, View: "page.tsx"}}
+	if err := writeConventionMain(root, generated, routes, nil); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), `r.SetPathValue("post-id", r.PathValue("post_id"))`) {
+		t.Fatalf("generated main does not rename the path value:\n%s", source)
 	}
 }
 

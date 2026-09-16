@@ -141,6 +141,35 @@ export function Nav() {
 
 The module is read-only metadata. Explicitly wired apps own their client-side navigation. Convention apps include it automatically.
 
+## Convention app files
+
+The project root is the route root, or the `app` directory when it exists. A directory becomes a route when it contains `page.tsx`, and its path is the URL path.
+
+Go cannot compile an import path containing brackets, parentheses, or `@`, so directory markers replace the bracketed forms other frameworks use:
+
+```sh
+app/posts/page.tsx            # /posts
+app/posts/post-id_/page.tsx   # /posts/{post-id}
+app/docs/slug__/page.tsx      # /docs/{slug...}
+app/marketing~/about/page.tsx # /about
+app/_components/Card.tsx      # never routed
+```
+
+One trailing `_` marks a parameter that captures one segment. Two mark a parameter that captures the remaining path, and it must be the last segment. A trailing `~` marks a route group: the folder organizes files and never appears in the URL. A leading `_` keeps the whole directory out of routing, and a `page.tsx` or `route.go` inside one is a build error. Bifrost rejects the bracketed forms with an error naming the folder to use instead.
+
+Go needs a legal identifier for every path value. Bifrost replaces the characters a Go identifier cannot contain, so `post-id_` registers `/posts/{post_id}` and `r.PathValue("post-id")` still returns the captured segment.
+
+The other files in a route directory are optional:
+
+- `page.tsx` exports `Page` and, optionally, `Head`.
+- `layout.tsx` exports `Layout`, wraps every route below it, and stays mounted across navigation.
+- `error.tsx` exports `Error`, and `not-found.tsx` exports `NotFound`.
+- `page.go` exports `Load`, the Go loader for `page.tsx`.
+- `route.go` exports any of `Get`, `Post`, `Put`, `Patch`, `Delete`, `Head`, and `Options`.
+- `middleware.go` exports `Middleware`, which wraps every route below it.
+- `server.go` exports `Serve` and is only valid at the route root.
+- `public/` holds files served as they are.
+
 ## Convention navigation
 
 Use normal `<a href="/posts/hello">` links. After the first server render, convention apps fetch the next route through the same Go middleware and loader, lazy-load its Vite module, and update one React root. Shared layouts stay mounted. Back/forward, scroll, hash links, focus, page head, and root document attributes update with the route.

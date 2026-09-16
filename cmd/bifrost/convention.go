@@ -19,9 +19,15 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/builder"
 )
 
+type conventionParam struct {
+	Name  string
+	Value string
+}
+
 type conventionRoute struct {
 	Directory    string
 	Pattern      string
+	Params       []conventionParam
 	View         string
 	ImportPath   string
 	Alias        string
@@ -36,6 +42,7 @@ type conventionRoute struct {
 type conventionGoDir struct {
 	Directory   string
 	Pattern     string
+	Params      []conventionParam
 	ImportPath  string
 	Alias       string
 	Middleware  bool
@@ -181,7 +188,9 @@ func discoverConventionRoutes(root string) ([]conventionRoute, error) {
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() && entry.Name() == ".bifrost" {
+		if skip, err := skipConventionDirectory(filePath, entry); err != nil {
+			return err
+		} else if skip {
 			return filepath.SkipDir
 		}
 		if entry.IsDir() || entry.Name() != "page.tsx" {
@@ -192,7 +201,7 @@ func discoverConventionRoutes(root string) ([]conventionRoute, error) {
 		if err != nil {
 			return err
 		}
-		pattern, err := conventionPattern(relative)
+		pattern, params, err := conventionPattern(relative)
 		if err != nil {
 			return fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err)
 		}
@@ -200,7 +209,7 @@ func discoverConventionRoutes(root string) ([]conventionRoute, error) {
 			return fmt.Errorf("bifrost: duplicate route %q from %s and %s", pattern, previous, filepath.ToSlash(relative))
 		}
 		patterns[pattern] = filepath.ToSlash(relative)
-		route := conventionRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), HasHead: hasHeadExport(filePath)}
+		route := conventionRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, Params: params, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), HasHead: hasHeadExport(filePath)}
 		if _, err := os.Stat(filepath.Join(directory, "page.go")); err == nil {
 			route.PageGo = true
 			route.ImportPath = filepath.ToSlash(relative)
@@ -223,7 +232,9 @@ func appendNotFoundRoutes(root string, routes []conventionRoute) ([]conventionRo
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() && entry.Name() == ".bifrost" {
+		if skip, err := skipConventionDirectory(filePath, entry); err != nil {
+			return err
+		} else if skip {
 			return filepath.SkipDir
 		}
 		if entry.IsDir() || entry.Name() != "not-found.tsx" {
@@ -233,14 +244,11 @@ func appendNotFoundRoutes(root string, routes []conventionRoute) ([]conventionRo
 		if err != nil {
 			return err
 		}
-		pattern := "/{path...}"
-		if relative != "." {
-			base, err := conventionPattern(relative)
-			if err != nil {
-				return err
-			}
-			pattern = base + "/{path...}"
+		base, _, err := conventionPattern(relative)
+		if err != nil {
+			return err
 		}
+		pattern := strings.TrimSuffix(base, "/{$}") + "/{path...}"
 		routes = append(routes, conventionRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), NotFoundPage: true})
 		return nil
 	})
@@ -257,7 +265,9 @@ func discoverConventionGo(root string) ([]conventionGoDir, error) {
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() && entry.Name() == ".bifrost" {
+		if skip, err := skipConventionDirectory(filePath, entry); err != nil {
+			return err
+		} else if skip {
 			return filepath.SkipDir
 		}
 		if entry.IsDir() || entry.Name() != "route.go" && entry.Name() != "middleware.go" && entry.Name() != "server.go" {
@@ -267,7 +277,7 @@ func discoverConventionGo(root string) ([]conventionGoDir, error) {
 		if err != nil {
 			return err
 		}
-		pattern, err := conventionPattern(relative)
+		pattern, params, err := conventionPattern(relative)
 		if err != nil {
 			return fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err)
 		}
@@ -275,6 +285,7 @@ func discoverConventionGo(root string) ([]conventionGoDir, error) {
 		item := byDirectory[directory]
 		item.Directory = directory
 		item.Pattern = pattern
+		item.Params = params
 		byDirectory[directory] = item
 		return nil
 	})
@@ -385,33 +396,179 @@ func fileExists(filePath string) bool {
 	return err == nil
 }
 
-func conventionPattern(relative string) (string, error) {
+func skipConventionDirectory(filePath string, entry os.DirEntry) (bool, error) {
+	if !entry.IsDir() {
+		return false, nil
+	}
+	if entry.Name() == ".bifrost" {
+		return true, nil
+	}
+	if strings.HasPrefix(entry.Name(), "_") {
+		return true, conventionPrivateDirectory(filePath)
+	}
+	return false, nil
+}
+
+func conventionPrivateDirectory(directory string) error {
+	var offender string
+	err := filepath.WalkDir(directory, func(filePath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || offender != "" {
+			return walkErr
+		}
+		if !entry.IsDir() && (entry.Name() == "page.tsx" || entry.Name() == "route.go") {
+			offender = filePath
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if offender == "" {
+		return nil
+	}
+	return fmt.Errorf("bifrost: %s: folders with a leading _ are never routed; rename %s to route it", filepath.ToSlash(offender), filepath.ToSlash(filepath.Dir(offender)))
+}
+
+func conventionPattern(relative string) (string, []conventionParam, error) {
 	if relative == "." {
-		return "/{$}", nil
+		return "/{$}", nil, nil
 	}
 	parts := strings.Split(filepath.ToSlash(relative), "/")
+	segments := make([]string, 0, len(parts))
+	var params []conventionParam
 	for index, part := range parts {
-		if part == "" || part == "." || part == ".." || strings.ContainsAny(part, "{}?#%") {
-			return "", fmt.Errorf("invalid segment %q", part)
+		segment, param, err := conventionSegment(part, index == len(parts)-1)
+		if err != nil {
+			return "", nil, err
 		}
-		if strings.HasSuffix(part, "_") {
-			name := strings.TrimSuffix(part, "_")
-			if name == "" || !goIdentifier(name) {
-				return "", fmt.Errorf("invalid dynamic segment %q", part)
+		if param == nil {
+			if segment != "" {
+				segments = append(segments, segment)
 			}
-			parts[index] = "{" + name + "}"
+			continue
+		}
+		if err := appendConventionParam(&params, *param); err != nil {
+			return "", nil, err
+		}
+		segments = append(segments, segment)
+	}
+	if len(segments) == 0 {
+		return "/{$}", params, nil
+	}
+	return "/" + strings.Join(segments, "/"), params, nil
+}
+
+func conventionSegment(part string, last bool) (string, *conventionParam, error) {
+	if err := conventionSegmentName(part); err != nil {
+		return "", nil, err
+	}
+	if strings.HasSuffix(part, "~") {
+		name := strings.TrimSuffix(part, "~")
+		if name == "" || strings.HasSuffix(name, "_") {
+			return "", nil, fmt.Errorf("invalid route group %s", part)
+		}
+		return "", nil, nil
+	}
+	trailing := len(part) - len(strings.TrimRight(part, "_"))
+	if trailing == 0 {
+		return part, nil, nil
+	}
+	if trailing > 2 {
+		return "", nil, fmt.Errorf("%s: use one _ for a parameter and __ for the remaining path", part)
+	}
+	name := strings.TrimRight(part, "_")
+	if name == "" {
+		return "", nil, fmt.Errorf("invalid parameter %s", part)
+	}
+	if trailing == 2 && !last {
+		return "", nil, fmt.Errorf("the %s parameter must be the last segment", part)
+	}
+	value := conventionPathValue(name)
+	suffix := ""
+	if trailing == 2 {
+		suffix = "..."
+	}
+	return "{" + value + suffix + "}", &conventionParam{Name: name, Value: value}, nil
+}
+
+func appendConventionParam(params *[]conventionParam, param conventionParam) error {
+	for _, existing := range *params {
+		if existing.Name == param.Name {
+			return fmt.Errorf("duplicate parameter %s", param.Name)
+		}
+		if existing.Value == param.Value {
+			return fmt.Errorf("parameters %s and %s share the name %s in Go", param.Name, existing.Name, param.Value)
 		}
 	}
-	return "/" + strings.Join(parts, "/"), nil
+	*params = append(*params, param)
+	return nil
+}
+
+func conventionSegmentName(part string) error {
+	if part == "" || part == "." || part == ".." {
+		return fmt.Errorf("invalid segment %q", part)
+	}
+	for _, r := range part {
+		if goIdentifierRune(r) || r == '-' || r == '.' || r == '+' || r == '~' {
+			continue
+		}
+		switch r {
+		case '[', ']':
+			return fmt.Errorf("%s: brackets are not valid; name the folder %s", part, conventionParameterFolder(part))
+		case '(', ')':
+			return fmt.Errorf("%s: parentheses are not valid; name the folder %s~", part, strings.Trim(part, "()"))
+		case '@':
+			return fmt.Errorf("%s: parallel route folders are not supported", part)
+		}
+		return fmt.Errorf("invalid character %q in segment %s", r, part)
+	}
+	return nil
+}
+
+func conventionParameterFolder(part string) string {
+	name := strings.TrimRight(strings.TrimLeft(part, "["), "]")
+	if rest, ok := strings.CutPrefix(name, "..."); ok {
+		return rest + "__"
+	}
+	return name + "_"
+}
+
+func conventionPathValue(name string) string {
+	if goIdentifier(name) {
+		return name
+	}
+	var value strings.Builder
+	for _, r := range name {
+		if goIdentifierRune(r) {
+			value.WriteRune(r)
+			continue
+		}
+		value.WriteRune('_')
+	}
+	if !goIdentifier(value.String()) {
+		return "_" + value.String()
+	}
+	return value.String()
 }
 
 func goIdentifier(value string) bool {
 	for index, r := range value {
-		if r != '_' && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (index == 0 || r < '0' || r > '9') {
+		if !goIdentifierRune(r) {
+			return false
+		}
+		if index == 0 && r >= '0' && r <= '9' {
 			return false
 		}
 	}
 	return value != ""
+}
+
+func goIdentifierRune(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		return true
+	}
+	return r == '_'
 }
 
 func conventionModule(ctx context.Context, root string, routes []conventionRoute, hasGo bool) (string, string, error) {
@@ -464,6 +621,21 @@ func hasSymbol(ctx context.Context, dir, importPath, name string) bool {
 	command := exec.CommandContext(ctx, "go", "doc", importPath+"."+name)
 	command.Dir = dir
 	return command.Run() == nil
+}
+
+func conventionPathValues(builder *strings.Builder, name, handler string, params []conventionParam) string {
+	var renamed strings.Builder
+	for _, param := range params {
+		if param.Name == param.Value {
+			continue
+		}
+		fmt.Fprintf(&renamed, "\t\tr.SetPathValue(%s, r.PathValue(%s))\n", strconv.Quote(param.Name), strconv.Quote(param.Value))
+	}
+	if renamed.Len() == 0 {
+		return handler
+	}
+	fmt.Fprintf(builder, "func %s(next http.Handler) http.Handler {\n\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n%s\t\tnext.ServeHTTP(w, r)\n\t})\n}\n\n", name, renamed.String())
+	return name + "(" + handler + ")"
 }
 
 func directoryContains(parent, child string) bool {
@@ -527,16 +699,18 @@ func writeConventionMain(root, generated string, routes []conventionRoute, goDir
 		fmt.Fprintf(&imports, "\t%s %s\n", importsByPath[importPath], strconv.Quote(importPath))
 	}
 	var registrations strings.Builder
-	for _, route := range routes {
+	var pathValues strings.Builder
+	for index, route := range routes {
 		handler := "http.Handler(pageMux)"
 		for index := len(goDirs) - 1; index >= 0; index-- {
 			if goDirs[index].Middleware && directoryContains(goDirs[index].Directory, route.Directory) {
 				handler = goDirs[index].Alias + ".Middleware(" + handler + ")"
 			}
 		}
+		handler = conventionPathValues(&pathValues, fmt.Sprintf("pathValues%d", index), handler, route.Params)
 		fmt.Fprintf(&registrations, "\tmux.Handle(%s, %s)\n", strconv.Quote("GET "+route.Pattern), handler)
 	}
-	for _, directory := range goDirs {
+	for directoryIndex, directory := range goDirs {
 		for _, method := range directory.HTTPMethods {
 			handler := "http.HandlerFunc(" + directory.Alias + "." + method + ")"
 			for index := len(goDirs) - 1; index >= 0; index-- {
@@ -544,6 +718,7 @@ func writeConventionMain(root, generated string, routes []conventionRoute, goDir
 					handler = goDirs[index].Alias + ".Middleware(" + handler + ")"
 				}
 			}
+			handler = conventionPathValues(&pathValues, fmt.Sprintf("pathValuesGo%d", directoryIndex), handler, directory.Params)
 			fmt.Fprintf(&registrations, "\tmux.Handle(%s, %s)\n", strconv.Quote(strings.ToUpper(method)+" "+directory.Pattern), handler)
 		}
 	}
@@ -554,7 +729,7 @@ func writeConventionMain(root, generated string, routes []conventionRoute, goDir
 			break
 		}
 	}
-	source := "package main\n\nimport (\n\t\"context\"\n\t\"embed\"\n\t\"errors\"\n\t\"flag\"\n\t\"io/fs\"\n\t\"log\"\n\t\"net/http\"\n\t\"os\"\n\t\"os/signal\"\n\t\"syscall\"\n\t\"time\"\n\n\t\"github.com/3-lines-studio/bifrost\"\n" + imports.String() + ")\n\n//go:embed all:build\nvar embedded embed.FS\n\n" + loaders.String() + "func main() {\n\tif err := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n\nfunc run() error {\n\tassets, err := fs.Sub(embedded, \"build\")\n\tif err != nil {\n\t\treturn err\n\t}\n\tapp, err := bifrost.New(bifrost.Config{SourceRoot: " + strconv.Quote(root) + ", Assets: assets, Routes: []bifrost.Route{\n" + declarations.String() + "\t}})\n\tif err != nil {\n\t\treturn err\n\t}\n\tif bifrost.Building() {\n\t\treturn nil\n\t}\n\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\tdefer stop()\n\tdefer func() {\n\t\tcloseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\t\tdefer cancel()\n\t\t_ = app.Close(closeCtx)\n\t}()\n\tpageMux := http.NewServeMux()\n\tif err := app.Register(pageMux); err != nil {\n\t\treturn err\n\t}\n\tmux := http.NewServeMux()\n" + registrations.String() + "\tmux.Handle(\"/\", pageMux)\n\t" + serve + "\n}\n\nfunc serve(ctx context.Context, handler http.Handler) error {\n\taddr := os.Getenv(\"BIFROST_ADDR\")\n\tif addr == \"\" {\n\t\taddr = \":8080\"\n\t}\n\tflag.StringVar(&addr, \"addr\", addr, \"HTTP listen address\")\n\tflag.Parse()\n\tserver := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10*time.Second}\n\tdone := make(chan error, 1)\n\tgo func() { done <- server.ListenAndServe() }()\n\tselect {\n\tcase err := <-done:\n\t\tif errors.Is(err, http.ErrServerClosed) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\tcase <-ctx.Done():\n\t}\n\tshutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\tdefer cancel()\n\tif err := server.Shutdown(shutdownCtx); err != nil {\n\t\t_ = server.Close()\n\t\treturn err\n\t}\n\terr := <-done\n\tif errors.Is(err, http.ErrServerClosed) {\n\t\treturn nil\n\t}\n\treturn err\n}\n"
+	source := "package main\n\nimport (\n\t\"context\"\n\t\"embed\"\n\t\"errors\"\n\t\"flag\"\n\t\"io/fs\"\n\t\"log\"\n\t\"net/http\"\n\t\"os\"\n\t\"os/signal\"\n\t\"syscall\"\n\t\"time\"\n\n\t\"github.com/3-lines-studio/bifrost\"\n" + imports.String() + ")\n\n//go:embed all:build\nvar embedded embed.FS\n\n" + loaders.String() + pathValues.String() + "func main() {\n\tif err := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n\nfunc run() error {\n\tassets, err := fs.Sub(embedded, \"build\")\n\tif err != nil {\n\t\treturn err\n\t}\n\tapp, err := bifrost.New(bifrost.Config{SourceRoot: " + strconv.Quote(root) + ", Assets: assets, Routes: []bifrost.Route{\n" + declarations.String() + "\t}})\n\tif err != nil {\n\t\treturn err\n\t}\n\tif bifrost.Building() {\n\t\treturn nil\n\t}\n\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\tdefer stop()\n\tdefer func() {\n\t\tcloseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\t\tdefer cancel()\n\t\t_ = app.Close(closeCtx)\n\t}()\n\tpageMux := http.NewServeMux()\n\tif err := app.Register(pageMux); err != nil {\n\t\treturn err\n\t}\n\tmux := http.NewServeMux()\n" + registrations.String() + "\tmux.Handle(\"/\", pageMux)\n\t" + serve + "\n}\n\nfunc serve(ctx context.Context, handler http.Handler) error {\n\taddr := os.Getenv(\"BIFROST_ADDR\")\n\tif addr == \"\" {\n\t\taddr = \":8080\"\n\t}\n\tflag.StringVar(&addr, \"addr\", addr, \"HTTP listen address\")\n\tflag.Parse()\n\tserver := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10*time.Second}\n\tdone := make(chan error, 1)\n\tgo func() { done <- server.ListenAndServe() }()\n\tselect {\n\tcase err := <-done:\n\t\tif errors.Is(err, http.ErrServerClosed) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\tcase <-ctx.Done():\n\t}\n\tshutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\tdefer cancel()\n\tif err := server.Shutdown(shutdownCtx); err != nil {\n\t\t_ = server.Close()\n\t\treturn err\n\t}\n\terr := <-done\n\tif errors.Is(err, http.ErrServerClosed) {\n\t\treturn nil\n\t}\n\treturn err\n}\n"
 	formatted, err := format.Source([]byte(source))
 	if err != nil {
 		return err
