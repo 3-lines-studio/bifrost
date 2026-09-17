@@ -40,8 +40,8 @@ type Options struct {
 	StaticWorkers       int
 	SourceMaps          bool
 	ViteConfig          string
+	RouteParams         map[string][]string
 	OnDescribe          func(protocol.DescribeResult)
-	OnBeforeOutputSwap  func()
 	OnOutput            func(string)
 	Version             string
 }
@@ -62,7 +62,14 @@ type viewPlan struct {
 	ServerFile string
 }
 
-func Build(ctx context.Context, options Options) error {
+func Describe(ctx context.Context, options Options) (protocol.DescribeResult, error) {
+	if _, _, err := prepareApp(ctx, options); err != nil {
+		return protocol.DescribeResult{}, err
+	}
+	return runDescribe(ctx, options.Dir, options.Package)
+}
+
+func prepareApp(ctx context.Context, options Options) (packageInfo, string, error) {
 	if options.Package == "" {
 		options.Package = "."
 	}
@@ -71,10 +78,10 @@ func Build(ctx context.Context, options Options) error {
 	}
 	info, err := inspectPackage(ctx, options.Dir, options.Package)
 	if err != nil {
-		return err
+		return packageInfo{}, "", err
 	}
 	if info.Name != "main" {
-		return fmt.Errorf("bifrost: package %s is %q, want main", info.ImportPath, info.Name)
+		return packageInfo{}, "", fmt.Errorf("bifrost: package %s is %q, want main", info.ImportPath, info.Name)
 	}
 	output := options.Output
 	if output == "" {
@@ -83,6 +90,14 @@ func Build(ctx context.Context, options Options) error {
 		output = filepath.Join(info.Dir, output)
 	}
 	if err := ensureGeneratedEmbed(info.Dir, info.Name, output); err != nil {
+		return packageInfo{}, "", err
+	}
+	return info, output, nil
+}
+
+func Build(ctx context.Context, options Options) error {
+	_, output, err := prepareApp(ctx, options)
+	if err != nil {
 		return err
 	}
 
@@ -134,11 +149,11 @@ func Build(ctx context.Context, options Options) error {
 	if options.Development && !options.ExternalDevelopment {
 		buildID = digest(strconv.FormatInt(time.Now().UnixNano(), 10))
 	}
-	plans, routeViews, err := planViews(describe, temporary)
+	plans, routeViews, client, err := planViews(describe, temporary, options.RouteParams)
 	if err != nil {
 		return err
 	}
-	if err := writeEntries(describe.SourceRoot, temporary, plans, buildID); err != nil {
+	if err := writeEntries(describe.SourceRoot, temporary, plans, client, buildID); err != nil {
 		return err
 	}
 	if options.Development && !options.ExternalDevelopment {
@@ -283,9 +298,6 @@ func Build(ctx context.Context, options Options) error {
 		_ = os.RemoveAll(filepath.Join(temporary, "entries"))
 	}
 
-	if options.OnBeforeOutputSwap != nil {
-		options.OnBeforeOutputSwap()
-	}
 	backup := output + ".old"
 	_ = os.RemoveAll(backup)
 	if _, err := os.Stat(output); err == nil {
@@ -363,6 +375,8 @@ func runGenerate(ctx context.Context, dir, packagePath string) (protocol.Generat
 	return result, err
 }
 
+const phaseExitGrace = 5 * time.Second
+
 func runPhase(ctx context.Context, dir, packagePath, phase string, result any) error {
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -382,10 +396,7 @@ func runPhase(ctx context.Context, dir, packagePath, phase string, result any) e
 	}
 	_ = writer.Close()
 	decodeErr := json.NewDecoder(reader).Decode(result)
-	if command.Process != nil {
-		_ = syscall.Kill(-command.Process.Pid, syscall.SIGTERM)
-	}
-	waitErr := command.Wait()
+	waitErr := waitForPhase(command, phaseExitGrace)
 	if decodeErr != nil {
 		if waitErr != nil {
 			return fmt.Errorf("bifrost: %s phase: %w", phase, waitErr)
@@ -395,9 +406,26 @@ func runPhase(ctx context.Context, dir, packagePath, phase string, result any) e
 	return nil
 }
 
-func planViews(describe protocol.DescribeResult, output string) ([]viewPlan, map[string]string, error) {
+func waitForPhase(command *exec.Cmd, grace time.Duration) error {
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+	}
+	if command.Process != nil {
+		_ = syscall.Kill(-command.Process.Pid, syscall.SIGTERM)
+	}
+	return <-done
+}
+
+func planViews(describe protocol.DescribeResult, output string, routeParams map[string][]string) ([]viewPlan, map[string]string, []clientRoute, error) {
 	byKey := make(map[string]viewPlan)
 	routeViews := make(map[string]string, len(describe.Spec.Routes))
+	navigationViews := make(map[string]string, len(describe.Spec.Routes))
 	for _, route := range describe.Spec.Routes {
 		mode := "hydrate"
 		if route.Kind == "client" {
@@ -414,17 +442,20 @@ func planViews(describe protocol.DescribeResult, output string) ([]viewPlan, map
 		}
 		byKey[id] = plan
 		routeViews[route.Pattern] = id
+		if route.Navigation {
+			navigationViews[route.Pattern] = id
+		}
 	}
 	plans := make([]viewPlan, 0, len(byKey))
 	for _, plan := range byKey {
 		plans = append(plans, plan)
 	}
 	slices.SortFunc(plans, func(a, b viewPlan) int { return strings.Compare(a.ID, b.ID) })
-	return plans, routeViews, nil
+	return plans, routeViews, clientRoutes(navigationViews, routeParams), nil
 }
 
-func writeEntries(sourceRoot, output string, plans []viewPlan, buildID string) error {
-	if err := writeNavigation(sourceRoot, output, plans); err != nil {
+func writeEntries(sourceRoot, output string, plans []viewPlan, routes []clientRoute, buildID string) error {
+	if err := writeNavigation(sourceRoot, output, plans, routes); err != nil {
 		return err
 	}
 	for _, plan := range plans {
@@ -449,7 +480,7 @@ func writeEntries(sourceRoot, output string, plans []viewPlan, buildID string) e
 			return err
 		}
 		if plan.ServerFile != "" {
-			server := "import React from 'react';\nimport { renderToReadableStream, renderToString } from 'react-dom/server';\nimport * as M from " + quoted + ";\nexport async function render(props, signal) { let renderError; const head = typeof M.Head === 'function' ? renderToString(React.createElement(M.Head, props)) : ''; const source = await renderToReadableStream(React.createElement(M.Page, props), { signal, onError(error) { renderError = error instanceof Error ? error : new Error(String(error)); } }); const reader = source.getReader(); const body = new ReadableStream({ async pull(controller) { try { const result = await reader.read(); if (renderError) throw renderError; if (result.done) controller.close(); else controller.enqueue(result.value); } catch (error) { controller.error(error); } }, cancel(reason) { return reader.cancel(reason); } }); return { head, body }; }\n"
+			server := "import React from 'react';\nimport { renderToReadableStream, renderToString } from 'react-dom/server';\nimport * as M from " + quoted + ";\nexport async function render(props, signal) { let renderError; const headElement = typeof M.renderHead === 'function' ? await M.renderHead(props) : typeof M.Head === 'function' ? React.createElement(M.Head, props) : null; const head = headElement ? renderToString(headElement) : ''; const source = await renderToReadableStream(React.createElement(M.Page, props), { signal, onError(error) { renderError = error instanceof Error ? error : new Error(String(error)); } }); const reader = source.getReader(); const body = new ReadableStream({ async pull(controller) { try { const result = await reader.read(); if (renderError) throw renderError; if (result.done) controller.close(); else controller.enqueue(result.value); } catch (error) { controller.error(error); } }, cancel(reason) { return reader.cancel(reason); } }); return { head, body }; }\n"
 			if err := os.WriteFile(plan.ServerFile, []byte(server), 0o644); err != nil {
 				return err
 			}
@@ -621,12 +652,10 @@ func collectExternalDevelopmentViews(output string, plans []viewPlan) ([]protoco
 func collectBuiltViews(output string, plans []viewPlan, development bool) ([]protocol.BuiltView, []protocol.FileRef, error) {
 	clientManifestPath := filepath.Join(output, "dist", "client-manifest.json")
 	clientManifest, err := readViteManifest(clientManifestPath)
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, nil, err
 	}
-	if err := os.Remove(clientManifestPath); err != nil {
-		return nil, nil, err
-	}
+	_ = os.Remove(clientManifestPath)
 	var serverManifest viteManifest
 	serverManifestPath := filepath.Join(output, "ssr", "server-manifest.json")
 	if !development {

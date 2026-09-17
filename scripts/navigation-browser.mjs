@@ -16,9 +16,20 @@ try {
       documents++;
     }
   });
+  async function hydration() {
+    const counter = page.getByRole("button", { name: "Root 0", exact: true });
+    for (let attempt = 0; attempt < 60; attempt++) {
+      if (await counter.count() === 0) {
+        return;
+      }
+      await counter.click();
+      await page.waitForTimeout(500);
+    }
+    throw new Error("the Root counter ignored clicks after the document loaded");
+  }
+
   await page.goto(origin);
-  await page.getByRole("button", { name: "Root 0", exact: true }).click();
-  await page.getByRole("button", { name: "Root 1", exact: true }).waitFor();
+  await hydration();
   await page.evaluate(() => { window.navigationMarker = "alive"; });
 
   async function click(name, heading) {
@@ -149,8 +160,11 @@ try {
   const slow = page.waitForRequest(request => request.url().endsWith("/posts/slow"));
   await page.getByRole("link", { name: "Slow", exact: true }).click();
   await slow;
-  assert.equal(await page.getByRole("heading", { name: "two", exact: true }).count(), 1);
+  await page.getByRole("heading", { name: "Loading", exact: true }).waitFor();
+  assert.equal(await page.locator("#loading-param").textContent(), "slow");
+  assert.equal(await page.getByRole("heading", { name: "two", exact: true }).count(), 0);
   assert.equal(await page.locator("#app").getAttribute("aria-busy"), "true");
+  await page.getByRole("button", { name: "Posts 1", exact: true }).waitFor();
   await click("One", "one");
   await page.waitForTimeout(2100);
   assert.equal(new URL(page.url()).pathname, "/posts/one");
@@ -213,16 +227,14 @@ try {
   await page.getByRole("link", { name: "Reload", exact: true }).click();
   await page.waitForFunction(() => window.navigationMarker === undefined);
   assert.equal(documents, 2);
-  await page.getByRole("button", { name: "Root 0", exact: true }).click();
-  await page.getByRole("button", { name: "Root 1", exact: true }).waitFor();
+  await hydration();
   await page.getByRole("link", { name: "File", exact: true }).click();
   await page.waitForURL(origin + "/file.txt");
   assert.equal(documents, 3);
   assert.match(await page.locator("body").textContent(), /file body/);
 
   await page.goto(origin);
-  await page.getByRole("button", { name: "Root 0", exact: true }).click();
-  await page.getByRole("button", { name: "Root 1", exact: true }).waitFor();
+  await hydration();
   await page.route("**/posts/one", async route => {
     if (route.request().headers().accept !== "application/vnd.bifrost.navigation+json") {
       await route.continue();
@@ -235,8 +247,7 @@ try {
   const before = documents;
   await click("One", "one");
   assert.equal(documents, before + 1);
-  await page.getByRole("button", { name: "Root 0", exact: true }).click();
-  await page.getByRole("button", { name: "Root 1", exact: true }).waitFor();
+  await hydration();
   const beforeRefreshFallback = await page.evaluate(() => history.length);
   await page.evaluate(() => { window.navigationMarker = "refresh-fallback"; });
   await page.evaluate(() => { window.navigationAPI.refresh(); });

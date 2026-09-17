@@ -202,16 +202,6 @@ func runDev(args []string) error {
 			if err := writeRoutesFile(filepath.Join(socketDir, "routes.json"), description.Spec.Routes); err != nil {
 				fmt.Fprintln(os.Stderr, "bifrost: write development routes:", err)
 			}
-		}, OnBeforeOutputSwap: func() {
-			if bridge == nil || bridge.Process == nil {
-				return
-			}
-			_ = syscall.Kill(-bridge.Process.Pid, syscall.SIGTERM)
-			if bridgeDone != nil {
-				<-bridgeDone
-			}
-			bridge = nil
-			bridgeDone = nil
 		}, OnOutput: func(output string) { buildOutput = output }, Version: bifrost.Version}
 		if convention != nil {
 			options.Output = convention.Output
@@ -219,13 +209,10 @@ func runDev(args []string) error {
 		if err := builder.Build(ctx, options); err != nil {
 			return err
 		}
-		if err := os.RemoveAll(devDir); err != nil {
-			return err
-		}
 		if err := os.MkdirAll(devDir, 0o700); err != nil {
 			return err
 		}
-		if err := os.CopyFS(filepath.Join(devDir, "entries"), os.DirFS(filepath.Join(buildOutput, "entries"))); err != nil {
+		if err := copyEntries(filepath.Join(buildOutput, "entries"), filepath.Join(devDir, "entries")); err != nil {
 			return err
 		}
 		if err := ensureBridge(); err != nil {
@@ -305,6 +292,31 @@ func requireViteInstalled(dir string) error {
 		current = parent
 	}
 	return errors.New("bifrost: Vite is not installed; run `bun install` first")
+}
+
+func copyEntries(source, target string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(target, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(destination, 0o700)
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		staging := destination + ".tmp"
+		if err := os.WriteFile(staging, content, 0o600); err != nil {
+			return err
+		}
+		return os.Rename(staging, destination)
+	})
 }
 
 func writeRoutesFile(path string, routes []protocol.RouteSpec) error {
