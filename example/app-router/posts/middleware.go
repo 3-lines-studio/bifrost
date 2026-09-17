@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	app "github.com/3-lines-studio/bifrost/example/convention"
+	app "github.com/3-lines-studio/bifrost/example/app-router"
 )
 
 func Middleware(next http.Handler) http.Handler {

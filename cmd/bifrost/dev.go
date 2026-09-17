@@ -41,18 +41,18 @@ func runDev(args []string) error {
 	if flags.NArg() > 1 {
 		return fmt.Errorf("dev accepts one package path")
 	}
-	var convention *conventionApp
+	var router *appRouter
 	buildDir := *dir
-	projectRoot, routeRoot, isConvention, err := conventionRoots(*dir, packagePath)
+	projectRoot, routeRoot, isAppRouter, err := appRouterRoots(*dir, packagePath)
 	if err != nil {
 		return err
 	}
-	if isConvention {
-		app, err := prepareConventionApp(context.Background(), projectRoot, routeRoot)
+	if isAppRouter {
+		app, err := prepareAppRouter(context.Background(), projectRoot, routeRoot)
 		if err != nil {
 			return err
 		}
-		convention = &app
+		router = &app
 		packagePath = app.Package
 		*dir = app.ProjectRoot
 		buildDir = app.WorkDir
@@ -72,10 +72,10 @@ func runDev(args []string) error {
 	}
 	if *prepareOnly {
 		options := builder.Options{Package: packagePath, Dir: buildDir, Development: true, ExternalDevelopment: true, SourceMaps: false, ViteConfig: *viteConfig, OnDescribe: func(description protocol.DescribeResult) {
-			printRouteTable(description, convention.routeRows())
+			printRouteTable(description, router.routeRows())
 		}, Version: bifrost.Version}
-		if convention != nil {
-			options.Output = convention.Output
+		if router != nil {
+			options.Output = router.Output
 		}
 		return builder.Build(context.Background(), options)
 	}
@@ -199,14 +199,14 @@ func runDev(args []string) error {
 
 	buildAndStart := func() error {
 		options := builder.Options{Package: packagePath, Dir: buildDir, Development: true, SourceMaps: false, ViteConfig: *viteConfig, OnDescribe: func(description protocol.DescribeResult) {
-			printRouteTable(description, convention.routeRows())
+			printRouteTable(description, router.routeRows())
 			sourceRoot = description.SourceRoot
 			if err := writeRoutesFile(filepath.Join(socketDir, "routes.json"), description.Spec.Routes); err != nil {
 				fmt.Fprintln(os.Stderr, "bifrost: write development routes:", err)
 			}
 		}, OnOutput: func(output string) { buildOutput = output }, Version: bifrost.Version}
-		if convention != nil {
-			options.Output = convention.Output
+		if router != nil {
+			options.Output = router.Output
 		}
 		if err := builder.Build(ctx, options); err != nil {
 			return err

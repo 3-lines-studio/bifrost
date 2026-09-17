@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestDiscoverConventionRoutes(t *testing.T) {
+func TestDiscoverAppRouterRoutes(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"page.tsx", "about/page.tsx", "posts/slug_/page.tsx"} {
 		path := filepath.Join(root, filepath.FromSlash(name))
@@ -22,7 +22,7 @@ func TestDiscoverConventionRoutes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	routes, err := discoverConventionRoutes(root)
+	routes, err := discoverRoutes(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestDiscoverConventionRoutes(t *testing.T) {
 	}
 }
 
-func TestConventionRoots(t *testing.T) {
+func TestAppRouterRoots(t *testing.T) {
 	projectRoot := t.TempDir()
 	appRoot := filepath.Join(projectRoot, "app")
 	if err := os.Mkdir(appRoot, 0o755); err != nil {
@@ -44,7 +44,7 @@ func TestConventionRoots(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	project, routes, ok, err := conventionRoots(".", projectRoot)
+	project, routes, ok, err := appRouterRoots(".", projectRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,12 +54,12 @@ func TestConventionRoots(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projectRoot, "page.tsx"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := conventionRoots(".", projectRoot); err == nil {
+	if _, _, _, err := appRouterRoots(".", projectRoot); err == nil {
 		t.Fatal("ambiguous route roots were accepted")
 	}
 }
 
-func TestConventionRootsFollowNestedPages(t *testing.T) {
+func TestAppRouterRootsFollowNestedPages(t *testing.T) {
 	projectRoot := t.TempDir()
 	postsRoot := filepath.Join(projectRoot, "posts")
 	if err := os.Mkdir(postsRoot, 0o755); err != nil {
@@ -68,7 +68,7 @@ func TestConventionRootsFollowNestedPages(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(postsRoot, "page.tsx"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	project, routes, ok, err := conventionRoots(".", projectRoot)
+	project, routes, ok, err := appRouterRoots(".", projectRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestConventionRootsFollowNestedPages(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	project, routes, ok, err = conventionRoots(".", projectRoot)
+	project, routes, ok, err = appRouterRoots(".", projectRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestConventionRootsFollowNestedPages(t *testing.T) {
 	}
 }
 
-func TestNestedConventionViewUsesProjectRelativePath(t *testing.T) {
+func TestNestedAppRouterViewUsesProjectRelativePath(t *testing.T) {
 	projectRoot := t.TempDir()
 	routeRoot := filepath.Join(projectRoot, "app")
 	if err := os.Mkdir(routeRoot, 0o755); err != nil {
@@ -103,11 +103,11 @@ func TestNestedConventionViewUsesProjectRelativePath(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(routeRoot, "page.tsx"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	routes, err := discoverConventionRoutes(routeRoot)
+	routes, err := discoverRoutes(routeRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeConventionViews(projectRoot, routeRoot, routes); err != nil {
+	if err := writeViews(projectRoot, routeRoot, routes); err != nil {
 		t.Fatal(err)
 	}
 	if routes[0].View != ".bifrost/views/page-0.tsx" {
@@ -122,27 +122,27 @@ func TestNestedConventionViewUsesProjectRelativePath(t *testing.T) {
 	}
 }
 
-func TestConventionPatternRejectsInvalidDynamicSegment(t *testing.T) {
-	if _, _, err := conventionPattern("posts/_"); err == nil {
+func TestAppRouterPatternRejectsInvalidDynamicSegment(t *testing.T) {
+	if _, _, err := routePattern("posts/_"); err == nil {
 		t.Fatal("empty dynamic segment was accepted")
 	}
 }
 
-func TestConventionPatternNextSyntax(t *testing.T) {
+func TestAppRouterPatternNextSyntax(t *testing.T) {
 	cases := []struct {
 		relative string
 		pattern  string
-		params   []conventionParam
+		params   []routeParam
 	}{
 		{"about", "/about", nil},
-		{"posts/slug_", "/posts/{slug}", []conventionParam{{Name: "slug", Value: "slug"}}},
-		{"posts/post-id_", "/posts/{post_id}", []conventionParam{{Name: "post-id", Value: "post_id"}}},
-		{"docs/slug__", "/docs/{slug...}", []conventionParam{{Name: "slug", Value: "slug", Segments: true}}},
+		{"posts/slug_", "/posts/{slug}", []routeParam{{Name: "slug", Value: "slug"}}},
+		{"posts/post-id_", "/posts/{post_id}", []routeParam{{Name: "post-id", Value: "post_id"}}},
+		{"docs/slug__", "/docs/{slug...}", []routeParam{{Name: "slug", Value: "slug", Segments: true}}},
 		{"marketing~/about", "/about", nil},
 		{"marketing~", "/{$}", nil},
 	}
 	for _, test := range cases {
-		pattern, params, err := conventionPattern(test.relative)
+		pattern, params, err := routePattern(test.relative)
 		if err != nil {
 			t.Fatalf("%s: %v", test.relative, err)
 		}
@@ -155,7 +155,7 @@ func TestConventionPatternNextSyntax(t *testing.T) {
 	}
 }
 
-func TestConventionPatternRejectsNextOnlySyntax(t *testing.T) {
+func TestAppRouterPatternRejectsNextOnlySyntax(t *testing.T) {
 	cases := map[string]string{
 		"posts/[slug]":    "slug_",
 		"posts/[...slug]": "slug__",
@@ -166,7 +166,7 @@ func TestConventionPatternRejectsNextOnlySyntax(t *testing.T) {
 		"posts/post id":   "invalid character",
 	}
 	for relative, expected := range cases {
-		_, _, err := conventionPattern(filepath.FromSlash(relative))
+		_, _, err := routePattern(filepath.FromSlash(relative))
 		if err == nil {
 			t.Fatalf("%s: invalid segment was accepted", relative)
 		}
@@ -176,7 +176,7 @@ func TestConventionPatternRejectsNextOnlySyntax(t *testing.T) {
 	}
 }
 
-func TestConventionPrivateDirectoriesAreNotRouted(t *testing.T) {
+func TestAppRouterPrivateDirectoriesAreNotRouted(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"page.tsx", "_components/Card.tsx"} {
 		path := filepath.Join(root, filepath.FromSlash(name))
@@ -187,7 +187,7 @@ func TestConventionPrivateDirectoriesAreNotRouted(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	routes, err := discoverConventionRoutes(root)
+	routes, err := discoverRoutes(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,12 +198,12 @@ func TestConventionPrivateDirectoriesAreNotRouted(t *testing.T) {
 	if err := os.WriteFile(path, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := discoverConventionRoutes(root); err == nil {
+	if _, err := discoverRoutes(root); err == nil {
 		t.Fatal("page.tsx inside a private directory was accepted")
 	}
 }
 
-func TestConventionRouteParamsUseFolderNames(t *testing.T) {
+func TestAppRouterRouteParamsUseFolderNames(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "posts", "post-id_", "page.tsx")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -212,17 +212,17 @@ func TestConventionRouteParamsUseFolderNames(t *testing.T) {
 	if err := os.WriteFile(path, []byte("export function Page() { return null }"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	routes, err := discoverConventionRoutes(root)
+	routes, err := discoverRoutes(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	params := conventionRouteParams(routes)
+	params := routeParams(routes)
 	if names := params["/posts/{post_id}"]; len(names) != 1 || names[0] != "post-id" {
 		t.Fatalf("params = %v", params)
 	}
 }
 
-func TestConventionViewsRenderPendingTrees(t *testing.T) {
+func TestAppRouterViewsRenderPendingTrees(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
 		"page.tsx":           "export function Page() { return null }",
@@ -238,11 +238,11 @@ func TestConventionViewsRenderPendingTrees(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	routes, err := discoverConventionRoutes(root)
+	routes, err := discoverRoutes(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeConventionViews(root, root, routes); err != nil {
+	if err := writeViews(root, root, routes); err != nil {
 		t.Fatal(err)
 	}
 	for index, route := range routes {
@@ -266,7 +266,7 @@ func TestConventionViewsRenderPendingTrees(t *testing.T) {
 	}
 }
 
-func TestConventionNestedLoadingViewsWin(t *testing.T) {
+func TestAppRouterNestedLoadingViewsWin(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
 		"page.tsx":                    "export function Page() { return null }",
@@ -285,11 +285,11 @@ func TestConventionNestedLoadingViewsWin(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	routes, err := discoverConventionRoutes(root)
+	routes, err := discoverRoutes(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeConventionViews(root, root, routes); err != nil {
+	if err := writeViews(root, root, routes); err != nil {
 		t.Fatal(err)
 	}
 	expected := map[string]string{
@@ -315,7 +315,7 @@ func TestConventionNestedLoadingViewsWin(t *testing.T) {
 	}
 }
 
-func TestConventionViewsWrapTheTreeInTheRouteProvider(t *testing.T) {
+func TestAppRouterViewsWrapTheTreeInTheRouteProvider(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
 		"layout.tsx": "export function Layout({ children }) { return children }",
@@ -326,11 +326,11 @@ func TestConventionViewsWrapTheTreeInTheRouteProvider(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	routes, err := discoverConventionRoutes(root)
+	routes, err := discoverRoutes(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeConventionViews(root, root, routes); err != nil {
+	if err := writeViews(root, root, routes); err != nil {
 		t.Fatal(err)
 	}
 	view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", "page-0.tsx"))
@@ -348,7 +348,7 @@ func TestConventionViewsWrapTheTreeInTheRouteProvider(t *testing.T) {
 	}
 }
 
-func TestConventionViewsGenerateMetadataHead(t *testing.T) {
+func TestAppRouterViewsGenerateMetadataHead(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
 		"layout.tsx":     "export const metadata = { description: 'site' }",
@@ -364,11 +364,11 @@ func TestConventionViewsGenerateMetadataHead(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	routes, err := discoverConventionRoutes(root)
+	routes, err := discoverRoutes(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeConventionViews(root, root, routes); err != nil {
+	if err := writeViews(root, root, routes); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(filepath.Join(root, ".bifrost", "views"))
@@ -405,7 +405,7 @@ func TestConventionViewsGenerateMetadataHead(t *testing.T) {
 	}
 }
 
-func TestConventionViewsGenerateAsyncMetadataHead(t *testing.T) {
+func TestAppRouterViewsGenerateAsyncMetadataHead(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
 		"layout.tsx": "export const metadata = { description: 'site' }",
@@ -416,11 +416,11 @@ func TestConventionViewsGenerateAsyncMetadataHead(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	routes, err := discoverConventionRoutes(root)
+	routes, err := discoverRoutes(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeConventionViews(root, root, routes); err != nil {
+	if err := writeViews(root, root, routes); err != nil {
 		t.Fatal(err)
 	}
 	view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", "page-0.tsx"))
@@ -442,7 +442,7 @@ func TestConventionViewsGenerateAsyncMetadataHead(t *testing.T) {
 	}
 }
 
-func TestConventionRejectsConflictingMetadata(t *testing.T) {
+func TestAppRouterRejectsConflictingMetadata(t *testing.T) {
 	cases := map[string]struct {
 		page string
 		want string
@@ -456,19 +456,19 @@ func TestConventionRejectsConflictingMetadata(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, "page.tsx"), []byte(testCase.page), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			routes, err := discoverConventionRoutes(root)
+			routes, err := discoverRoutes(root)
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = writeConventionViews(root, root, routes)
+			err = writeViews(root, root, routes)
 			if err == nil || !strings.Contains(err.Error(), testCase.want) {
-				t.Fatalf("writeConventionViews error = %v, want %q", err, testCase.want)
+				t.Fatalf("writeViews error = %v, want %q", err, testCase.want)
 			}
 		})
 	}
 }
 
-func TestConventionErrorViewsReceiveAnErrorAndReset(t *testing.T) {
+func TestAppRouterErrorViewsReceiveAnErrorAndReset(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
 		"page.tsx":  "export function Page() { return null }",
@@ -479,11 +479,11 @@ func TestConventionErrorViewsReceiveAnErrorAndReset(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	routes, err := discoverConventionRoutes(root)
+	routes, err := discoverRoutes(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeConventionViews(root, root, routes); err != nil {
+	if err := writeViews(root, root, routes); err != nil {
 		t.Fatal(err)
 	}
 	view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", "page-0.tsx"))
@@ -501,7 +501,7 @@ func TestConventionErrorViewsReceiveAnErrorAndReset(t *testing.T) {
 	}
 }
 
-func TestConventionTemplatesNestInsideTheirLayouts(t *testing.T) {
+func TestAppRouterTemplatesNestInsideTheirLayouts(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
 		"layout.tsx":             "export function Layout({ children }) { return children }",
@@ -519,11 +519,11 @@ func TestConventionTemplatesNestInsideTheirLayouts(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	routes, err := discoverConventionRoutes(root)
+	routes, err := discoverRoutes(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeConventionViews(root, root, routes); err != nil {
+	if err := writeViews(root, root, routes); err != nil {
 		t.Fatal(err)
 	}
 	view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", "page-0.tsx"))
@@ -542,7 +542,7 @@ func TestConventionTemplatesNestInsideTheirLayouts(t *testing.T) {
 	}
 }
 
-func TestConventionViewsAcceptDefaultExports(t *testing.T) {
+func TestAppRouterViewsAcceptDefaultExports(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
 		"page.tsx":           "export default function Page() { return null }",
@@ -560,11 +560,11 @@ func TestConventionViewsAcceptDefaultExports(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	routes, err := discoverConventionRoutes(root)
+	routes, err := discoverRoutes(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeConventionViews(root, root, routes); err != nil {
+	if err := writeViews(root, root, routes); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(filepath.Join(root, ".bifrost", "views"))
@@ -592,7 +592,7 @@ func TestConventionViewsAcceptDefaultExports(t *testing.T) {
 	}
 }
 
-func TestConventionNotFoundRoutesUseTheURLPrefix(t *testing.T) {
+func TestAppRouterNotFoundRoutesUseTheURLPrefix(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"posts/not-found.tsx", "marketing~/not-found.tsx", "posts/api/not-found.tsx"} {
 		path := filepath.Join(root, filepath.FromSlash(name))
@@ -622,11 +622,11 @@ func TestGeneratedMainInjectsRequestProps(t *testing.T) {
 	if err := os.MkdirAll(generated, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	routes := []conventionRoute{
-		{Pattern: "/posts/{post_id}", Params: []conventionParam{{Name: "post-id", Value: "post_id"}}, View: "page.tsx", HasLoader: true, ImportPath: "example.com/app/posts", Alias: "route0", ErrorViews: []string{"error.tsx"}},
-		{Pattern: "/docs/{slug...}", Params: []conventionParam{{Name: "slug", Value: "slug", Segments: true}}, View: "page.tsx"},
+	routes := []appRoute{
+		{Pattern: "/posts/{post_id}", Params: []routeParam{{Name: "post-id", Value: "post_id"}}, View: "page.tsx", HasLoader: true, ImportPath: "example.com/app/posts", Alias: "route0", ErrorViews: []string{"error.tsx"}},
+		{Pattern: "/docs/{slug...}", Params: []routeParam{{Name: "slug", Value: "slug", Segments: true}}, View: "page.tsx"},
 	}
-	if err := writeConventionMain(root, generated, routes, nil); err != nil {
+	if err := writeAppRouterMain(root, generated, routes, nil); err != nil {
 		t.Fatal(err)
 	}
 	source, err := os.ReadFile(filepath.Join(generated, "main.go"))
@@ -656,8 +656,8 @@ func TestGeneratedMainRenamesPathValuesForGo(t *testing.T) {
 	if err := os.MkdirAll(generated, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	routes := []conventionRoute{{Pattern: "/posts/{post_id}", Params: []conventionParam{{Name: "post-id", Value: "post_id"}}, View: "page.tsx"}}
-	if err := writeConventionMain(root, generated, routes, nil); err != nil {
+	routes := []appRoute{{Pattern: "/posts/{post_id}", Params: []routeParam{{Name: "post-id", Value: "post_id"}}, View: "page.tsx"}}
+	if err := writeAppRouterMain(root, generated, routes, nil); err != nil {
 		t.Fatal(err)
 	}
 	source, err := os.ReadFile(filepath.Join(generated, "main.go"))
@@ -669,7 +669,7 @@ func TestGeneratedMainRenamesPathValuesForGo(t *testing.T) {
 	}
 }
 
-func TestConventionLayoutsComposeOuterToInner(t *testing.T) {
+func TestAppRouterLayoutsComposeOuterToInner(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
 		"layout.tsx":                   "export function Layout({ children }) { return children }",
@@ -687,11 +687,11 @@ func TestConventionLayoutsComposeOuterToInner(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	routes, err := discoverConventionRoutes(root)
+	routes, err := discoverRoutes(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeConventionViews(root, root, routes); err != nil {
+	if err := writeViews(root, root, routes); err != nil {
 		t.Fatal(err)
 	}
 	view, err := os.ReadFile(filepath.Join(root, ".bifrost", "views", "page-0.tsx"))
@@ -719,7 +719,7 @@ func TestGeneratedModuleRequiresUserModule(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.25.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeConventionModule(generated, root); err != nil {
+	if err := writeAppRouterModule(generated, root); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(generated, "go.mod"))
@@ -733,7 +733,7 @@ func TestGeneratedModuleRequiresUserModule(t *testing.T) {
 }
 
 func TestGoRouteRows(t *testing.T) {
-	goDirs := []conventionGoDir{
+	goDirs := []goDir{
 		{Directory: ".", Pattern: "/{$}", Middleware: true},
 		{Directory: "posts", Pattern: "/posts", Middleware: true},
 		{Directory: "posts/api/slug_", Pattern: "/posts/api/{slug}", HTTPMethods: []string{"Get", "Post"}},
@@ -747,7 +747,7 @@ func TestGoRouteRows(t *testing.T) {
 	if rows := goRouteRows(goDirs); !slices.Equal(rows, want) {
 		t.Fatalf("goRouteRows() = %+v, want %+v", rows, want)
 	}
-	if rows := (*conventionApp)(nil).routeRows(); rows != nil {
+	if rows := (*appRouter)(nil).routeRows(); rows != nil {
 		t.Fatalf("nil app rows = %+v, want nil", rows)
 	}
 }
@@ -758,9 +758,9 @@ func TestGeneratedServerLifecycleAndEscapeHatch(t *testing.T) {
 	if err := os.MkdirAll(generated, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	routes := []conventionRoute{{Pattern: "/{$}", View: "page.tsx"}}
-	goDirs := []conventionGoDir{{Directory: ".", ImportPath: "example.com/app", Alias: "route0", Serve: true}}
-	if err := writeConventionMain(root, generated, routes, goDirs); err != nil {
+	routes := []appRoute{{Pattern: "/{$}", View: "page.tsx"}}
+	goDirs := []goDir{{Directory: ".", ImportPath: "example.com/app", Alias: "route0", Serve: true}}
+	if err := writeAppRouterMain(root, generated, routes, goDirs); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(generated, "main.go"))
@@ -777,7 +777,7 @@ func TestGeneratedServerLifecycleAndEscapeHatch(t *testing.T) {
 		t.Fatal("generated server sets WriteTimeout")
 	}
 	goDirs[0].Serve = false
-	if err := writeConventionMain(root, generated, routes, goDirs); err != nil {
+	if err := writeAppRouterMain(root, generated, routes, goDirs); err != nil {
 		t.Fatal(err)
 	}
 	data, err = os.ReadFile(filepath.Join(generated, "main.go"))
@@ -795,7 +795,7 @@ func TestDirectoryContains(t *testing.T) {
 	}
 }
 
-func TestConventionRootsAcceptAPIOnlyApps(t *testing.T) {
+func TestAppRouterRootsAcceptAPIOnlyApps(t *testing.T) {
 	projectRoot := t.TempDir()
 	appRoot := filepath.Join(projectRoot, "app", "api", "hello_")
 	if err := os.MkdirAll(appRoot, 0o755); err != nil {
@@ -804,7 +804,7 @@ func TestConventionRootsAcceptAPIOnlyApps(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(appRoot, "route.go"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	project, routes, ok, err := conventionRoots(".", projectRoot)
+	project, routes, ok, err := appRouterRoots(".", projectRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -813,7 +813,7 @@ func TestConventionRootsAcceptAPIOnlyApps(t *testing.T) {
 	}
 }
 
-func TestConventionRootsAcceptMarkerDirectoriesWithoutPages(t *testing.T) {
+func TestAppRouterRootsAcceptMarkerDirectoriesWithoutPages(t *testing.T) {
 	projectRoot := t.TempDir()
 	marker := filepath.Join(projectRoot, "posts", "slug_")
 	if err := os.MkdirAll(marker, 0o755); err != nil {
@@ -822,7 +822,7 @@ func TestConventionRootsAcceptMarkerDirectoriesWithoutPages(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(marker, "route.go"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	project, routes, ok, err := conventionRoots(".", projectRoot)
+	project, routes, ok, err := appRouterRoots(".", projectRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -831,7 +831,7 @@ func TestConventionRootsAcceptMarkerDirectoriesWithoutPages(t *testing.T) {
 	}
 }
 
-func TestConventionRootsIgnorePlainGoFiles(t *testing.T) {
+func TestAppRouterRootsIgnorePlainGoFiles(t *testing.T) {
 	projectRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(projectRoot, "internal", "api"), 0o755); err != nil {
 		t.Fatal(err)
@@ -842,12 +842,12 @@ func TestConventionRootsIgnorePlainGoFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projectRoot, "internal", "api", "route.go"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, ok, err := conventionRoots(".", projectRoot); err != nil || ok {
-		t.Fatalf("plain Go files were taken as a convention app: ok=%t err=%v", ok, err)
+	if _, _, ok, err := appRouterRoots(".", projectRoot); err != nil || ok {
+		t.Fatalf("plain Go files were taken as an App Router app: ok=%t err=%v", ok, err)
 	}
 }
 
-func TestPrepareConventionAppAcceptsRoutesWithoutPages(t *testing.T) {
+func TestPrepareAppRouterAppAcceptsRoutesWithoutPages(t *testing.T) {
 	projectRoot := t.TempDir()
 	appRoot := filepath.Join(projectRoot, "app")
 	routeRoot := filepath.Join(appRoot, "api", "hello_")
@@ -860,7 +860,7 @@ func TestPrepareConventionAppAcceptsRoutesWithoutPages(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(routeRoot, "route.go"), []byte("package api\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	app, err := prepareConventionApp(context.Background(), projectRoot, appRoot)
+	app, err := prepareAppRouter(context.Background(), projectRoot, appRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -872,13 +872,13 @@ func TestPrepareConventionAppAcceptsRoutesWithoutPages(t *testing.T) {
 	}
 }
 
-func TestPrepareConventionAppRejectsEmptyTrees(t *testing.T) {
+func TestPrepareAppRouterAppRejectsEmptyTrees(t *testing.T) {
 	projectRoot := t.TempDir()
 	appRoot := filepath.Join(projectRoot, "app")
 	if err := os.MkdirAll(appRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prepareConventionApp(context.Background(), projectRoot, appRoot); err == nil {
+	if _, err := prepareAppRouter(context.Background(), projectRoot, appRoot); err == nil {
 		t.Fatal("an empty route root was accepted")
 	}
 }

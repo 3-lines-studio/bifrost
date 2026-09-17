@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/3-lines-studio/bifrost"
-	app "github.com/3-lines-studio/bifrost/example/convention"
+	app "github.com/3-lines-studio/bifrost/example/app-router"
 )
 
 func Load(r *http.Request) (any, error) {
