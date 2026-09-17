@@ -252,7 +252,8 @@ done
 grep -q '"order":\["root","posts"\]' <<<"$body"
 test "$(curl -sS -o /dev/null -w '%{http_code}' -I http://127.0.0.1:18102/posts/api/value)" = 200
 grep -q static-page < <(curl -fsS http://127.0.0.1:18102/posts/static)
-test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18102/posts/hello/)" = 404
+test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18102/posts/hello/)" = 308
+test "$(curl -sS -o /dev/null -w '%{redirect_url}' http://127.0.0.1:18102/posts/hello/)" = "http://127.0.0.1:18102/posts/hello"
 test "$(curl -fsS http://127.0.0.1:18102/asset.txt)" = asset-ok
 traversal=$(curl --path-as-is -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18102/../asset.txt)
 test "$traversal" != 200
