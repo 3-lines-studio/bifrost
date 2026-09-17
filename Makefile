@@ -1,6 +1,6 @@
-.PHONY: check test race vet gate bench fuzz integration dev-integration reproducible
+.PHONY: check test race vet gate demo bench fuzz integration dev-integration reproducible
 
-check: test race vet gate
+check: test race vet gate demo
 
 test:
 	@test -z "$$(gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'))" || (gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'); exit 1)
@@ -11,6 +11,9 @@ race:
 
 vet:
 	go vet ./...
+
+demo:
+	$(MAKE) -C example/app-router-demo check
 
 gate:
 	bun install --frozen-lockfile
