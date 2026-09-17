@@ -1,6 +1,6 @@
-.PHONY: check test race vet bench fuzz integration dev-integration reproducible
+.PHONY: check test race vet gate bench fuzz integration dev-integration reproducible
 
-check: test race vet
+check: test race vet gate
 
 test:
 	@test -z "$$(gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'))" || (gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'); exit 1)
@@ -11,6 +11,9 @@ race:
 
 vet:
 	go vet ./...
+
+gate:
+	BIFROST_RELEASE_GATE=1 go test ./cmd/bifrost -run TestConventionReleaseGate -count=1
 
 bench:
 	go test -run '^$$' -bench . -benchmem ./...
