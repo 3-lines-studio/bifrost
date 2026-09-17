@@ -13,6 +13,7 @@ vet:
 	go vet ./...
 
 gate:
+	bun install --frozen-lockfile
 	BIFROST_RELEASE_GATE=1 go test ./cmd/bifrost -run TestConventionReleaseGate -count=1
 
 bench:
