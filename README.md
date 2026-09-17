@@ -36,11 +36,9 @@ go run github.com/3-lines-studio/bifrost/cmd/bifrost version
 
 Flags precede the package path. `init` runs `bun install` automatically (`--no-install` skips it). `build` accepts `--sourcemaps`, `--static-workers`, `--output`, and `--vite-config`. `dev` accepts `--poll`, `--vite-port` (zero picks a free port), and `--vite-config`. `routes` prints the route table (views, API handlers, and middleware) without building the app (`-C` and `--vite-config`).
 
-`dev` performs one validated bootstrap build, then owns a Bun process hosting Vite's development server and the SSR bridge. The bridge outlives Go child restarts, so frontend module state is never thrown away by a Go edit. All browser assets are proxied through your Go origin at `/_bifrost/dev/`, so HMR, module loads, and page requests share one origin; the Vite server itself never has to be reachable from the browser. Server and Static pages include stylesheet links extracted from Vite's live SSR module graph, so development pages carry their styles in the HTML instead of flashing unstyled content. Go replacement is detected by a long-poll to `/_bifrost/build-id` that holds until the process is replaced, so idle development generates almost no requests.
+`dev` runs one validated bootstrap build, then owns a Bun process hosting Vite's development server and the SSR bridge. The bridge outlives Go child restarts, so a Go edit never discards frontend module state. Browser assets are proxied through your Go origin at `/_bifrost/dev/`, so HMR, module loads, and page requests share one origin and the Vite server never has to be reachable from the browser. Server and Static pages include stylesheet links from Vite's live SSR module graph, so development pages keep their styles instead of flashing unstyled content. Go replacement is detected by a long-poll to `/_bifrost/build-id` that holds until the process is replaced, so idle development generates almost no requests.
 
-Call `bifrost.Building()` immediately after `New` and return before opening databases or listeners. `build` runs the app through dedicated describe and static-generation phases, asks Vite to build each unique client and SSR view, prerenders Static routes through Bun, compiles a pinned standalone Bun renderer, validates Vite's manifests, writes a strict Bifrost manifest, and atomically replaces `.bifrost`.
-
-The generated `zz_bifrost_gen.go` embeds `.bifrost` and provides the package-local `bifrostAssets` value used by `Config`.
+`build` runs the app through describe and static-generation phases, asks Vite to build each unique client and SSR view, prerenders Static routes through Bun, compiles a pinned standalone Bun renderer, validates Vite's manifests, writes a strict Bifrost manifest, and atomically replaces `.bifrost`. The generated `zz_bifrost_gen.go` embeds `.bifrost` and provides the package-local `bifrostAssets` value used by `Config`.
 
 ## React module contract
 
@@ -54,7 +52,7 @@ export function Page(props) {
 }
 ```
 
-`Page` is required. `Head` is optional. Server and Static pages hydrate. Client pages mount into an empty shell. Loader and generator props are sent to the browser; never return secrets as props. Hydrated pages use React Client Component rules, so page components cannot themselves be async. Use `React.lazy` with `Suspense` for streamed deferred UI.
+`Page` is required and `Head` is optional. Server and Static pages hydrate; client pages mount into an empty shell. Loader and generator props reach the browser, so never return secrets as props. Hydrated pages follow React Client Component rules: page components cannot be async, and streamed deferred UI uses `React.lazy` with `Suspense`.
 
 A Server loader may return request-scoped root document attributes without putting them in React props:
 
@@ -82,19 +80,17 @@ handler := sharedMiddleware(app.ResolveMarkdown(mux))
 
 `ResolveMarkdown` serves server-rendered routes as Markdown for a `.md` path suffix or a preferred `Accept: text/markdown` media type. It leaves static pages, client pages, public files, and other mux handlers unchanged. `Handler` applies it automatically, and so do generated App Router apps.
 
-Use `/{$}` for an exact root page. The standard `/` pattern is a subtree fallback. Bifrost does not add router-specific adapters.
+Use `/{$}` for an exact root page; the standard `/` pattern is a subtree fallback. Bifrost does not add router-specific adapters.
 
 ## Build and runtime boundary
 
-Build phases execute the application to collect immutable declarations. Code needed to construct `Config`, routes, loaders, and generators must be side-effect free. Check `bifrost.Building()` immediately after `New`, before opening listeners, databases, queues, or background workers.
-
-When declarations live in an internal package, pass the generated package-local `bifrostAssets` from `main` into that package. See `example/structured` for this layout. This keeps one generated embedded tree and avoids a second copied embed.
+Build phases execute the application to collect immutable declarations, so code that constructs `Config`, routes, loaders, and generators must be side-effect free. Check `bifrost.Building()` immediately after `New`, before opening listeners, databases, queues, or background workers. When declarations live in an internal package, pass the generated package-local `bifrostAssets` from `main` into that package; `example/structured` shows the layout that keeps one generated embedded tree instead of a second copied embed.
 
 ## SSR concurrency contract
 
-Bifrost uses one isolated Bun renderer process by default. `RenderConcurrency: N` starts N production renderer processes, and each process handles one render at a time. Development always serializes SSR through its one Vite module graph. This prevents simultaneous requests from racing through one JavaScript module graph while allowing explicit production scaling.
+Bifrost uses one isolated Bun renderer process by default; `RenderConcurrency: N` starts N production renderers, each handling one render at a time. Development always serializes SSR through its one Vite module graph. This keeps simultaneous requests from racing through one JavaScript module graph while allowing explicit production scaling.
 
-Mutable JavaScript module globals still persist between sequential requests handled by the same worker. Do not store locale, user, authentication, or request data in module-level variables. Derive them from props or request-local React context.
+Module globals persist between sequential requests handled by the same worker, so keep locale, user, authentication, and request data out of module-level variables: derive them from props or request-local React context.
 
 Expose renderer readiness through the user-owned health endpoint:
 
@@ -158,9 +154,9 @@ app/marketing~/about/page.tsx # /about
 app/_components/Card.tsx      # never routed
 ```
 
-One trailing `_` marks a parameter that captures one segment. Two mark a parameter that captures the remaining path, and it must be the last segment. A trailing `~` marks a route group: the folder organizes files and never appears in the URL. A leading `_` keeps the whole directory out of routing, and a `page.tsx` or `route.go` inside one is a build error. Bifrost rejects the bracketed forms with an error naming the folder to use instead.
+One trailing `_` marks a one-segment parameter; two mark a parameter that captures the rest of the path, which must be last. A trailing `~` marks a route group, which organizes files without appearing in the URL. A leading `_` keeps a directory out of routing, and a `page.tsx` or `route.go` inside one is a build error. The bracketed forms fail with an error that names the folder to use instead.
 
-Go needs a legal identifier for every path value. Bifrost replaces the characters a Go identifier cannot contain, so `post-id_` registers `/posts/{post_id}` and `r.PathValue("post-id")` still returns the captured segment.
+Go needs a legal identifier for every path value, so Bifrost replaces the characters one cannot contain: `post-id_` registers `/posts/{post_id}` while `r.PathValue("post-id")` still returns the captured segment.
 
 The other files in a route directory are optional:
 
@@ -177,23 +173,23 @@ The other files in a route directory are optional:
 
 Every view accepts a default export instead of the named one, so `export default function Page` and `export default function Layout({ children })` work.
 
-Every page also receives `params`, `searchParams`, and `pathname` merged into its loader props, so a page reads `params.slug` and `searchParams.tab` without asking the loader. `params` uses the folder name as the key, and a catch-all parameter is an array of segments. A repeated query key is an array too. Because Bifrost merges them into the props, a loader must return a map or a `bifrost.PageData` whose `Props` is a map.
+Every page receives `params`, `searchParams`, and `pathname` merged into its loader props, so a page reads `params.slug` and `searchParams.tab` without asking the loader. `params` keys by folder name, a catch-all parameter is an array of segments, and a repeated query key is an array too. Because Bifrost merges them into the props, a loader must return a map or a `bifrost.PageData` whose `Props` is a map.
 
-A layout or a page can export `metadata` instead of a `Head` component. Bifrost merges the objects from the outer layouts down to the page, so a page overrides one key and inherits the rest. It renders `title`, `description`, `keywords`, `alternates.canonical`, `robots.index`, `robots.follow`, and `openGraph` (`title`, `description`, `url`, `images`). `generateMetadata(props)` covers what depends on the request: it receives the page props, may be async, and its result merges the same way.
+A layout or a page can export `metadata` instead of a `Head` component, and Bifrost merges the objects from the outer layouts down to the page, so a page overrides one key and inherits the rest. It renders `title`, `description`, `keywords`, `alternates.canonical`, `robots.index`, `robots.follow`, and `openGraph` (`title`, `description`, `url`, `images`). `generateMetadata(props)` covers what depends on the request: it receives the page props, may be async, and merges the same way.
 
 ## App Router navigation
 
-Use normal `<a href="/posts/hello">` links. After the first server render, App Router apps fetch the next route through the same Go middleware and loader, lazy-load its Vite module, and update one React root. Shared layouts stay mounted. Back/forward, scroll, hash links, focus, page head, and root document attributes update with the route.
+Use normal `<a href="/posts/hello">` links. After the first server render, an App Router app fetches the next route through the same Go middleware and loader, lazy-loads its Vite module, and updates one React root. Shared layouts stay mounted, and back/forward, scroll, hash links, focus, page head, and root document attributes follow the route.
 
-Page-local state resets when the pathname changes, including dynamic parameters such as `/posts/one` → `/posts/two`. Query changes keep page state but reload props. Hash-only changes keep state without running the loader. Shared layouts keep state while they remain in the tree; leaving a layout discards its state. Back/forward restores scroll, not previously unmounted page state.
+Page-local state resets when the pathname changes, dynamic parameters included (`/posts/one` → `/posts/two`). Query changes keep page state but reload props; hash-only changes keep state without running the loader. Layouts keep state while they stay in the tree. Back/forward restores scroll, not unmounted page state.
 
-The current page stays visible with `aria-busy="true"` on `#app` while navigation runs. When the target route is covered by a `loading.tsx`, the client renders the target tree with the loading view in place of the page instead, and swaps in the page when the props arrive. A navigation that keeps the pathname, such as a query or hash change, never shows the loading view, so page state survives it. A newer navigation or refresh cancels the previous request. There is no prefetch or route-data cache; loaders run on route navigation and refresh, including back/forward between paths or queries.
+The current page stays visible with `aria-busy="true"` on `#app` while a navigation runs. When a `loading.tsx` covers the target route, the client renders the target tree with the loading view instead of the page and swaps in the page when the props arrive; a navigation that keeps the pathname, such as a query or hash change, never shows it, so page state survives. A newer navigation or refresh cancels the previous request. There is no prefetch or route-data cache: loaders run on route navigation and refresh, including back/forward between paths or queries.
 
-External links, downloads, new tabs, and modified clicks keep browser behavior. Add `data-bifrost-reload` to a link to force a document load. Unsupported responses, incompatible builds, and heads with scripts, base tags, or HTTP-equivalent metadata fall back to document navigation. Direct visits and links without JavaScript still use SSR.
+External links, downloads, new tabs, and modified clicks keep browser behavior; `data-bifrost-reload` on a link forces a document load. Unsupported responses, incompatible builds, and heads with scripts, base tags, or HTTP-equivalent metadata fall back to document navigation. Direct visits and links without JavaScript still use SSR.
 
-Navigation responses contain props and server-rendered head metadata, not page HTML. Bifrost still runs SSR to preserve render-error boundaries, discarding body chunks without buffering them. This saves document reloads, not SSR work. Custom middleware must preserve the navigation `Accept` header and `Vary: Accept`; do not cache these responses.
+Navigation responses carry props and server-rendered head metadata, not page HTML. Bifrost still runs SSR to preserve render-error boundaries, discarding body chunks without buffering them; this saves document reloads, not SSR work. Custom middleware must preserve the navigation `Accept` header and `Vary: Accept`, and must not cache these responses.
 
-Generated App Router routes use `Route.WithNavigation()`. Its view must export a hook-free `renderPage(props, pageKey?)` tree factory, an SSR `Page` component that renders the same tree, and, when a `loading.tsx` covers the route, a `renderPending(props, pageKey?)` factory that renders the same tree with the loading view instead of the page. The factory keys the page branch by `pageKey` while keeping layout keys stable. The generated factory opts out of React Compiler memoization; hooks belong in the page and layout components inside it. Ordinary `Server`, `Static`, and `Client` declarations keep their existing behavior.
+Generated App Router routes use `Route.WithNavigation()`. Its view must export a hook-free `renderPage(props, pageKey?)` tree factory, an SSR `Page` component that renders the same tree, and, when a `loading.tsx` covers the route, a `renderPending(props, pageKey?)` factory that renders the same tree with the loading view instead of the page. The factory keys the page branch by `pageKey`, keeps layout keys stable, and opts out of React Compiler memoization; hooks belong in the page and layout components inside it. Ordinary `Server`, `Static`, and `Client` declarations keep their behavior.
 
 ### Programmatic navigation and refresh
 
@@ -210,10 +206,10 @@ export function Actions() {
 }
 ```
 
-- `navigate(href)` follows the same path as an internal link and adds a history entry. Relative URLs resolve against the current browser URL. External HTTP(S) URLs use a document load; other URL schemes reject with `TypeError`.
+- `navigate(href)` follows the same path as an internal link and adds a history entry. Relative URLs resolve against the current browser URL; external HTTP(S) URLs use a document load, and other URL schemes reject with `TypeError`.
 - `replace(href)` does the same but replaces the current history entry.
-- `refresh()` reruns the current URL's middleware and loader without adding a history entry. It updates props and head metadata while keeping page/layout state, focus, and scroll. Call `await refresh()` after a successful mutation to display fresh server data. If the server redirects, Bifrost replaces the current history entry and applies normal route state and focus rules.
-- They return `Promise<void>`. They resolve after the client update, a superseding request, or initiation of a document fallback; they do not wait for a fallback document to load. Importing them during SSR is safe, but calling them without a mounted client router rejects.
+- `refresh()` reruns the current URL's middleware and loader without adding a history entry, updating props and head metadata while keeping page/layout state, focus, and scroll. Call `await refresh()` after a successful mutation to display fresh server data. If the server redirects, Bifrost replaces the current history entry and applies normal route state and focus rules.
+- They return `Promise<void>`, resolving after the client update, a superseding request, or initiation of a document fallback; they do not wait for a fallback document to load. Importing them during SSR is safe, but calling them without a mounted client router rejects.
 
 The hooks read the current route. Bifrost provides the values on the server and on the client, so a component that renders them hydrates without a mismatch:
 
@@ -233,10 +229,10 @@ export function Nav() {
 ```
 
 - `usePathname()` returns the current pathname, percent-encoded as the browser reports it.
-- `useParams()` returns the route parameters, the same object the page receives. In a layout they are the parameters of the page below it.
+- `useParams()` returns the route parameters, the same object the page receives; in a layout they are the parameters of the page below it.
 - `useSearchParams()` returns a `URLSearchParams` built from the query string.
-- `useRouter()` returns `push`, `replace`, `refresh`, `back`, and `forward`. `back` and `forward` use browser history.
-- `Link` renders an anchor. On click Bifrost navigates in place, exactly like any other internal link, and a document load happens when JavaScript is off.
+- `useRouter()` returns `push`, `replace`, `refresh`, `back`, and `forward`; `back` and `forward` use browser history.
+- `Link` renders an anchor that navigates in place on click, exactly like any other internal link, and loads a document when JavaScript is off.
 
 `bifrost init` includes the types. Existing App Router apps can add this to `bifrost.d.ts`:
 
@@ -263,11 +259,11 @@ Run `bash scripts/navigation-integration.sh` for production and development brow
 
 ## Browser performance
 
-Bifrost emits render-blocking styles first, preloads every static client import, and gives module preloads low fetch priority so they do not compete with high-priority LCP images. Vite remains responsible for tree shaking and chunking. Hashed build assets use one-year immutable caching.
+Bifrost emits render-blocking styles first, preloads every static client import, and gives module preloads low fetch priority so they do not compete with high-priority LCP images. Vite owns tree shaking and chunking; hashed build assets use one-year immutable caching.
 
-Serve production responses through Brotli or gzip compression. Compression remains the HTTP server, CDN, or reverse proxy's job because that layer owns content negotiation and caching. Import long-lived assets through Vite when possible so they receive hashed immutable URLs; files copied from `public/` keep stable URLs and revalidate by default.
+Serve production responses through Brotli or gzip: that belongs to the HTTP server, CDN, or reverse proxy, which owns content negotiation and caching. Import long-lived assets through Vite when possible so they receive hashed immutable URLs; files copied from `public/` keep stable URLs and revalidate by default.
 
-Track compressed transfer bytes, request count, LCP, CLS, and hydration time under network and CPU throttling. Local uncompressed load time is not a useful production browser metric.
+Track compressed transfer bytes, request count, LCP, CLS, and hydration time under network and CPU throttling; local uncompressed load time is not a useful production browser metric.
 
 ## Go application plugins
 
@@ -284,17 +280,11 @@ type AppPlugin interface {
 
 - Standard `http.ServeMux` patterns and path values.
 - Props are encoded once and safely embedded for hydration.
-- Request-scoped root document attributes are validated and kept out of React props.
-- Immutable startup model and strict stale-manifest checks.
-- Vite manifests are authoritative; Go hashes but never renames Vite output.
-- Development requests, HMR, and module loads share one origin through the Go server, and the Vite bridge survives Go restarts.
+- Immutable startup model and strict stale-manifest checks; Vite manifests are authoritative, and Go hashes but never renames Vite output.
 - Tailwind, React Compiler, Vite aliases, linked workspace packages, virtual modules, CSS Modules, assets, and shared client/SSR chunks are covered by integration tests.
-- Static and client requests do no render work.
-- SSR streams head and body frames.
-- Isolated renderer workers with bounded concurrency and queue.
+- Static and client requests do no render work; SSR streams head and body frames.
+- Isolated renderer workers with bounded concurrency and queue, readiness checks, and restart after transport failure.
 - End-to-end request cancellation through Go, Bun, and React streams.
-- Renderer readiness checks and process restart after transport failure.
-- Hashed assets use immutable cache headers.
 - Required build failures fail the whole build.
 
 ## Platforms
