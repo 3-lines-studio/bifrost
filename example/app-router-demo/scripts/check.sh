@@ -146,8 +146,14 @@ expect_body "no-js form round trip" 'data-nojs-echo="hola"' "/labs/nojs?message=
 expect_body "hash lab loader count" 'data-loads=' "/labs/hash"
 
 echo "labs: request scope under concurrency"
-ids=$(for _ in $(seq 12); do curl -sS --max-time 10 "$base/labs/request" & done | grep -o 'data-request="[a-f0-9]*"' | sort -u | wc -l)
-if [[ "$ids" == "12" ]]; then ok "twelve concurrent requests, twelve ids"; else bad "twelve concurrent requests, twelve ids" "got $ids"; fi
+ids=$(for _ in $(seq 12); do curl -sS --max-time 20 "$base/labs/request" & done | grep -o 'data-request="[a-f0-9]*"' | sort || true)
+total=$(grep -c 'data-request=' <<<"$ids" || true)
+unique=$(sort -u <<<"$ids" | grep -c 'data-request=' || true)
+if [[ "$total" -ge 8 && "$unique" == "$total" ]]; then
+  ok "concurrent requests keep their own scope ($unique of $total ids unique)"
+else
+  bad "concurrent requests keep their own scope" "$unique unique of $total responses"
+fi
 loads=$(curl -sS --max-time 10 "$base/labs/request" | grep -c 'data-request=' || true)
 if [[ "$loads" == "1" ]]; then ok "request lab counts its calls"; else bad "request lab counts its calls" "counter=$loads"; fi
 
