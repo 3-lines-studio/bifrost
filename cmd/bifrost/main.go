@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/3-lines-studio/bifrost"
 	"github.com/3-lines-studio/bifrost/internal/builder"
@@ -35,9 +36,18 @@ func main() {
 		err = fmt.Errorf("unknown command %q", os.Args[1])
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "bifrost:", err)
+		reportError(err)
 		os.Exit(1)
 	}
+}
+
+func reportError(err error) {
+	message := err.Error()
+	if strings.HasPrefix(message, "bifrost:") {
+		fmt.Fprintln(os.Stderr, message)
+		return
+	}
+	fmt.Fprintln(os.Stderr, "bifrost:", message)
 }
 
 func usage() {
