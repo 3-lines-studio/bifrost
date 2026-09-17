@@ -732,6 +732,26 @@ func TestGeneratedModuleRequiresUserModule(t *testing.T) {
 	}
 }
 
+func TestGoRouteRows(t *testing.T) {
+	goDirs := []conventionGoDir{
+		{Directory: ".", Pattern: "/{$}", Middleware: true},
+		{Directory: "posts", Pattern: "/posts", Middleware: true},
+		{Directory: "posts/api/slug_", Pattern: "/posts/api/{slug}", HTTPMethods: []string{"Get", "Post"}},
+	}
+	want := []routeRow{
+		{kind: "middleware", pattern: "/*", source: "middleware.go"},
+		{kind: "middleware", pattern: "/posts/*", source: "posts/middleware.go"},
+		{kind: "api", pattern: "GET /posts/api/{slug}", source: "posts/api/slug_/route.go"},
+		{kind: "api", pattern: "POST /posts/api/{slug}", source: "posts/api/slug_/route.go"},
+	}
+	if rows := goRouteRows(goDirs); !slices.Equal(rows, want) {
+		t.Fatalf("goRouteRows() = %+v, want %+v", rows, want)
+	}
+	if rows := (*conventionApp)(nil).routeRows(); rows != nil {
+		t.Fatalf("nil app rows = %+v, want nil", rows)
+	}
+}
+
 func TestGeneratedServerLifecycleAndEscapeHatch(t *testing.T) {
 	root := t.TempDir()
 	generated := filepath.Join(root, ".bifrost", "app")

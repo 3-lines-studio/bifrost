@@ -61,17 +61,21 @@ func runBuild(args []string) error {
 	if flags.NArg() > 1 {
 		return fmt.Errorf("build accepts one package path")
 	}
-	options := builder.Options{Package: packagePath, Dir: *dir, Output: *output, StaticWorkers: *staticWorkers, SourceMaps: *sourceMaps, ViteConfig: *viteConfig, OnDescribe: printRouteTable, Version: bifrost.Version}
+	var app *conventionApp
+	options := builder.Options{Package: packagePath, Dir: *dir, Output: *output, StaticWorkers: *staticWorkers, SourceMaps: *sourceMaps, ViteConfig: *viteConfig, OnDescribe: func(description protocol.DescribeResult) {
+		printRouteTable(description, app.routeRows())
+	}, Version: bifrost.Version}
 	projectRoot, routeRoot, convention, err := conventionRoots(*dir, packagePath)
 	if err != nil {
 		return err
 	}
 	if convention {
-		app, err := prepareConventionApp(context.Background(), projectRoot, routeRoot)
+		prepared, err := prepareConventionApp(context.Background(), projectRoot, routeRoot)
 		if err != nil {
 			return err
 		}
-		if err := buildConvention(context.Background(), app, options, true); err != nil {
+		app = &prepared
+		if err := buildConvention(context.Background(), prepared, options, true); err != nil {
 			return err
 		}
 	} else if err := builder.Build(context.Background(), options); err != nil {
@@ -81,9 +85,20 @@ func runBuild(args []string) error {
 	return nil
 }
 
-func printRouteTable(description protocol.DescribeResult) {
-	_, _ = fmt.Fprintln(os.Stdout, "Bifrost routes:")
+type routeRow struct {
+	kind    string
+	pattern string
+	source  string
+}
+
+func printRouteTable(description protocol.DescribeResult, extra []routeRow) {
+	rows := make([]routeRow, 0, len(description.Spec.Routes)+len(extra))
 	for _, route := range description.Spec.Routes {
-		_, _ = fmt.Fprintf(os.Stdout, "  %-8s %-24s %s\n", route.Kind, route.Pattern, route.View)
+		rows = append(rows, routeRow{kind: route.Kind, pattern: route.Pattern, source: route.View})
+	}
+	rows = append(rows, extra...)
+	_, _ = fmt.Fprintln(os.Stdout, "Bifrost routes:")
+	for _, row := range rows {
+		_, _ = fmt.Fprintf(os.Stdout, "  %-12s %-30s %s\n", row.kind, row.pattern, row.source)
 	}
 }
