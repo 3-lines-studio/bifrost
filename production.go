@@ -211,7 +211,6 @@ type productionRenderer struct {
 	args        []string
 	environment []string
 	workDir     string
-	cleanupRoot string
 	devRoutes   string
 	attach      bool
 	admission   chan struct{}
@@ -227,26 +226,37 @@ type productionRenderer struct {
 	queueHooks []QueueHook
 }
 
-func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency, queue int, logger *slog.Logger, queueHooks []QueueHook) (*productionRenderer, error) {
-	root, err := os.MkdirTemp("", "bifrost-runtime-")
-	if err != nil {
-		return nil, fmt.Errorf("bifrost: create runtime directory: %w", err)
+func runtimeDirectory(manifest *compiledManifest) (string, error) {
+	root := filepath.Join(os.TempDir(), "bifrost-runtime-"+manifest.manifest.BuildID)
+	info, err := os.Lstat(root)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("bifrost: inspect runtime directory: %w", err)
 	}
-	cleanup := func(err error) (*productionRenderer, error) {
-		_ = os.RemoveAll(root)
+	if err == nil && !info.IsDir() {
+		return "", fmt.Errorf("bifrost: runtime directory %s is not a directory", root)
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", fmt.Errorf("bifrost: create runtime directory: %w", err)
+	}
+	return root, nil
+}
+
+func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency, queue int, logger *slog.Logger, queueHooks []QueueHook) (*productionRenderer, error) {
+	root, err := runtimeDirectory(manifest)
+	if err != nil {
 		return nil, err
 	}
 	if manifest.manifest.Runtime == nil {
-		return cleanup(errors.New("bifrost: manifest has no renderer runtime"))
+		return nil, errors.New("bifrost: manifest has no renderer runtime")
 	}
 	runtimePath := manifest.manifest.Runtime.Path
 	if manifest.manifest.RuntimeCompression == "gzip" {
 		runtimePath = strings.TrimSuffix(runtimePath, ".gz")
 		if err := extractGzipArtifact(assets, root, *manifest.manifest.Runtime, runtimePath, 0o700); err != nil {
-			return cleanup(err)
+			return nil, err
 		}
 	} else if err := extractArtifact(assets, root, *manifest.manifest.Runtime, 0o700); err != nil {
-		return cleanup(err)
+		return nil, err
 	}
 	extracted := make(map[string]struct{})
 	for _, view := range manifest.views {
@@ -259,24 +269,23 @@ func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency
 				continue
 			}
 			if err := extractArtifact(assets, root, file, 0o600); err != nil {
-				return cleanup(err)
+				return nil, err
 			}
 			extracted[file.Path] = struct{}{}
 		}
 	}
 	executable := filepath.Join(root, filepath.FromSlash(runtimePath))
 	renderer := &productionRenderer{
-		assets:      assets,
-		manifest:    manifest,
-		root:        root,
-		executable:  executable,
-		workDir:     root,
-		cleanupRoot: root,
-		admission:   make(chan struct{}, concurrency+queue),
-		idle:        make(chan *rendererWorker, concurrency),
-		workers:     make([]*rendererWorker, 0, concurrency),
-		logger:      logger,
-		queueHooks:  slices.Clone(queueHooks),
+		assets:     assets,
+		manifest:   manifest,
+		root:       root,
+		executable: executable,
+		workDir:    root,
+		admission:  make(chan struct{}, concurrency+queue),
+		idle:       make(chan *rendererWorker, concurrency),
+		workers:    make([]*rendererWorker, 0, concurrency),
+		logger:     logger,
+		queueHooks: slices.Clone(queueHooks),
 	}
 	for index := range concurrency {
 		process, startErr := renderproc.Start(executable, root)
@@ -284,7 +293,7 @@ func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			_ = renderer.closeWorkers(ctx)
 			cancel()
-			return cleanup(fmt.Errorf("bifrost: start renderer worker %d: %w", index+1, startErr))
+			return nil, fmt.Errorf("bifrost: start renderer worker %d: %w", index+1, startErr)
 		}
 		worker := &rendererWorker{process: process}
 		renderer.workers = append(renderer.workers, worker)
@@ -584,11 +593,6 @@ func (r *productionRenderer) Close(ctx context.Context) error {
 		}
 		if r.devRoutes != "" {
 			_ = os.Remove(r.devRoutes)
-		}
-		if r.cleanupRoot != "" {
-			if err := os.RemoveAll(r.cleanupRoot); result == nil {
-				result = err
-			}
 		}
 	})
 	return result
