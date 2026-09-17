@@ -28,18 +28,20 @@ func runRoutes(args []string) error {
 	if err != nil {
 		return err
 	}
+	var app *conventionApp
 	if convention {
-		app, err := prepareConventionApp(ctx, projectRoot, routeRoot)
+		prepared, err := prepareConventionApp(ctx, projectRoot, routeRoot)
 		if err != nil {
 			return err
 		}
-		options.Package = app.Package
-		options.Dir = app.WorkDir
+		app = &prepared
+		options.Package = prepared.Package
+		options.Dir = prepared.WorkDir
 	}
 	description, err := builder.Describe(ctx, options)
 	if err != nil {
 		return conventionHint(projectRoot, err)
 	}
-	printRouteTable(description)
+	printRouteTable(description, app.routeRows())
 	return nil
 }

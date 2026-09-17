@@ -8,6 +8,7 @@ import (
 	"go/format"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -155,6 +156,35 @@ type conventionApp struct {
 	Output      string
 	Executable  string
 	RouteParams map[string][]string
+	Rows        []routeRow
+}
+
+func (a *conventionApp) routeRows() []routeRow {
+	if a == nil {
+		return nil
+	}
+	return a.Rows
+}
+
+func goRouteRows(goDirs []conventionGoDir) []routeRow {
+	var rows []routeRow
+	for _, directory := range goDirs {
+		for _, method := range directory.HTTPMethods {
+			rows = append(rows, routeRow{kind: "api", pattern: strings.ToUpper(method) + " " + directory.Pattern, source: path.Join(directory.Directory, "route.go")})
+		}
+		if directory.Middleware {
+			rows = append(rows, routeRow{kind: "middleware", pattern: middlewareScope(directory.Pattern), source: path.Join(directory.Directory, "middleware.go")})
+		}
+	}
+	return rows
+}
+
+func middlewareScope(pattern string) string {
+	prefix := strings.TrimSuffix(pattern, "/{$}")
+	if prefix == "" {
+		return "/*"
+	}
+	return prefix + "/*"
 }
 
 func prepareConventionApp(ctx context.Context, projectRoot, routeRoot string) (conventionApp, error) {
@@ -254,7 +284,7 @@ func prepareConventionApp(ctx context.Context, projectRoot, routeRoot string) (c
 	if err := command.Run(); err != nil {
 		return conventionApp{}, fmt.Errorf("bifrost: prepare generated module: %w", err)
 	}
-	return conventionApp{ProjectRoot: projectRoot, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(projectRoot, ".bifrost", "bifrost-app"), RouteParams: conventionRouteParams(routes)}, nil
+	return conventionApp{ProjectRoot: projectRoot, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(projectRoot, ".bifrost", "bifrost-app"), RouteParams: conventionRouteParams(routes), Rows: goRouteRows(goDirs)}, nil
 }
 
 func conventionRouteParams(routes []conventionRoute) map[string][]string {

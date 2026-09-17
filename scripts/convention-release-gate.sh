@@ -226,6 +226,10 @@ printf 'asset-ok\n' >"$app/public/asset.txt"
 (cd "$app" && go mod tidy)
 
 "$cli" build "$app" >"$tmp/app-build.log" 2>&1
+"$cli" routes "$app" >"$tmp/routes.txt"
+grep -qE '^  api +GET /posts/api/\{slug\} +posts/api/slug_/route\.go$' "$tmp/routes.txt"
+grep -qE '^  middleware +/\* +middleware\.go$' "$tmp/routes.txt"
+grep -qE '^  middleware +/posts/\* +posts/middleware\.go$' "$tmp/routes.txt"
 CUSTOM_ADDR=127.0.0.1:18102 ACTIVE_MARKER="$tmp/active" "$app/.bifrost/bifrost-app" >"$tmp/full.log" 2>&1 &
 server_pid=$!
 for _ in $(seq 1 200); do curl -fsS http://127.0.0.1:18102/ >"$tmp/root.html" 2>/dev/null && break; sleep 0.05; done
