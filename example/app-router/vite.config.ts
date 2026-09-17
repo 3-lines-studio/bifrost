@@ -2,6 +2,6 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   define: {
-    __CONVENTION_EXAMPLE__: JSON.stringify(true),
+    __APP_ROUTER_EXAMPLE__: JSON.stringify(true),
   },
 });

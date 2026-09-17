@@ -1,12 +1,12 @@
 export function Head() {
-  return <title>Bifrost convention app</title>;
+  return <title>Bifrost App Router app</title>;
 }
 
 export function Page() {
   return (
     <main>
-      <h1>Bifrost convention app</h1>
-      <p>Custom Vite config: {__CONVENTION_EXAMPLE__ ? "active" : "inactive"}</p>
+      <h1>Bifrost App Router app</h1>
+      <p>Custom Vite config: {__APP_ROUTER_EXAMPLE__ ? "active" : "inactive"}</p>
       <ul>
         <li><a href="/posts/hello">Loader, dynamic params, middleware, and layouts</a></li>
         <li><a href="/posts/api/hello">All-method REST route</a></li>

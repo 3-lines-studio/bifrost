@@ -24,13 +24,13 @@ func runRoutes(args []string) error {
 	}
 	ctx := context.Background()
 	options := builder.Options{Package: packagePath, Dir: *dir, ViteConfig: *viteConfig}
-	projectRoot, routeRoot, convention, err := conventionRoots(*dir, packagePath)
+	projectRoot, routeRoot, isAppRouter, err := appRouterRoots(*dir, packagePath)
 	if err != nil {
 		return err
 	}
-	var app *conventionApp
-	if convention {
-		prepared, err := prepareConventionApp(ctx, projectRoot, routeRoot)
+	var app *appRouter
+	if isAppRouter {
+		prepared, err := prepareAppRouter(ctx, projectRoot, routeRoot)
 		if err != nil {
 			return err
 		}
@@ -40,7 +40,7 @@ func runRoutes(args []string) error {
 	}
 	description, err := builder.Describe(ctx, options)
 	if err != nil {
-		return conventionHint(projectRoot, err)
+		return appRouterHint(projectRoot, err)
 	}
 	printRouteTable(description, app.routeRows())
 	return nil

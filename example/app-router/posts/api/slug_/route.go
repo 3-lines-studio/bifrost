@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	app "github.com/3-lines-studio/bifrost/example/convention"
+	app "github.com/3-lines-studio/bifrost/example/app-router"
 )
 
 func Get(w http.ResponseWriter, r *http.Request) {

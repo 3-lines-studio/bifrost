@@ -1,22 +1,22 @@
-# Full convention app
+# Full App Router app
 
 This example exercises pages, loaders, dynamic params, every REST method, nested middleware, layouts, loading views, error fallbacks, not-found pages, public files, custom Vite config, streaming failure semantics, and `server.go`.
 
 ```sh
-go run ./cmd/bifrost dev ./example/convention
+go run ./cmd/bifrost dev ./example/app-router
 ```
 
 Use `BIFROST_ADDR` because this example owns the server through `server.go`:
 
 ```sh
-BIFROST_ADDR=127.0.0.1:9000 go run ./cmd/bifrost dev ./example/convention
+BIFROST_ADDR=127.0.0.1:9000 go run ./cmd/bifrost dev ./example/app-router
 ```
 
 Build and run:
 
 ```sh
-go run ./cmd/bifrost build ./example/convention
-BIFROST_ADDR=127.0.0.1:9000 ./example/convention/.bifrost/bifrost-app
+go run ./cmd/bifrost build ./example/app-router
+BIFROST_ADDR=127.0.0.1:9000 ./example/app-router/.bifrost/bifrost-app
 ```
 
 Try every REST method:

@@ -80,7 +80,7 @@ mux.Handle("/", apiRouter)
 handler := sharedMiddleware(app.ResolveMarkdown(mux))
 ```
 
-`ResolveMarkdown` serves server-rendered routes as Markdown for a `.md` path suffix or a preferred `Accept: text/markdown` media type. It leaves static pages, client pages, public files, and other mux handlers unchanged. `Handler` applies it automatically, and so do generated convention apps.
+`ResolveMarkdown` serves server-rendered routes as Markdown for a `.md` path suffix or a preferred `Accept: text/markdown` media type. It leaves static pages, client pages, public files, and other mux handlers unchanged. `Handler` applies it automatically, and so do generated App Router apps.
 
 Use `/{$}` for an exact root page. The standard `/` pattern is a subtree fallback. Bifrost does not add router-specific adapters.
 
@@ -140,9 +140,11 @@ export function Nav() {
 
 `href(pattern, params)` interpolates `http.ServeMux` patterns such as `/post/{slug}` and `/files/{path...}`. `bifrost init` writes the matching `bifrost.d.ts` declarations; add them manually to other projects.
 
-The module is read-only metadata. Explicitly wired apps own their client-side navigation. Convention apps include it automatically.
+The module is read-only metadata. Explicitly wired apps own their client-side navigation. App Router apps include it automatically.
 
-## Convention app files
+## App Router files
+
+Bifrost follows the Next.js App Router file conventions.
 
 The project root is the route root, or the `app` directory when it exists. A directory becomes a route when it contains `page.tsx`, and its path is the URL path.
 
@@ -179,9 +181,9 @@ Every page also receives `params`, `searchParams`, and `pathname` merged into it
 
 A layout or a page can export `metadata` instead of a `Head` component. Bifrost merges the objects from the outer layouts down to the page, so a page overrides one key and inherits the rest. It renders `title`, `description`, `keywords`, `alternates.canonical`, `robots.index`, `robots.follow`, and `openGraph` (`title`, `description`, `url`, `images`). `generateMetadata(props)` covers what depends on the request: it receives the page props, may be async, and its result merges the same way.
 
-## Convention navigation
+## App Router navigation
 
-Use normal `<a href="/posts/hello">` links. After the first server render, convention apps fetch the next route through the same Go middleware and loader, lazy-load its Vite module, and update one React root. Shared layouts stay mounted. Back/forward, scroll, hash links, focus, page head, and root document attributes update with the route.
+Use normal `<a href="/posts/hello">` links. After the first server render, App Router apps fetch the next route through the same Go middleware and loader, lazy-load its Vite module, and update one React root. Shared layouts stay mounted. Back/forward, scroll, hash links, focus, page head, and root document attributes update with the route.
 
 Page-local state resets when the pathname changes, including dynamic parameters such as `/posts/one` → `/posts/two`. Query changes keep page state but reload props. Hash-only changes keep state without running the loader. Shared layouts keep state while they remain in the tree; leaving a layout discards its state. Back/forward restores scroll, not previously unmounted page state.
 
@@ -191,11 +193,11 @@ External links, downloads, new tabs, and modified clicks keep browser behavior. 
 
 Navigation responses contain props and server-rendered head metadata, not page HTML. Bifrost still runs SSR to preserve render-error boundaries, discarding body chunks without buffering them. This saves document reloads, not SSR work. Custom middleware must preserve the navigation `Accept` header and `Vary: Accept`; do not cache these responses.
 
-Generated convention routes use `Route.WithNavigation()`. Its view must export a hook-free `renderPage(props, pageKey?)` tree factory, an SSR `Page` component that renders the same tree, and, when a `loading.tsx` covers the route, a `renderPending(props, pageKey?)` factory that renders the same tree with the loading view instead of the page. The factory keys the page branch by `pageKey` while keeping layout keys stable. The generated factory opts out of React Compiler memoization; hooks belong in the page and layout components inside it. Ordinary `Server`, `Static`, and `Client` declarations keep their existing behavior.
+Generated App Router routes use `Route.WithNavigation()`. Its view must export a hook-free `renderPage(props, pageKey?)` tree factory, an SSR `Page` component that renders the same tree, and, when a `loading.tsx` covers the route, a `renderPending(props, pageKey?)` factory that renders the same tree with the loading view instead of the page. The factory keys the page branch by `pageKey` while keeping layout keys stable. The generated factory opts out of React Compiler memoization; hooks belong in the page and layout components inside it. Ordinary `Server`, `Static`, and `Client` declarations keep their existing behavior.
 
 ### Programmatic navigation and refresh
 
-Convention apps can import `navigate`, `replace`, `refresh`, `Link`, and the navigation hooks from `virtual:bifrost/navigation`. Call `navigate`, `replace`, and `refresh` from browser event handlers or effects, not during rendering:
+App Router apps can import `navigate`, `replace`, `refresh`, `Link`, and the navigation hooks from `virtual:bifrost/navigation`. Call `navigate`, `replace`, and `refresh` from browser event handlers or effects, not during rendering:
 
 ```tsx
 import { navigate, refresh } from "virtual:bifrost/navigation";
@@ -236,7 +238,7 @@ export function Nav() {
 - `useRouter()` returns `push`, `replace`, `refresh`, `back`, and `forward`. `back` and `forward` use browser history.
 - `Link` renders an anchor. On click Bifrost navigates in place, exactly like any other internal link, and a document load happens when JavaScript is off.
 
-`bifrost init` includes the types. Existing convention apps can add this to `bifrost.d.ts`:
+`bifrost init` includes the types. Existing App Router apps can add this to `bifrost.d.ts`:
 
 ```ts
 declare module "virtual:bifrost/navigation" {
@@ -302,8 +304,8 @@ Linux amd64 and arm64 production, containers, and macOS development. Windows is 
 ## Checks
 
 ```sh
-make check # test race vet, and the convention release gate
-make gate # only the convention release gate
+make check # test race vet, and the App Router release gate
+make gate # only the App Router release gate
 make integration
 make dev-integration
 make reproducible

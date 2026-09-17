@@ -330,4 +330,4 @@ if [[ "${BIFROST_EMPTY_GOMODCACHE:-}" = 1 ]]; then
   GOMODCACHE="$empty" "$cli" build "$pure" >/dev/null 2>&1
 fi
 
-echo "convention release gate passed"
+echo "App Router release gate passed"

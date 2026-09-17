@@ -491,21 +491,21 @@ export function setRouter(value: Router) {
 
 export async function navigate(href: string): Promise<void> {
   if (!router) {
-    throw new Error("Bifrost navigation requires a mounted convention app");
+    throw new Error("Bifrost navigation requires a mounted App Router app");
   }
   await router.navigate(href);
 }
 
 export async function replace(href: string): Promise<void> {
   if (!router) {
-    throw new Error("Bifrost navigation requires a mounted convention app");
+    throw new Error("Bifrost navigation requires a mounted App Router app");
   }
   await router.replace(href);
 }
 
 export async function refresh(): Promise<void> {
   if (!router) {
-    throw new Error("Bifrost navigation requires a mounted convention app");
+    throw new Error("Bifrost navigation requires a mounted App Router app");
   }
   await router.refresh();
 }

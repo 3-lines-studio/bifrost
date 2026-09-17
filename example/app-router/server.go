@@ -1,4 +1,4 @@
-package convention
+package approuter
 
 import (
 	"context"
@@ -19,7 +19,7 @@ func Serve(ctx context.Context, handler http.Handler) error {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Bifrost-Example", "convention")
+		w.Header().Set("X-Bifrost-Example", "app-router")
 		handler.ServeHTTP(w, r)
 	}))
 
