@@ -302,7 +302,8 @@ Linux amd64 and arm64 production, containers, and macOS development. Windows is 
 ## Checks
 
 ```sh
-make check
+make check # test race vet, and the convention release gate
+make gate # only the convention release gate
 make integration
 make dev-integration
 make reproducible
