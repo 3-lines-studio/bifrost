@@ -49,7 +49,11 @@ EOF
 else
   cd "$root"
   go build -o "$cli" ./cmd/bifrost
-  cp -a --reflink=auto "$root/node_modules" "$deps/node_modules"
+  if [[ "$(uname)" == Darwin ]]; then
+    cp -c -a "$root/node_modules" "$deps/node_modules"
+  else
+    cp -a --reflink=auto "$root/node_modules" "$deps/node_modules"
+  fi
   module_requirement=$'require github.com/3-lines-studio/bifrost v0.0.0\nreplace github.com/3-lines-studio/bifrost => '"$root"
 fi
 
