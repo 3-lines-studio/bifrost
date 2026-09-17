@@ -748,7 +748,7 @@ func TestGeneratedServerLifecycleAndEscapeHatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, expected := range []string{"signal.NotifyContext", "ReadHeaderTimeout", "BIFROST_ADDR", `flag.StringVar(&addr, "addr"`, "route0.Serve(ctx, app.ResolveMarkdown(mux))", "server.Shutdown"} {
+	for _, expected := range []string{"signal.NotifyContext", "ReadHeaderTimeout", "BIFROST_ADDR", `flag.StringVar(&addr, "addr"`, "route0.Serve(ctx, redirectTrailingSlash(app.ResolveMarkdown(mux)))", "server.Shutdown"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("generated main does not contain %q", expected)
 		}
@@ -764,7 +764,7 @@ func TestGeneratedServerLifecycleAndEscapeHatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "return serve(ctx, app.ResolveMarkdown(mux))") {
+	if !strings.Contains(string(data), "return serve(ctx, redirectTrailingSlash(app.ResolveMarkdown(mux)))") {
 		t.Fatal("generated main does not apply markdown resolution")
 	}
 }
