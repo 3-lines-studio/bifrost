@@ -67,6 +67,10 @@ func TestNavigationEntriesShareRouterAndLazyViews(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	describe := protocol.DescribeResult{Spec: protocol.Spec{Routes: []protocol.RouteSpec{
 		{Pattern: "/a", View: "a.tsx", Kind: "server", Navigation: true},
 		{Pattern: "/b", View: "b.tsx", Kind: "server", Navigation: true},
@@ -87,7 +91,7 @@ func TestNavigationEntriesShareRouterAndLazyViews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(router), `import("`+filepath.Join(root, "a.tsx")+`")`) || !strings.Contains(string(router), `import("`+filepath.Join(root, "b.tsx")+`")`) || strings.Contains(string(router), "plain.tsx") {
+	if !strings.Contains(string(router), `import("`+filepath.Join(resolvedRoot, "a.tsx")+`")`) || !strings.Contains(string(router), `import("`+filepath.Join(resolvedRoot, "b.tsx")+`")`) || strings.Contains(string(router), "plain.tsx") {
 		t.Fatalf("router = %s", router)
 	}
 	api, err := os.ReadFile(filepath.Join(output, "entries", "navigation-api.ts"))
