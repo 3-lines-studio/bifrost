@@ -1,0 +1,29 @@
+:root { color-scheme: dark; --line: #2a3140; --dim: #8b96a8; --accent: #6cc4ff; --warn: #ffb454; --bad: #ff6b6b; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #11151c; color: #e6ebf2; font: 16px/1.6 ui-sans-serif, system-ui, sans-serif; }
+header, main, footer, nav { display: block; }
+.shell { max-width: 60rem; margin: 0 auto; padding: 1.5rem; }
+header.shell { border-bottom: 1px solid var(--line); }
+header a.brand { color: #fff; font-weight: 700; text-decoration: none; letter-spacing: .02em; }
+nav.crumbs { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: .75rem; font-size: .9rem; }
+nav.crumbs a { color: var(--dim); text-decoration: none; }
+nav.crumbs a:hover, nav.crumbs a[aria-current="page"] { color: var(--accent); }
+main.shell { min-height: 60vh; padding-top: 2rem; padding-bottom: 3rem; }
+footer.shell { border-top: 1px solid var(--line); color: var(--dim); font-size: .85rem; }
+h1 { font-size: 1.7rem; margin: 0 0 .5rem; }
+h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
+p.lede { color: var(--dim); margin-top: 0; }
+ul.cards { list-style: none; padding: 0; display: grid; gap: .6rem; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
+ul.cards a { display: block; padding: .8rem 1rem; border: 1px solid var(--line); border-radius: .5rem; color: #e6ebf2; text-decoration: none; }
+ul.cards a:hover { border-color: var(--accent); }
+ul.cards small { display: block; color: var(--dim); font-size: .8rem; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em; }
+pre { background: #0c1017; border: 1px solid var(--line); border-radius: .5rem; padding: .8rem 1rem; overflow-x: auto; }
+table.data { border-collapse: collapse; width: 100%; font-size: .92rem; }
+table.data th, table.data td { border-bottom: 1px solid var(--line); padding: .45rem .6rem; text-align: left; }
+table.data th { color: var(--dim); font-weight: 600; }
+.note { border-left: 3px solid var(--accent); background: #0e141d; padding: .7rem 1rem; margin: 1rem 0; font-size: .92rem; }
+.note.bad { border-left-color: var(--bad); }
+.note.warn { border-left-color: var(--warn); }
+.tag { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: .05rem .55rem; font-size: .78rem; color: var(--dim); }
+.busy { opacity: .6; }

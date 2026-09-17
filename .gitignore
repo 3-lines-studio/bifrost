@@ -15,3 +15,4 @@ node_modules/
 *.tmp
 
 /example/app-router-minimal/.bifrost/
+/example/app-router-demo/.bifrost/
