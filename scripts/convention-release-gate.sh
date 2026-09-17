@@ -7,8 +7,17 @@ cli="$tmp/bifrost"
 dev_pid=""
 server_pid=""
 cleanup() {
+  status=$?
   if [[ -n "$dev_pid" ]]; then kill -TERM "$dev_pid" 2>/dev/null || true; wait "$dev_pid" 2>/dev/null || true; fi
   if [[ -n "$server_pid" ]]; then kill -TERM "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; fi
+  if [[ $status -ne 0 ]]; then
+    for log in "$tmp/pure-build.log" "$tmp/app-build.log"; do
+      if [[ -s "$log" ]]; then
+        echo "== $log" >&2
+        cat "$log" >&2
+      fi
+    done
+  fi
   rm -rf "$tmp"
 }
 trap cleanup EXIT
@@ -49,7 +58,7 @@ mkdir -p "$pure/public"
 ln -s "$deps/node_modules" "$pure/node_modules"
 printf 'export function Page() { return <main>pure-page</main> }\n' >"$pure/page.tsx"
 printf 'public-ok\n' >"$pure/public/status.txt"
-"$cli" build "$pure" >/dev/null 2>&1
+"$cli" build "$pure" >"$tmp/pure-build.log" 2>&1
 BIFROST_ADDR=127.0.0.1:18101 "$pure/.bifrost/bifrost-app" >"$tmp/pure.log" 2>&1 &
 server_pid=$!
 for _ in $(seq 1 200); do curl -fsS http://127.0.0.1:18101/ >"$tmp/pure.html" 2>/dev/null && break; sleep 0.05; done
@@ -77,7 +86,7 @@ import type { ReactNode } from "react";
 export function Layout({ children }: { children: ReactNode }) { return <section>root-layout{children}</section> }
 EOF
 cat >"$app/error.tsx" <<'EOF'
-export function Error({ error }: { error: string }) { return <main>root-error:{error}</main> }
+export function Error({ error, reset }: { error: Error; reset: () => void }) { return <main>root-error:{error.message}</main> }
 EOF
 cat >"$app/not-found.tsx" <<'EOF'
 export function NotFound() { return <main>root-not-found</main> }
@@ -131,7 +140,7 @@ import type { ReactNode } from "react";
 export function Layout({ children }: { children: ReactNode }) { return <article>posts-layout{children}</article> }
 EOF
 cat >"$app/posts/error.tsx" <<'EOF'
-export function Error({ error }: { error: string }) { if (globalThis.location?.search === "?fail-boundary") throw new Error("boundary failed"); return <main>posts-error:{error}</main> }
+export function Error({ error, reset }: { error: Error; reset: () => void }) { if (globalThis.location?.search === "?fail-boundary") throw new Error("boundary failed"); return <main>posts-error:{error.message}</main> }
 EOF
 cat >"$app/posts/not-found.tsx" <<'EOF'
 export function NotFound() { return <main>posts-not-found</main> }
@@ -216,7 +225,7 @@ EOF
 printf 'asset-ok\n' >"$app/public/asset.txt"
 (cd "$app" && go mod tidy)
 
-"$cli" build "$app" >/dev/null 2>&1
+"$cli" build "$app" >"$tmp/app-build.log" 2>&1
 CUSTOM_ADDR=127.0.0.1:18102 ACTIVE_MARKER="$tmp/active" "$app/.bifrost/bifrost-app" >"$tmp/full.log" 2>&1 &
 server_pid=$!
 for _ in $(seq 1 200); do curl -fsS http://127.0.0.1:18102/ >"$tmp/root.html" 2>/dev/null && break; sleep 0.05; done
