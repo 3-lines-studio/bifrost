@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/3-lines-studio/bifrost/internal/protocol"
@@ -17,8 +18,13 @@ func TestDescribeBuildPhaseUsesDedicatedFD(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
+	fd, err := syscall.Dup(int(writer.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv(buildPhaseEnv, "describe")
-	t.Setenv(buildFDEnv, strconv.Itoa(int(writer.Fd())))
+	t.Setenv(buildFDEnv, strconv.Itoa(fd))
 
 	app, err := New(Config{SourceRoot: t.TempDir(), Routes: []Route{Client("/app", "pages/app.tsx")}})
 	if err != nil {
