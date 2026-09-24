@@ -600,7 +600,7 @@ func gzipFile(sourcePath, destination string) error {
 	if err != nil {
 		return err
 	}
-	writer, err := gzip.NewWriterLevel(output, gzip.BestCompression)
+	writer, err := gzip.NewWriterLevel(output, gzip.DefaultCompression)
 	if err != nil {
 		_ = output.Close()
 		return err
