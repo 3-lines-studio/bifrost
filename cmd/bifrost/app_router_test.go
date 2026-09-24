@@ -728,6 +728,25 @@ func TestGeneratedMainSetsRenderConcurrency(t *testing.T) {
 	}
 }
 
+func TestAppPackageCheck(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.25.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "page.go"), []byte("package app\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkAppPackages(context.Background(), root, []string{"example.com/app", "example.com/app"}); err != nil {
+		t.Fatalf("checkAppPackages on a healthy package = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "server.go"), []byte("package root\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkAppPackages(context.Background(), root, []string{"example.com/app"}); err == nil {
+		t.Fatal("checkAppPackages accepted two packages in one directory")
+	}
+}
+
 func TestGeneratedModuleUsesTheWorkingTreeForDevelopmentVersions(t *testing.T) {
 	root := t.TempDir()
 	userModule := filepath.Join(root, "app")

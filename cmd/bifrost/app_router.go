@@ -215,6 +215,9 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 	if err := os.MkdirAll(generated, 0o755); err != nil {
 		return appRouter{}, err
 	}
+	if err := checkAppPackages(ctx, moduleDir, appPackagePaths(modulePath, routes, goDirs)); err != nil {
+		return appRouter{}, err
+	}
 	for index := range routes {
 		if !routes[index].PageGo {
 			continue
@@ -991,6 +994,47 @@ func importAlias(aliases map[string]string, importPath string) string {
 	alias := fmt.Sprintf("route%d", len(aliases))
 	aliases[importPath] = alias
 	return alias
+}
+
+func appPackagePaths(modulePath string, routes []appRoute, goDirs []goDir) []string {
+	paths := make([]string, 0, len(routes)+len(goDirs))
+	join := func(relative string) string {
+		if relative == "" || relative == "." {
+			return modulePath
+		}
+		return modulePath + "/" + filepath.ToSlash(relative)
+	}
+	for _, route := range routes {
+		if route.PageGo {
+			paths = append(paths, join(route.ImportPath))
+		}
+	}
+	for _, directory := range goDirs {
+		paths = append(paths, join(directory.Directory))
+	}
+	return paths
+}
+
+func checkAppPackages(ctx context.Context, dir string, importPaths []string) error {
+	seen := make(map[string]struct{}, len(importPaths))
+	unique := make([]string, 0, len(importPaths))
+	for _, importPath := range importPaths {
+		if _, ok := seen[importPath]; ok {
+			continue
+		}
+		seen[importPath] = struct{}{}
+		unique = append(unique, importPath)
+	}
+	if len(unique) == 0 {
+		return nil
+	}
+	command := exec.CommandContext(ctx, "go", append([]string{"list"}, unique...)...)
+	command.Dir = dir
+	output, err := command.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("bifrost: the app packages do not load: %s", strings.TrimSpace(string(output)))
 }
 
 func hasSymbol(ctx context.Context, dir, importPath, name string) bool {
