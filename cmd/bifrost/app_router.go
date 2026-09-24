@@ -591,6 +591,12 @@ func metadataUsesProps(sources []metadataSource) bool {
 
 var headExportPattern = regexp.MustCompile(`(?m)^\s*export\s+(?:function|const|let|var)\s+Head\b`)
 
+var pseudoVersionPattern = regexp.MustCompile(`[.-]\d{14}-[0-9a-f]{12}(\+dirty)?$`)
+
+func developmentVersion(version string) bool {
+	return !strings.HasPrefix(version, "v") || pseudoVersionPattern.MatchString(version)
+}
+
 var defaultExportPattern = regexp.MustCompile(`(?m)^\s*export\s+default\b`)
 
 var metadataExportPattern = regexp.MustCompile(`(?m)^\s*export\s+(?:const|let|var)\s+metadata\b`)
@@ -1152,7 +1158,7 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 func writeAppRouterModule(generated, userModuleDir string) error {
 	version := bifrost.Version
 	bifrostModuleDir := ""
-	if !strings.HasPrefix(version, "v") || strings.HasPrefix(version, "v0.0.0-") {
+	if developmentVersion(version) {
 		_, source, _, ok := runtime.Caller(0)
 		if !ok {
 			return errors.New("bifrost: cannot locate the development module")

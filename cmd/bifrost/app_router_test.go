@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/3-lines-studio/bifrost"
 )
 
 func TestDiscoverAppRouterRoutes(t *testing.T) {
@@ -723,6 +725,49 @@ func TestGeneratedMainSetsRenderConcurrency(t *testing.T) {
 	}
 	if text := read(); strings.Contains(text, "RenderConcurrency: ") {
 		t.Fatalf("generated main sets a render concurrency with zero:\n%s", text)
+	}
+}
+
+func TestGeneratedModuleUsesTheWorkingTreeForDevelopmentVersions(t *testing.T) {
+	root := t.TempDir()
+	userModule := filepath.Join(root, "app")
+	if err := os.MkdirAll(userModule, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userModule, "go.mod"), []byte("module example.com/app\n\ngo 1.25.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	generated := filepath.Join(userModule, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := bifrost.Version
+	t.Cleanup(func() { bifrost.Version = original })
+	read := func() string {
+		source, err := os.ReadFile(filepath.Join(generated, "go.mod"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(source)
+	}
+
+	development := []string{"devel", "devel+1a2b3c4d5e6f", "v1.3.11-0.20260924213727-f23f09ff9bad", "v0.0.0-20260924213727-f23f09ff9bad", "v1.3.11-0.20260924213727-f23f09ff9bad+dirty"}
+	for _, version := range development {
+		bifrost.Version = version
+		if err := writeAppRouterModule(generated, userModule); err != nil {
+			t.Fatal(err)
+		}
+		if source := read(); !strings.Contains(source, "replace github.com/3-lines-studio/bifrost => ") {
+			t.Fatalf("version %q: generated module does not use the working tree:\n%s", version, source)
+		}
+	}
+
+	bifrost.Version = "v1.3.10"
+	if err := writeAppRouterModule(generated, userModule); err != nil {
+		t.Fatal(err)
+	}
+	if source := read(); strings.Contains(source, "replace github.com/3-lines-studio/bifrost => ") {
+		t.Fatalf("released version: generated module replaces the bifrost module:\n%s", source)
 	}
 }
 
