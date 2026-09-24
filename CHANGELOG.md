@@ -2,7 +2,7 @@
 
 Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
-## Unreleased
+## v1.3.11
 
 ### App Router
 
