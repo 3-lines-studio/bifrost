@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -100,6 +101,7 @@ func runDev(args []string) error {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		return errors.New("bifrost: development server is already running for this directory")
 	}
+	pruneStaleDevelopmentFiles(os.TempDir(), name+".lock")
 	socketDir := filepath.Join(os.TempDir(), name+"-"+fmt.Sprint(os.Getpid()))
 	defer func() { _ = os.RemoveAll(socketDir) }()
 	socket := filepath.Join(socketDir, "vite.sock")
@@ -277,6 +279,45 @@ func runDev(args []string) error {
 
 // requireViteInstalled fails early with an actionable message when Vite is
 // missing from node_modules at dir or any of its parents.
+func pruneStaleDevelopmentFiles(base, current string) {
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		prefix, ok := strings.CutSuffix(entry.Name(), ".lock")
+		if !ok || !strings.HasPrefix(prefix, "bifrost-dev-") || entry.Name() == current {
+			continue
+		}
+		if !claimDevelopmentLock(filepath.Join(base, entry.Name())) {
+			continue
+		}
+		_ = os.Remove(filepath.Join(base, entry.Name()))
+		pruneDevelopmentDirectories(base, prefix)
+	}
+}
+
+func claimDevelopmentLock(path string) bool {
+	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = file.Close() }()
+	return syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil
+}
+
+func pruneDevelopmentDirectories(base, prefix string) {
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), prefix+"-") {
+			_ = os.RemoveAll(filepath.Join(base, entry.Name()))
+		}
+	}
+}
+
 func requireViteInstalled(dir string) error {
 	absolute, err := filepath.Abs(dir)
 	if err != nil {
