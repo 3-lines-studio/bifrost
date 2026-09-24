@@ -47,14 +47,8 @@ HTTP: pages and `route.go` in the same tree, all methods, redirects from a loade
 
 Client: in-place navigation, loading views, error views with `reset`, request-scoped state under concurrency, `data-bifrost-reload`, downloads, hash-only navigation, and a plain form that works with JavaScript off.
 
-## One framework bug this demo found
-
-It is reported and not fixed here. The demo works around it.
-
-1. **A layout that exports `Head` and `metadata` silently drops the `Head`.** The builder rejects the combination in a page (`exports both Head and metadata; keep one`) but accepts it in a layout, where the `Head` component is then ignored: `app/layout.tsx` linked the stylesheet and the link never reached the HTML. Workaround here: the stylesheet is a `<link precedence="high">` inside the layout body, which React 19 hoists.
-
 ## Notes for whoever writes the next one
 
 - Go shared code lives in a normal folder (`app/store`), not in a private one: Go tools skip directories that start with `_` or `.`, so `_store` cannot be imported.
 - A section `not-found.tsx` registers `<section>/{path...}`, so a catch-all page in the same section collides with it and the build fails loudly. Pick one.
-- A page cannot export `Head` while a layout above it exports `metadata`.
+- `Head` only lives in `page.tsx`: any other view file that exports it fails the build.

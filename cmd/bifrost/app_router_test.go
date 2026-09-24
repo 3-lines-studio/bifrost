@@ -468,6 +468,51 @@ func TestAppRouterRejectsConflictingMetadata(t *testing.T) {
 	}
 }
 
+func TestAppRouterRejectsHeadOutsidePage(t *testing.T) {
+	for _, name := range []string{"layout.tsx", "template.tsx", "error.tsx", "not-found.tsx", "loading.tsx"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			files := map[string]string{
+				"page.tsx": "export function Page() { return null }",
+				name:       "export function Head() { return null }",
+			}
+			for file, content := range files {
+				if err := os.WriteFile(filepath.Join(root, file), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := discoverRoutes(root); err == nil || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "keep it in page.tsx") {
+				t.Fatalf("discoverRoutes error = %v", err)
+			}
+		})
+	}
+}
+
+func TestAppRouterAcceptsHeadInPageAndComponents(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"page.tsx":             "export function Head() { return null }\nexport function Page() { return null }",
+		"layout.tsx":           "export function Layout({ children }) { return children }",
+		"_components/card.tsx": "export function Head() { return null }",
+	}
+	for file, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(file))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || !routes[0].HasHead {
+		t.Fatalf("routes = %#v", routes)
+	}
+}
+
 func TestAppRouterErrorViewsReceiveAnErrorAndReset(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
