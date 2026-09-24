@@ -52,7 +52,7 @@ export function Page(props) {
 }
 ```
 
-`Page` is required and `Head` is optional. Server and Static pages hydrate; client pages mount into an empty shell. Loader and generator props reach the browser, so never return secrets as props. Hydrated pages follow React Client Component rules: page components cannot be async, and streamed deferred UI uses `React.lazy` with `Suspense`.
+`Page` is required and `Head` is optional. Only `page.tsx` can export `Head`: every other view file rejects it, because the renderer keeps a single head per route. Server and Static pages hydrate; client pages mount into an empty shell. Loader and generator props reach the browser, so never return secrets as props. Hydrated pages follow React Client Component rules: page components cannot be async, and streamed deferred UI uses `React.lazy` with `Suspense`.
 
 A Server loader may return request-scoped root document attributes without putting them in React props:
 
@@ -160,7 +160,7 @@ Go needs a legal identifier for every path value, so Bifrost replaces the charac
 
 The other files in a route directory are optional:
 
-- `page.tsx` exports `Page` and, optionally, `Head`.
+- `page.tsx` exports `Page` and, optionally, `Head`. It is the only file that can export `Head`.
 - `layout.tsx` exports `Layout`, wraps every route below it, and stays mounted across navigation.
 - `template.tsx` exports `Template`, wraps everything below it like a layout, and remounts on every navigation.
 - `loading.tsx` exports `Loading`, and shows while a navigation to that route runs. It covers a route and everything below it, like `layout.tsx`, and the deepest one wins.
@@ -175,7 +175,7 @@ Every view accepts a default export instead of the named one, so `export default
 
 Every page receives `params`, `searchParams`, and `pathname` merged into its loader props, so a page reads `params.slug` and `searchParams.tab` without asking the loader. `params` keys by folder name, a catch-all parameter is an array of segments, and a repeated query key is an array too. Because Bifrost merges them into the props, a loader must return a map or a `bifrost.PageData` whose `Props` is a map.
 
-A layout or a page can export `metadata` instead of a `Head` component, and Bifrost merges the objects from the outer layouts down to the page, so a page overrides one key and inherits the rest. It renders `title`, `description`, `keywords`, `alternates.canonical`, `robots.index`, `robots.follow`, and `openGraph` (`title`, `description`, `url`, `images`). `generateMetadata(props)` covers what depends on the request: it receives the page props, may be async, and merges the same way.
+A layout or a page can export `metadata`, and Bifrost merges the objects from the outer layouts down to the page, so a page overrides one key and inherits the rest. A page that exports `Head` cannot also export `metadata`. It renders `title`, `description`, `keywords`, `alternates.canonical`, `robots.index`, `robots.follow`, and `openGraph` (`title`, `description`, `url`, `images`). `generateMetadata(props)` covers what depends on the request: it receives the page props, may be async, and merges the same way.
 
 ## App Router navigation
 
