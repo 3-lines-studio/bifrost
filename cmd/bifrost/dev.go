@@ -49,7 +49,7 @@ func runDev(args []string) error {
 		return err
 	}
 	if isAppRouter {
-		app, err := prepareAppRouter(context.Background(), projectRoot, routeRoot, 0)
+		app, err := prepareAppRouter(context.Background(), projectRoot, routeRoot, 0, 0)
 		if err != nil {
 			return err
 		}

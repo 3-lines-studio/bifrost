@@ -60,6 +60,7 @@ func runBuild(args []string) error {
 	dir := flags.String("C", ".", "working directory")
 	staticWorkers := flags.Int("static-workers", 4, "concurrent static render workers")
 	renderConcurrency := flags.Int("render-concurrency", 0, "production renderer processes (default two)")
+	renderQueue := flags.Int("render-queue", 0, "requests waiting on renderer capacity (default 64)")
 	sourceMaps := flags.Bool("sourcemaps", false, "include inline production source maps")
 	viteConfig := flags.String("vite-config", "", "path to the Vite configuration file")
 	if err := flags.Parse(args); err != nil {
@@ -81,7 +82,7 @@ func runBuild(args []string) error {
 		return err
 	}
 	if isAppRouter {
-		prepared, err := prepareAppRouter(context.Background(), projectRoot, routeRoot, *renderConcurrency)
+		prepared, err := prepareAppRouter(context.Background(), projectRoot, routeRoot, *renderConcurrency, *renderQueue)
 		if err != nil {
 			return err
 		}

@@ -671,7 +671,7 @@ func TestGeneratedMainInjectsRequestProps(t *testing.T) {
 		{Pattern: "/posts/{post_id}", Params: []routeParam{{Name: "post-id", Value: "post_id"}}, View: "page.tsx", HasLoader: true, ImportPath: "example.com/app/posts", Alias: "route0", ErrorViews: []string{"error.tsx"}, NotFoundView: "not-found.tsx"},
 		{Pattern: "/docs/{slug...}", Params: []routeParam{{Name: "slug", Value: "slug", Segments: true}}, View: "page.tsx"},
 	}
-	if err := writeAppRouterMain(root, generated, routes, nil, 0); err != nil {
+	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	source, err := os.ReadFile(filepath.Join(generated, "main.go"))
@@ -711,18 +711,47 @@ func TestGeneratedMainSetsRenderConcurrency(t *testing.T) {
 		return string(source)
 	}
 
-	if err := writeAppRouterMain(root, generated, nil, nil, 4); err != nil {
+	if err := writeAppRouterMain(root, generated, nil, nil, 4, 0); err != nil {
 		t.Fatal(err)
 	}
 	if text := read(); !strings.Contains(text, "Assets: bifrostAssets, RenderConcurrency: 4, Routes:") {
 		t.Fatalf("generated main does not set the render concurrency:\n%s", text)
 	}
 
-	if err := writeAppRouterMain(root, generated, nil, nil, 0); err != nil {
+	if err := writeAppRouterMain(root, generated, nil, nil, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	if text := read(); strings.Contains(text, "RenderConcurrency: ") {
 		t.Fatalf("generated main sets a render concurrency with zero:\n%s", text)
+	}
+}
+
+func TestGeneratedMainSetsRenderQueue(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	read := func() string {
+		source, err := os.ReadFile(filepath.Join(generated, "main.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(source)
+	}
+
+	if err := writeAppRouterMain(root, generated, nil, nil, 0, 512); err != nil {
+		t.Fatal(err)
+	}
+	if text := read(); !strings.Contains(text, "Assets: bifrostAssets, RenderQueue: 512, Routes:") {
+		t.Fatalf("generated main does not set the render queue:\n%s", text)
+	}
+
+	if err := writeAppRouterMain(root, generated, nil, nil, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if text := read(); strings.Contains(text, "RenderQueue: ") {
+		t.Fatalf("generated main sets a render queue with zero:\n%s", text)
 	}
 }
 
@@ -736,7 +765,7 @@ func TestGeneratedMainDeclaresTheRouteCache(t *testing.T) {
 		{Pattern: "/cached", View: "page.tsx", Alias: "route0", ImportPath: "example.com/app/cached", HasCache: true},
 		{Pattern: "/plain", View: "page.tsx", Alias: "route1", ImportPath: "example.com/app/plain"},
 	}
-	if err := writeAppRouterMain(root, generated, routes, nil, 0); err != nil {
+	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	source, err := os.ReadFile(filepath.Join(generated, "main.go"))
@@ -758,7 +787,7 @@ func TestGeneratedMainRenamesPathValuesForGo(t *testing.T) {
 		t.Fatal(err)
 	}
 	routes := []appRoute{{Pattern: "/posts/{post_id}", Params: []routeParam{{Name: "post-id", Value: "post_id"}}, View: "page.tsx"}}
-	if err := writeAppRouterMain(root, generated, routes, nil, 0); err != nil {
+	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	source, err := os.ReadFile(filepath.Join(generated, "main.go"))
@@ -861,7 +890,7 @@ func TestGeneratedServerLifecycleAndEscapeHatch(t *testing.T) {
 	}
 	routes := []appRoute{{Pattern: "/{$}", View: "page.tsx"}}
 	goDirs := []goDir{{Directory: ".", ImportPath: "example.com/app", Alias: "route0", Serve: true}}
-	if err := writeAppRouterMain(root, generated, routes, goDirs, 0); err != nil {
+	if err := writeAppRouterMain(root, generated, routes, goDirs, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(generated, "main.go"))
@@ -878,7 +907,7 @@ func TestGeneratedServerLifecycleAndEscapeHatch(t *testing.T) {
 		t.Fatal("generated server sets WriteTimeout")
 	}
 	goDirs[0].Serve = false
-	if err := writeAppRouterMain(root, generated, routes, goDirs, 0); err != nil {
+	if err := writeAppRouterMain(root, generated, routes, goDirs, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	data, err = os.ReadFile(filepath.Join(generated, "main.go"))
@@ -961,7 +990,7 @@ func TestPrepareAppRouterAppAcceptsRoutesWithoutPages(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(routeRoot, "route.go"), []byte("package api\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	app, err := prepareAppRouter(context.Background(), projectRoot, appRoot, 0)
+	app, err := prepareAppRouter(context.Background(), projectRoot, appRoot, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -979,7 +1008,7 @@ func TestPrepareAppRouterAppRejectsEmptyTrees(t *testing.T) {
 	if err := os.MkdirAll(appRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prepareAppRouter(context.Background(), projectRoot, appRoot, 0); err == nil {
+	if _, err := prepareAppRouter(context.Background(), projectRoot, appRoot, 0, 0); err == nil {
 		t.Fatal("an empty route root was accepted")
 	}
 }

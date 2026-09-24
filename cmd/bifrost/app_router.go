@@ -188,7 +188,7 @@ func middlewareScope(pattern string) string {
 	return prefix + "/*"
 }
 
-func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, renderConcurrency int) (appRouter, error) {
+func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, renderConcurrency, renderQueue int) (appRouter, error) {
 	if renderConcurrency < 0 {
 		return appRouter{}, errors.New("bifrost: render concurrency must not be negative")
 	}
@@ -270,7 +270,7 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 	if err := writeViews(projectRoot, routeRoot, routes); err != nil {
 		return appRouter{}, err
 	}
-	if err := writeAppRouterMain(projectRoot, generated, routes, goDirs, renderConcurrency); err != nil {
+	if err := writeAppRouterMain(projectRoot, generated, routes, goDirs, renderConcurrency, renderQueue); err != nil {
 		return appRouter{}, err
 	}
 	if err := writeAppRouterModule(generated, moduleDir); err != nil {
@@ -1039,10 +1039,13 @@ func directoryContains(parent, child string) bool {
 	return parent == "." || parent == child || strings.HasPrefix(child, parent+"/")
 }
 
-func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDir, renderConcurrency int) error {
+func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDir, renderConcurrency, renderQueue int) error {
 	renderConfig := "Assets: bifrostAssets, "
 	if renderConcurrency > 0 {
 		renderConfig += "RenderConcurrency: " + strconv.Itoa(renderConcurrency) + ", "
+	}
+	if renderQueue > 0 {
+		renderConfig += "RenderQueue: " + strconv.Itoa(renderQueue) + ", "
 	}
 	importsByPath := make(map[string]string)
 	var declarations strings.Builder

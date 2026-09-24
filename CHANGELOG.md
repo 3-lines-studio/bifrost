@@ -8,6 +8,10 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
 - The generated view re-exports the whole page module, so a page that re-exports `Head` from another file keeps its head instead of rendering an empty one.
 
+### CLI
+
+- `build --render-queue N` sets the queue depth of the generated App Router main, the same knob `Config.RenderQueue` has in the classic router. Zero keeps the default of 64.
+
 ## v1.3.10
 
 ### App Router

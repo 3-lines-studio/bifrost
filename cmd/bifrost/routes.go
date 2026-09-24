@@ -30,7 +30,7 @@ func runRoutes(args []string) error {
 	}
 	var app *appRouter
 	if isAppRouter {
-		prepared, err := prepareAppRouter(ctx, projectRoot, routeRoot, 0)
+		prepared, err := prepareAppRouter(ctx, projectRoot, routeRoot, 0, 0)
 		if err != nil {
 			return err
 		}
