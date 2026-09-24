@@ -49,16 +49,15 @@ type DocumentAttributes struct {
 }
 
 type Manifest struct {
-	Schema             uint32        `json:"schema"`
-	SpecHash           string        `json:"specHash"`
-	BuildID            string        `json:"buildId"`
-	Toolchain          Toolchain     `json:"toolchain"`
-	Runtime            *FileRef      `json:"runtime,omitempty"`
-	RuntimeCompression string        `json:"runtimeCompression,omitempty"`
-	Views              []BuiltView   `json:"views"`
-	Routes             []BuiltRoute  `json:"routes"`
-	ClientFiles        []FileRef     `json:"clientFiles,omitempty"`
-	Public             []PublicAsset `json:"public,omitempty"`
+	Schema      uint32        `json:"schema"`
+	SpecHash    string        `json:"specHash"`
+	BuildID     string        `json:"buildId"`
+	Toolchain   Toolchain     `json:"toolchain"`
+	Runtime     *FileRef      `json:"runtime,omitempty"`
+	Views       []BuiltView   `json:"views"`
+	Routes      []BuiltRoute  `json:"routes"`
+	ClientFiles []FileRef     `json:"clientFiles,omitempty"`
+	Public      []PublicAsset `json:"public,omitempty"`
 }
 
 type PublicAsset struct {
