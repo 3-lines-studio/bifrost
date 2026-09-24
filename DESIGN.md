@@ -292,7 +292,7 @@ The Go side streams without a channel or `RenderedPage{Body string, Head string}
 
 If rendering fails before the first body byte, return a normal error page. If it fails after the response is committed, stop the stream and log the request and renderer error. No model can replace HTTP status after bytes have been sent.
 
-Production defaults to one Bun worker process and one active render. `RenderConcurrency` creates an explicit pool of isolated worker processes; each worker still handles one render at a time. An idle-worker channel provides bounded assignment without a shared mutable scheduler. Request cancellation propagates through the Go transport, Bun request signal, React stream, and body reader. `App.Ready` probes every worker.
+Production defaults to two Bun worker processes, each with one active render. `RenderConcurrency` creates an explicit pool of isolated worker processes; each worker still handles one render at a time. An idle-worker channel provides bounded assignment without a shared mutable scheduler. Request cancellation propagates through the Go transport, Bun request signal, React stream, and body reader. `App.Ready` probes every worker.
 
 ## Build flow
 
