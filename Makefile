@@ -37,6 +37,7 @@ integration:
 	bash ./scripts/vite-failure.sh
 	bash ./scripts/cancellation-integration.sh
 	bash ./scripts/integration.sh
+	bash ./scripts/navigation-integration.sh
 	bash ./scripts/structured-integration.sh
 
 dev-integration:
