@@ -86,7 +86,7 @@ test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ready)" = 
 
 bun ./scripts/browser.mjs
 
-test ! -e example/plugin/.bifrost/runtime/bifrost-renderer
+test ! -e example/plugin/.bifrost/runtime
 test ! -e example/plugin/.bifrost/ssr
 go build -o "$binary2" ./example/plugin
 "$binary2" >/tmp/bifrost-plugin.out 2>/tmp/bifrost-plugin.err &
