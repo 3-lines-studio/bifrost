@@ -284,6 +284,7 @@ type AppPlugin interface {
 - Tailwind, React Compiler, Vite aliases, linked workspace packages, virtual modules, CSS Modules, assets, and shared client/SSR chunks are covered by integration tests.
 - Static and client requests do no render work; SSR streams head and body frames.
 - Isolated renderer workers with bounded concurrency and queue, readiness checks, and restart after transport failure.
+- The extracted renderer runtime is cached per build and reused across starts, and every start removes the leftovers nothing is using.
 - End-to-end request cancellation through Go, Bun, and React streams.
 - Required build failures fail the whole build.
 
