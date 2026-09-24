@@ -29,9 +29,9 @@ func runInit(args []string) error {
 	}
 	module := moduleCleaner.ReplaceAllString(filepath.Base(directory), "-")
 	files := map[string]string{
-		"go.mod":                     "module " + module + "\n\ngo 1.25.0\n\nrequire github.com/3-lines-studio/bifrost v1.1.0\n",
+		"go.mod":                     "module " + module + "\n\ngo 1.25.0\n",
 		"package.json":               "{\n  \"private\": true,\n  \"type\": \"module\",\n  \"dependencies\": {\n    \"react\": \"19.2.4\",\n    \"react-dom\": \"19.2.4\"\n  },\n  \"devDependencies\": {\n    \"@tailwindcss/vite\": \"4.3.3\",\n    \"@types/react\": \"19.2.14\",\n    \"@types/react-dom\": \"19.2.3\",\n    \"@vitejs/plugin-react\": \"6.0.5\",\n    \"tailwindcss\": \"4.3.3\",\n    \"vite\": \"8.2.1\"\n  }\n}\n",
-		"main.go":                    "package main\n\nimport (\n\t\"log\"\n\t\"net/http\"\n\n\t\"github.com/3-lines-studio/bifrost\"\n)\n\nfunc main() {\n\tapp, err := bifrost.New(bifrost.Config{\n\t\tAssets: bifrostAssets,\n\t\tRoutes: []bifrost.Route{bifrost.Server(\"/{$}\", \"pages/home.tsx\", nil)},\n\t})\n\tif err != nil { log.Fatal(err) }\n\tif bifrost.Building() { return }\n\tdefer app.Close(context.Background())\n\tif err := http.ListenAndServe(\":8080\", app.Handler()); err != nil { log.Print(err) }\n}\n",
+		"main.go":                    "package main\n\nimport (\n\t\"log\"\n\t\"net/http\"\n\n\t\"github.com/3-lines-studio/bifrost\"\n)\n\nfunc main() {\n\tapp, err := bifrost.New(bifrost.Config{\n\t\tAssets: bifrostAssets,\n\t\tRoutes: []bifrost.Route{bifrost.Server(\"/{$}\", \"pages/home.tsx\", nil)},\n\t})\n\tif err != nil { log.Fatal(err) }\n\tif bifrost.Building() { return }\n\tdefer app.Close(context.Background())\n\taddr := os.Getenv(\"BIFROST_ADDR\")\n\tif addr == \"\" {\n\t\taddr = \":8080\"\n\t}\n\tif err := http.ListenAndServe(addr, app.Handler()); err != nil { log.Print(err) }\n}\n",
 		"pages/home.tsx":             "import React from 'react';\nimport './style.css';\n\nexport function Head() { return <title>Bifrost</title>; }\nexport function Page() { return <main className=\"p-6\"><h1>Bifrost</h1></main>; }\n",
 		"pages/style.css":            "@import \"tailwindcss\";\n",
 		"vite.config.ts":             "import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\nimport tailwindcss from '@tailwindcss/vite';\n\nexport default defineConfig({ plugins: [react(), tailwindcss()] });\n",
@@ -42,6 +42,7 @@ func runInit(args []string) error {
 	}
 	// The scaffold uses context in main.
 	files["main.go"] = strings.Replace(files["main.go"], "import (\n", "import (\n\t\"context\"\n", 1)
+	files["main.go"] = strings.Replace(files["main.go"], "import (\n", "import (\n\t\"os\"\n", 1)
 	for name := range files {
 		path := filepath.Join(directory, filepath.FromSlash(name))
 		if _, err := os.Stat(path); err == nil {
@@ -67,16 +68,22 @@ func runInit(args []string) error {
 	}
 	fmt.Printf("Created %s\n", directory)
 	if *noInstall {
-		fmt.Printf("Run: cd %s && bun install && bifrost dev .\n", directory)
+		fmt.Printf("Run: cd %s && go mod tidy && bun install && bifrost dev .\n", directory)
 		return nil
 	}
-	command := exec.Command("bun", "install")
+	runScaffoldStep(directory, "go", "get", "github.com/3-lines-studio/bifrost@latest")
+	runScaffoldStep(directory, "go", "mod", "tidy")
+	runScaffoldStep(directory, "bun", "install")
+	return nil
+}
+
+func runScaffoldStep(directory string, args ...string) {
+	command := exec.Command(args[0], args[1:]...)
 	command.Dir = directory
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
-	fmt.Println("Running bun install...")
+	fmt.Printf("Running %s...\n", strings.Join(args, " "))
 	if err := command.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "bifrost: bun install failed; run it manually before bifrost dev\n")
+		fmt.Fprintf(os.Stderr, "bifrost: %s failed; run it manually before bifrost dev\n", strings.Join(args, " "))
 	}
-	return nil
 }

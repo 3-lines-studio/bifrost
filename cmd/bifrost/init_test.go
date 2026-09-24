@@ -16,7 +16,7 @@ func TestRunInitCreatesFormattedScaffoldAndRefusesOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"bifrost.Building()", "bifrost.Server", "app.Close"} {
+	for _, expected := range []string{"bifrost.Building()", "bifrost.Server", "app.Close", "BIFROST_ADDR"} {
 		if !strings.Contains(string(mainData), expected) {
 			t.Fatalf("main.go does not contain %q", expected)
 		}
@@ -36,6 +36,13 @@ func TestRunInitCreatesFormattedScaffoldAndRefusesOverwrite(t *testing.T) {
 		if !strings.Contains(string(types), expected) {
 			t.Fatalf("bifrost.d.ts does not contain %q", expected)
 		}
+	}
+	moduleData, err := os.ReadFile(filepath.Join(target, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(moduleData), "require") {
+		t.Fatalf("go.mod pins a bifrost version instead of letting go get pick one:\n%s", moduleData)
 	}
 	if err := runInit([]string{"--no-install", target}); err == nil || !strings.Contains(err.Error(), "refusing to overwrite") {
 		t.Fatalf("second init error = %v", err)
