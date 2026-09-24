@@ -1,8 +1,8 @@
 # Changelog
 
-Notable changes. Releases are tagged `vMAJOR.MINOR.PATCH`; this file covers what landed after the last tag.
+Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
-## Unreleased
+## v1.3.10
 
 ### App Router
 
@@ -30,6 +30,7 @@ Notable changes. Releases are tagged `vMAJOR.MINOR.PATCH`; this file covers what
 - The runtime directory is cached per build id, shared across processes with a lock, and pruned when nothing is using it: runs no longer pile directories and sockets into `/tmp`, and a warm start is a fraction of what it was.
 - The `describe` and `generate` phases no longer embed the previous build's output, so the Go build cache hits them and rebuilds skip recompiling and relinking the embedded output.
 - Build temp directories are removed instead of leaking on every build.
+- The production renderer caches its view modules instead of importing them per request: about 0.022 ms less work per render, measured at 2000 requests per variant.
 
 ### Development server
 
