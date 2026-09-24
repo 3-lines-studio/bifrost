@@ -552,8 +552,8 @@ func writeViews(projectRoot, routeRoot string, routes []appRoute) error {
 			head = "export async function renderHead(props: Record<string, unknown>) {\n  return <RouteMetadata values={[" + metadataValues(metadata) + "]} />;\n}\n"
 		case len(metadata) > 0:
 			head = "export function Head() {\n  return <RouteMetadata values={[" + metadataValues(metadata) + "]} />;\n}\n"
-		case routes[index].HasHead && !routes[index].NotFoundPage:
-			head = "export { Head } from " + strconv.Quote(pageView) + ";\n"
+		case !routes[index].NotFoundPage:
+			head = "export * from " + strconv.Quote(pageView) + ";\n"
 		}
 		source := imports.String() + head + "export function renderPage(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + wrap(body) + ";\n}\nexport function Page(props: Record<string, unknown>) {\n  return renderPage(props);\n}\n"
 		if routes[index].LoadingView != "" {
