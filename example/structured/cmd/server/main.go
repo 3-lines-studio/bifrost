@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/3-lines-studio/bifrost"
 	"github.com/3-lines-studio/bifrost/example/structured/internal/webapp"
@@ -21,7 +22,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := http.ListenAndServe(":8082", handler); err != nil {
+	addr := os.Getenv("BIFROST_ADDR")
+	if addr == "" {
+		addr = ":8082"
+	}
+	if err := http.ListenAndServe(addr, handler); err != nil {
 		log.Print(err)
 	}
 }

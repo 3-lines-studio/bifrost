@@ -2,6 +2,8 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+port=${BIFROST_TEST_PORT:-8080}
+base=http://127.0.0.1:$port
 cli=$(mktemp)
 pid=""
 source_file="$root/example/basic/pages/home.tsx"
@@ -23,10 +25,10 @@ trap cleanup EXIT
 
 cd "$root"
 go build -o "$cli" ./cmd/bifrost
-"$cli" dev ./example/basic >/tmp/bifrost-dev.out 2>/tmp/bifrost-dev.err &
+BIFROST_ADDR=127.0.0.1:$port "$cli" dev ./example/basic >/tmp/bifrost-dev.out 2>/tmp/bifrost-dev.err &
 pid=$!
 for _ in $(seq 1 600); do
-  if curl -sS http://127.0.0.1:8080/_bifrost/build-id >/dev/null 2>&1; then
+  if curl -sS $base/_bifrost/build-id >/dev/null 2>&1; then
     break
   fi
   sleep 0.05
@@ -35,14 +37,14 @@ if "$cli" dev ./example/basic >/tmp/bifrost-dev-second.out 2>/tmp/bifrost-dev-se
   exit 1
 fi
 grep -q "development server is already running" /tmp/bifrost-dev-second.err
-bun ./scripts/dev-browser.mjs
+BIFROST_TEST_URL=$base bun ./scripts/dev-browser.mjs
 bridge_pid_before=$(pgrep -f "entries/vite-dev.ts" | head -1)
 test -n "$bridge_pid_before"
-before=$(curl -fsS http://127.0.0.1:8080/_bifrost/build-id)
+before=$(curl -fsS $base/_bifrost/build-id)
 touch "$go_file"
 restarted=0
 for _ in $(seq 1 1200); do
-  after=$(curl -fsS http://127.0.0.1:8080/_bifrost/build-id 2>/dev/null || true)
+  after=$(curl -fsS $base/_bifrost/build-id 2>/dev/null || true)
   if [[ -n "$after" && "$after" != "$before" ]]; then
     restarted=1
     break

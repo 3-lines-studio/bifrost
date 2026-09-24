@@ -1,5 +1,6 @@
 import { chromium } from "playwright-core";
 
+const base = process.env.BIFROST_TEST_URL || "http://127.0.0.1:8080";
 const executablePath = process.env.CHROMIUM_PATH || "/usr/bin/chromium";
 const browser = await chromium.launch({ executablePath, headless: true });
 try {
@@ -32,7 +33,7 @@ try {
     }
   };
 
-  await page.goto("http://127.0.0.1:8080/?name=Browser", { waitUntil: "networkidle" });
+  await page.goto(`${base}/?name=Browser`, { waitUntil: "networkidle" });
   if ((await page.locator("h1").textContent()) !== "Hello Browser") {
     throw new Error("server page did not render or hydrate");
   }
@@ -42,14 +43,14 @@ try {
   }
   await assertImageAsset();
 
-  await page.goto("http://127.0.0.1:8080/stream", { waitUntil: "networkidle" });
+  await page.goto(`${base}/stream`, { waitUntil: "networkidle" });
   await page.locator("strong").waitFor();
   if ((await page.locator("strong").textContent()) !== "Stream complete") {
     throw new Error("Suspense stream did not complete");
   }
   assertNoBrowserErrors();
 
-  await page.goto("http://127.0.0.1:8080/about", { waitUntil: "networkidle" });
+  await page.goto(`${base}/about`, { waitUntil: "networkidle" });
   if ((await page.locator("h1").textContent()) !== "About") {
     throw new Error("static page did not render or hydrate");
   }
@@ -57,7 +58,7 @@ try {
     throw new Error("Tailwind Vite plugin did not transform CSS");
   }
 
-  await page.goto("http://127.0.0.1:8080/app", { waitUntil: "networkidle" });
+  await page.goto(`${base}/app`, { waitUntil: "networkidle" });
   assertNoBrowserErrors();
   await assertImageAsset();
   const lazyFeature = page.locator('[data-lazy="vite-dynamic-import"]');

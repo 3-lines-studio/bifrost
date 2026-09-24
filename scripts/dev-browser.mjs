@@ -7,13 +7,14 @@ const clientPath = new URL("../example/basic/pages/app.tsx", import.meta.url);
 const original = await readFile(sourcePath, "utf8");
 const originalStatic = await readFile(staticPath, "utf8");
 const originalClient = await readFile(clientPath, "utf8");
+const base = process.env.BIFROST_TEST_URL || "http://127.0.0.1:8080";
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium",
   headless: true,
 });
 try {
   const page = await browser.newPage();
-  await page.goto("http://127.0.0.1:8080/?name=Dev", { waitUntil: "domcontentloaded" });
+  await page.goto(`${base}/?name=Dev`, { waitUntil: "domcontentloaded" });
   if ((await page.locator("h1").textContent()) !== "Hello Dev") throw new Error("unexpected initial development page");
   const foreign = await page.evaluate(() =>
     [...document.querySelectorAll("script[src], link[href]")]
@@ -45,7 +46,7 @@ try {
   await page.locator("vite-error-overlay").waitFor({ state: "detached", timeout: 60_000 });
   await page.waitForFunction(() => document.querySelector("h1")?.textContent === "Welcome Dev", undefined, { timeout: 60_000 });
 
-  await page.goto("http://127.0.0.1:8080/about", { waitUntil: "domcontentloaded" });
+  await page.goto(`${base}/about`, { waitUntil: "domcontentloaded" });
   const changedStatic = originalStatic.replace("<h1>About", "<h1>Static HMR");
   if (changedStatic === originalStatic) throw new Error("static fixture replacement did not match");
   await writeFile(staticPath, changedStatic);
@@ -59,7 +60,7 @@ try {
   );
   if (directCss < 1) throw new Error("SSR page did not include Vite CSS stylesheet links");
 
-  await page.goto("http://127.0.0.1:8080/app", { waitUntil: "domcontentloaded" });
+  await page.goto(`${base}/app`, { waitUntil: "domcontentloaded" });
   const button = page.locator("button");
   await button.waitFor();
   await button.click();
