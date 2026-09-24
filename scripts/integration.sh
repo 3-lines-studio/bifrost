@@ -2,6 +2,10 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+port=${BIFROST_TEST_PORT:-8080}
+base=http://127.0.0.1:$port
+plugin_port=$((port + 1))
+plugin_base=http://127.0.0.1:$plugin_port
 binary=$(mktemp)
 binary2=$(mktemp)
 stdout=$(mktemp)
@@ -23,12 +27,12 @@ trap cleanup EXIT
 
 cd "$root"
 go build -o "$binary" ./example/basic
-"$binary" >"$stdout" 2>"$stderr" &
+BIFROST_ADDR=127.0.0.1:$port "$binary" >"$stdout" 2>"$stderr" &
 pid=$!
 
 ready=0
 for _ in $(seq 1 300); do
-  if curl -sS http://127.0.0.1:8080/about >/tmp/bifrost-about.html 2>/dev/null; then
+  if curl -sS $base/about >/tmp/bifrost-about.html 2>/dev/null; then
     ready=1
     break
   fi
@@ -39,14 +43,14 @@ if [[ "$ready" != 1 ]]; then
   exit 1
 fi
 
-test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ready)" = 204
-curl -fsS 'http://127.0.0.1:8080/?name=Don' >/tmp/bifrost-home.html
-curl -fsS http://127.0.0.1:8080/app >/tmp/bifrost-app.html
-curl -fsS http://127.0.0.1:8080/post/first >/tmp/bifrost-post-first.html
-curl -fsS http://127.0.0.1:8080/post/second >/tmp/bifrost-post.html
-curl -fsS http://127.0.0.1:8080/robots.txt >/tmp/bifrost-robots.txt
+test "$(curl -sS -o /dev/null -w '%{http_code}' $base/ready)" = 204
+curl -fsS "$base/?name=Don" >/tmp/bifrost-home.html
+curl -fsS $base/app >/tmp/bifrost-app.html
+curl -fsS $base/post/first >/tmp/bifrost-post-first.html
+curl -fsS $base/post/second >/tmp/bifrost-post.html
+curl -fsS $base/robots.txt >/tmp/bifrost-robots.txt
 asset=$(grep -o '/_bifrost/dist/[^" ]*\.js' /tmp/bifrost-home.html | head -1)
-curl -fsSI "http://127.0.0.1:8080$asset" >/tmp/bifrost-asset.headers
+curl -fsSI "$base$asset" >/tmp/bifrost-asset.headers
 
 grep -q '<html lang="es" class="theme-dark" dir="ltr">' /tmp/bifrost-home.html
 grep -q '<title>Hello Don</title>' /tmp/bifrost-home.html
@@ -63,14 +67,14 @@ test "$(pgrep -P "$pid" | wc -l)" = 2
 renderer_pid=$(pgrep -P "$pid" | head -1)
 kill -KILL "$renderer_pid"
 for _ in $(seq 1 100); do
-  if [[ "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ready)" = 503 ]]; then break; fi
+  if [[ "$(curl -sS -o /dev/null -w '%{http_code}' $base/ready)" = 503 ]]; then break; fi
   sleep 0.01
 done
-test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ready)" = 503
-curl -sS 'http://127.0.0.1:8080/?name=Restart' >/dev/null || true
+test "$(curl -sS -o /dev/null -w '%{http_code}' $base/ready)" = 503
+curl -sS "$base/?name=Restart" >/dev/null || true
 restarted=0
 for _ in $(seq 1 200); do
-  if curl -sS 'http://127.0.0.1:8080/?name=Restart' 2>/dev/null | grep -q 'Hello.*Restart'; then
+  if curl -sS "$base/?name=Restart" 2>/dev/null | grep -q 'Hello.*Restart'; then
     restarted=1
     break
   fi
@@ -78,25 +82,25 @@ for _ in $(seq 1 200); do
 done
 test "$restarted" = 1
 for _ in $(seq 1 100); do
-  if [[ "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ready)" = 204 ]]; then break; fi
-  curl -sS 'http://127.0.0.1:8080/?name=Restart' >/dev/null || true
+  if [[ "$(curl -sS -o /dev/null -w '%{http_code}' $base/ready)" = 204 ]]; then break; fi
+  curl -sS "$base/?name=Restart" >/dev/null || true
   sleep 0.01
 done
-test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ready)" = 204
+test "$(curl -sS -o /dev/null -w '%{http_code}' $base/ready)" = 204
 
-bun ./scripts/browser.mjs
+BIFROST_TEST_URL=$base bun ./scripts/browser.mjs
 
 test ! -e example/plugin/.bifrost/runtime
 test ! -e example/plugin/.bifrost/ssr
 go build -o "$binary2" ./example/plugin
-"$binary2" >/tmp/bifrost-plugin.out 2>/tmp/bifrost-plugin.err &
+BIFROST_ADDR=127.0.0.1:$plugin_port "$binary2" >/tmp/bifrost-plugin.out 2>/tmp/bifrost-plugin.err &
 pid2=$!
 for _ in $(seq 1 200); do
-  if curl -sS http://127.0.0.1:8081/ >/tmp/bifrost-plugin.html 2>/dev/null; then break; fi
+  if curl -sS $plugin_base/ >/tmp/bifrost-plugin.html 2>/dev/null; then break; fi
   sleep 0.05
 done
-curl -fsSI http://127.0.0.1:8081/dashboard >/tmp/bifrost-plugin.headers
-curl -fsSI http://127.0.0.1:8081/robots.txt >/tmp/bifrost-plugin-asset.headers
+curl -fsSI $plugin_base/dashboard >/tmp/bifrost-plugin.headers
+curl -fsSI $plugin_base/robots.txt >/tmp/bifrost-plugin-asset.headers
 grep -q '<h1>Plugin example</h1>' /tmp/bifrost-plugin.html
 grep -qi 'x-example-plugin: active' /tmp/bifrost-plugin.headers
 grep -qi 'x-asset-plugin: active' /tmp/bifrost-plugin-asset.headers

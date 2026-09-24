@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/3-lines-studio/bifrost"
 )
@@ -43,7 +44,11 @@ func main() {
 		return
 	}
 	defer func() { _ = app.Close(context.Background()) }()
-	if err := http.ListenAndServe(":8081", app.Handler()); err != nil {
+	addr := os.Getenv("BIFROST_ADDR")
+	if addr == "" {
+		addr = ":8081"
+	}
+	if err := http.ListenAndServe(addr, app.Handler()); err != nil {
 		log.Print(err)
 	}
 }

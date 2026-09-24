@@ -303,4 +303,6 @@ make reproducible
 make bench
 ```
 
+The integration scripts serve on `127.0.0.1:8080`, `:8081` and `:8082`. Set `BIFROST_TEST_PORT` to move the whole range, for example `BIFROST_TEST_PORT=8090 make integration` when 8080 is taken.
+
 See [DESIGN.md](DESIGN.md), [QUESTIONNAIRE.md](QUESTIONNAIRE.md), and [IMPLEMENTATION.md](IMPLEMENTATION.md) for the model, decisions, completed scope, and measured limits.
