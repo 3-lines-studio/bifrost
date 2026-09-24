@@ -6,7 +6,7 @@ An app that exercises every App Router feature on purpose, and a script that ass
 make build     # go run ../../cmd/bifrost build .
 make dev       # development server with HMR
 make serve     # build and serve on 127.0.0.1:18700
-make check     # build, then run scripts/check.sh (71 assertions)
+make check     # build, then run scripts/check.sh (72 assertions)
 ```
 
 ## The tree
@@ -43,17 +43,15 @@ Routing: markers, route groups, private folders, catch-all and dynamic params, s
 
 Data: loaders returning maps or `bifrost.PageData`, `params`, `searchParams` with repeated keys, `pathname`, merged metadata with a page override, `generateMetadata`, and per-request root document attributes.
 
-HTTP: pages and `route.go` in the same tree, all methods, redirects from a loader and from `server.go`, a 404 with a status the loader chooses, a 405, JSON, Markdown by suffix and by `Accept`, and public files.
+HTTP: pages and `route.go` in the same tree, all methods, redirects from a loader and from `server.go`, a 404 that falls back to the nearest not-found view, a 405, JSON, Markdown by suffix and by `Accept`, and public files.
 
 Client: in-place navigation, loading views, error views with `reset`, request-scoped state under concurrency, `data-bifrost-reload`, downloads, hash-only navigation, and a plain form that works with JavaScript off.
 
-## Two framework bugs this demo found
+## One framework bug this demo found
 
-Both are reported and not fixed here. The demo works around them.
+It is reported and not fixed here. The demo works around it.
 
 1. **A layout that exports `Head` and `metadata` silently drops the `Head`.** The builder rejects the combination in a page (`exports both Head and metadata; keep one`) but accepts it in a layout, where the `Head` component is then ignored: `app/layout.tsx` linked the stylesheet and the link never reached the HTML. Workaround here: the stylesheet is a `<link precedence="high">` inside the layout body, which React 19 hoists.
-
-2. **`bifrost.NotFound()` from a loader returns a 500 when the route has no `not-found.tsx` of its own.** With a catch-all page in `app/docs/slug__` and the only not-found view at the root, the response is a plain 500 instead of the nearest not-found view with a 404, which is what Next does. The generated loader returns the right props (`__bifrostNotFound`, `ErrorFallbacks: 2`) and the generated view renders `<NotFound/>` inside the docs layout, so the failure is in the render. One clue: that branch does not go through `requestPage`, so its props carry no `params`, `searchParams` or `pathname`, unlike every other path. The 503 branch (a loader that fails) does work. Workaround here: the docs loader answers 404 with a page of its own.
 
 ## Notes for whoever writes the next one
 
