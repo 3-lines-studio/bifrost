@@ -7,9 +7,13 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -109,5 +113,45 @@ func TestRenderClassifiesRemoteError(t *testing.T) {
 	var remote *RemoteError
 	if !errors.As(err, &remote) {
 		t.Fatalf("error = %T %v, want RemoteError", err, err)
+	}
+}
+
+func TestRemoveStaleSocketsKeepsLiveOwners(t *testing.T) {
+	base := t.TempDir()
+	stale := filepath.Join(base, fmt.Sprintf("bifrost-%d-aaaaaaaaaaaaaaaa.sock", 99999999))
+	own := filepath.Join(base, fmt.Sprintf("bifrost-%d-bbbbbbbbbbbbbbbb.sock", 12345))
+	live := filepath.Join(base, fmt.Sprintf("bifrost-%d-cccccccccccccccc.sock", os.Getpid()))
+	unrelated := filepath.Join(base, "bifrost-runtime-abc")
+	for _, path := range []string{stale, own, live, unrelated} {
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removeStaleSockets(base, 12345)
+	if _, err := os.Stat(stale); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("stale socket survived: %v", err)
+	}
+	for _, kept := range []string{own, live, unrelated} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Fatalf("%s was removed: %v", kept, err)
+		}
+	}
+}
+
+func TestSocketPID(t *testing.T) {
+	cases := map[string]int{
+		"bifrost-4242-abcdef0123456789.sock": 4242,
+		"bifrost-7-x.sock":                   7,
+	}
+	for name, want := range cases {
+		got, ok := socketPID(name)
+		if !ok || got != want {
+			t.Fatalf("socketPID(%q) = %d, %v", name, got, ok)
+		}
+	}
+	for _, name := range []string{"bifrost-runtime-abc", "bifrost-42.sock", "unrelated.sock", "bifrost-abc-def.sock"} {
+		if _, ok := socketPID(name); ok {
+			t.Fatalf("socketPID(%q) matched", name)
+		}
 	}
 }

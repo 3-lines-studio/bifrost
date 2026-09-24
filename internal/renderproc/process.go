@@ -17,6 +17,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -57,6 +59,46 @@ func Start(executable, workDir string, environment ...string) (*Process, error) 
 	return StartCommand(executable, nil, workDir, environment...)
 }
 
+var pruneSocketsOnce sync.Once
+
+func pruneStaleSockets() {
+	pruneSocketsOnce.Do(func() { removeStaleSockets(os.TempDir(), os.Getpid()) })
+}
+
+func removeStaleSockets(base string, self int) {
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		pid, ok := socketPID(entry.Name())
+		if !ok || pid == self || processAlive(pid) {
+			continue
+		}
+		_ = os.Remove(filepath.Join(base, entry.Name()))
+	}
+}
+
+func socketPID(name string) (int, bool) {
+	if !strings.HasPrefix(name, "bifrost-") || !strings.HasSuffix(name, ".sock") {
+		return 0, false
+	}
+	pid, _, found := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(name, "bifrost-"), ".sock"), "-")
+	if !found {
+		return 0, false
+	}
+	value, err := strconv.Atoi(pid)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
+}
+
+func processAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
 // StartCommand starts a renderer command and waits for its Unix socket health
 // endpoint.
 func StartCommand(executable string, args []string, workDir string, environment ...string) (*Process, error) {
@@ -68,6 +110,7 @@ func StartCommand(executable string, args []string, workDir string, environment 
 		return nil, fmt.Errorf("renderer socket ID: %w", err)
 	}
 	socket := filepath.Join(os.TempDir(), fmt.Sprintf("bifrost-%d-%s.sock", os.Getpid(), hex.EncodeToString(random[:])))
+	pruneStaleSockets()
 	_ = os.Remove(socket)
 
 	cmd := exec.Command(executable, args...)

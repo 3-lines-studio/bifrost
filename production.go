@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/3-lines-studio/bifrost/internal/dochtml"
@@ -213,6 +214,7 @@ type productionRenderer struct {
 	workDir     string
 	devRoutes   string
 	attach      bool
+	runtimeLock *runtimeLock
 	admission   chan struct{}
 	idle        chan *rendererWorker
 	workers     []*rendererWorker
@@ -226,37 +228,111 @@ type productionRenderer struct {
 	queueHooks []QueueHook
 }
 
-func runtimeDirectory(manifest *compiledManifest) (string, error) {
+type runtimeLock struct {
+	file *os.File
+}
+
+func runtimeDirectory(manifest *compiledManifest) (string, *runtimeLock, error) {
 	root := filepath.Join(os.TempDir(), "bifrost-runtime-"+manifest.manifest.BuildID)
 	info, err := os.Lstat(root)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return "", fmt.Errorf("bifrost: inspect runtime directory: %w", err)
+		return "", nil, fmt.Errorf("bifrost: inspect runtime directory: %w", err)
 	}
 	if err == nil && !info.IsDir() {
-		return "", fmt.Errorf("bifrost: runtime directory %s is not a directory", root)
+		return "", nil, fmt.Errorf("bifrost: runtime directory %s is not a directory", root)
+	}
+	lock, err := newRuntimeLock(root)
+	if err != nil {
+		return "", nil, err
+	}
+	pruneRuntimeDirectories(os.TempDir(), root)
+	return root, lock, nil
+}
+
+func newRuntimeLock(root string) (*runtimeLock, error) {
+	file, err := os.OpenFile(filepath.Join(root, "lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if errors.Is(err, fs.ErrNotExist) {
+		if mkdirErr := os.MkdirAll(root, 0o700); mkdirErr != nil {
+			return nil, fmt.Errorf("bifrost: create runtime directory: %w", mkdirErr)
+		}
+		file, err = os.OpenFile(filepath.Join(root, "lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("bifrost: lock runtime directory: %w", err)
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_SH); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("bifrost: lock runtime directory: %w", err)
 	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
-		return "", fmt.Errorf("bifrost: create runtime directory: %w", err)
+		_ = file.Close()
+		return nil, fmt.Errorf("bifrost: create runtime directory: %w", err)
 	}
-	return root, nil
+	return &runtimeLock{file: file}, nil
+}
+
+func (l *runtimeLock) release() {
+	if l == nil {
+		return
+	}
+	_ = l.file.Close()
+}
+
+func pruneRuntimeDirectories(base, current string) {
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "bifrost-runtime-") {
+			continue
+		}
+		root := filepath.Join(base, entry.Name())
+		if root == current {
+			continue
+		}
+		_ = removeRuntimeDirectory(root)
+	}
+}
+
+func removeRuntimeDirectory(root string) error {
+	file, err := os.OpenFile(filepath.Join(root, "lock"), os.O_RDWR, 0o600)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return os.RemoveAll(root)
+		}
+		return err
+	}
+	defer func() { _ = file.Close() }()
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil
+		}
+		return err
+	}
+	return os.RemoveAll(root)
 }
 
 func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency, queue int, logger *slog.Logger, queueHooks []QueueHook) (*productionRenderer, error) {
-	root, err := runtimeDirectory(manifest)
+	root, lock, err := runtimeDirectory(manifest)
 	if err != nil {
 		return nil, err
 	}
+	fail := func(err error) (*productionRenderer, error) {
+		lock.release()
+		return nil, err
+	}
 	if manifest.manifest.Runtime == nil {
-		return nil, errors.New("bifrost: manifest has no renderer runtime")
+		return fail(errors.New("bifrost: manifest has no renderer runtime"))
 	}
 	runtimePath := manifest.manifest.Runtime.Path
 	if manifest.manifest.RuntimeCompression == "gzip" {
 		runtimePath = strings.TrimSuffix(runtimePath, ".gz")
 		if err := extractGzipArtifact(assets, root, *manifest.manifest.Runtime, runtimePath, 0o700); err != nil {
-			return nil, err
+			return fail(err)
 		}
 	} else if err := extractArtifact(assets, root, *manifest.manifest.Runtime, 0o700); err != nil {
-		return nil, err
+		return fail(err)
 	}
 	extracted := make(map[string]struct{})
 	for _, view := range manifest.views {
@@ -269,23 +345,24 @@ func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency
 				continue
 			}
 			if err := extractArtifact(assets, root, file, 0o600); err != nil {
-				return nil, err
+				return fail(err)
 			}
 			extracted[file.Path] = struct{}{}
 		}
 	}
 	executable := filepath.Join(root, filepath.FromSlash(runtimePath))
 	renderer := &productionRenderer{
-		assets:     assets,
-		manifest:   manifest,
-		root:       root,
-		executable: executable,
-		workDir:    root,
-		admission:  make(chan struct{}, concurrency+queue),
-		idle:       make(chan *rendererWorker, concurrency),
-		workers:    make([]*rendererWorker, 0, concurrency),
-		logger:     logger,
-		queueHooks: slices.Clone(queueHooks),
+		assets:      assets,
+		manifest:    manifest,
+		root:        root,
+		executable:  executable,
+		workDir:     root,
+		runtimeLock: lock,
+		admission:   make(chan struct{}, concurrency+queue),
+		idle:        make(chan *rendererWorker, concurrency),
+		workers:     make([]*rendererWorker, 0, concurrency),
+		logger:      logger,
+		queueHooks:  slices.Clone(queueHooks),
 	}
 	for index := range concurrency {
 		process, startErr := renderproc.Start(executable, root)
@@ -293,7 +370,7 @@ func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			_ = renderer.closeWorkers(ctx)
 			cancel()
-			return nil, fmt.Errorf("bifrost: start renderer worker %d: %w", index+1, startErr)
+			return fail(fmt.Errorf("bifrost: start renderer worker %d: %w", index+1, startErr))
 		}
 		worker := &rendererWorker{process: process}
 		renderer.workers = append(renderer.workers, worker)
@@ -418,12 +495,20 @@ func extractReader(root, artifactPath string, source io.Reader, mode fs.FileMode
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("bifrost: artifact %q escapes extraction root", artifactPath)
 	}
+	if info, err := os.Stat(destination); err == nil && info.Mode().IsRegular() {
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 		return err
 	}
-	temporary := destination + ".tmp"
-	output, err := os.OpenFile(temporary, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	output, err := os.CreateTemp(filepath.Dir(destination), filepath.Base(destination)+".*")
 	if err != nil {
+		return err
+	}
+	temporary := output.Name()
+	if err := output.Chmod(mode); err != nil {
+		_ = output.Close()
+		_ = os.Remove(temporary)
 		return err
 	}
 	written, copyErr := io.Copy(output, io.LimitReader(source, maxExtractedArtifactBytes+1))
@@ -593,6 +678,10 @@ func (r *productionRenderer) Close(ctx context.Context) error {
 		}
 		if r.devRoutes != "" {
 			_ = os.Remove(r.devRoutes)
+		}
+		if r.runtimeLock != nil {
+			r.runtimeLock.release()
+			_ = removeRuntimeDirectory(r.workDir)
 		}
 	})
 	return result
