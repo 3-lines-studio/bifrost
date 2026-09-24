@@ -623,7 +623,7 @@ func TestGeneratedMainInjectsRequestProps(t *testing.T) {
 		t.Fatal(err)
 	}
 	routes := []appRoute{
-		{Pattern: "/posts/{post_id}", Params: []routeParam{{Name: "post-id", Value: "post_id"}}, View: "page.tsx", HasLoader: true, ImportPath: "example.com/app/posts", Alias: "route0", ErrorViews: []string{"error.tsx"}},
+		{Pattern: "/posts/{post_id}", Params: []routeParam{{Name: "post-id", Value: "post_id"}}, View: "page.tsx", HasLoader: true, ImportPath: "example.com/app/posts", Alias: "route0", ErrorViews: []string{"error.tsx"}, NotFoundView: "not-found.tsx"},
 		{Pattern: "/docs/{slug...}", Params: []routeParam{{Name: "slug", Value: "slug", Segments: true}}, View: "page.tsx"},
 	}
 	if err := writeAppRouterMain(root, generated, routes, nil); err != nil {
@@ -637,6 +637,8 @@ func TestGeneratedMainInjectsRequestProps(t *testing.T) {
 	for _, expected := range []string{
 		`requestPage(r, map[string]any{"post-id": r.PathValue("post_id")}, props, 1)`,
 		`return requestPage(r, map[string]any{"slug": requestSegments(r.PathValue("slug"))}, nil, 0)`,
+		`return requestPage(r, map[string]any{"post-id": r.PathValue("post_id")}, bifrost.PageData{Props: map[string]any{"__bifrostNotFound": true}, Status: status}, 1)`,
+		`return requestPage(r, map[string]any{"post-id": r.PathValue("post_id")}, bifrost.PageData{Props: map[string]any{"__bifrostError": message, "__bifrostErrorLevel": 0}, Status: status}, 1)`,
 		`values["params"] = params`,
 		`values["searchParams"] = requestSearchParams(r)`,
 		`values["pathname"] = r.URL.EscapedPath()`,

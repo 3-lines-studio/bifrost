@@ -1039,10 +1039,10 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 			} else {
 				fmt.Fprintf(&loaders, "\tstatus, ok := bifrost.ErrorStatus(err)\n\tif !ok {\n\t\tstatus = http.StatusInternalServerError\n\t}\n")
 				if route.NotFoundView != "" {
-					fmt.Fprintf(&loaders, "\tif status == http.StatusNotFound {\n\t\treturn bifrost.PageData{Props: map[string]any{\"__bifrostNotFound\": true}, Status: status, ErrorFallbacks: %d}, nil\n\t}\n", len(route.ErrorViews))
+					fmt.Fprintf(&loaders, "\tif status == http.StatusNotFound {\n\t\treturn requestPage(r, %s, bifrost.PageData{Props: map[string]any{\"__bifrostNotFound\": true}, Status: status}, %d)\n\t}\n", params, len(route.ErrorViews))
 				}
 				if len(route.ErrorViews) > 0 {
-					fmt.Fprintf(&loaders, "\tmessage := http.StatusText(status)\n\tif os.Getenv(\"BIFROST_DEV_DIR\") != \"\" {\n\t\tmessage = err.Error()\n\t}\n\treturn bifrost.PageData{Props: map[string]any{\"__bifrostError\": message, \"__bifrostErrorLevel\": %d}, Status: status, ErrorFallbacks: %d}, nil\n", len(route.ErrorViews)-1, len(route.ErrorViews))
+					fmt.Fprintf(&loaders, "\tmessage := http.StatusText(status)\n\tif os.Getenv(\"BIFROST_DEV_DIR\") != \"\" {\n\t\tmessage = err.Error()\n\t}\n\treturn requestPage(r, %s, bifrost.PageData{Props: map[string]any{\"__bifrostError\": message, \"__bifrostErrorLevel\": %d}, Status: status}, %d)\n", params, len(route.ErrorViews)-1, len(route.ErrorViews))
 				} else {
 					fmt.Fprintf(&loaders, "\treturn nil, err\n")
 				}
