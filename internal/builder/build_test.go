@@ -169,7 +169,7 @@ func TestResolveSourceFileRejectsSymlinkEscape(t *testing.T) {
 func TestGeneratedEmbedSupportsChildOutputDirectory(t *testing.T) {
 	root := t.TempDir()
 	output := filepath.Join(root, "generated", "web")
-	if err := ensureGeneratedEmbed(root, "main", output); err != nil {
+	if err := ensureGeneratedEmbed(root, "main", output, true); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(root, "zz_bifrost_gen.go"))
@@ -178,6 +178,24 @@ func TestGeneratedEmbedSupportsChildOutputDirectory(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "//go:embed all:generated/web") || !strings.Contains(string(data), `fs.Sub(bifrostEmbedded, "generated/web")`) {
 		t.Fatalf("bad generated embed:\n%s", data)
+	}
+}
+
+func TestGeneratedEmbedForBuildPhasesOnlyEmbedsThePlaceholder(t *testing.T) {
+	root := t.TempDir()
+	output := filepath.Join(root, "generated", "web")
+	if err := ensureGeneratedEmbed(root, "main", output, false); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "zz_bifrost_gen.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "//go:embed generated/web/embed.placeholder") || strings.Contains(string(data), "all:") {
+		t.Fatalf("bad phase embed:\n%s", data)
+	}
+	if _, err := os.Stat(filepath.Join(output, "embed.placeholder")); err != nil {
+		t.Fatal(err)
 	}
 }
 
