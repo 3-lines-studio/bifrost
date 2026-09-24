@@ -3,6 +3,10 @@ package bifrost
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -77,5 +81,77 @@ func TestRendererRestartRateLimit(t *testing.T) {
 	}
 	if !worker.allowRestart(now.Add(61*time.Second), nil) {
 		t.Fatal("restart limit did not reset after one minute")
+	}
+}
+
+func TestExtractReaderReusesExtractedArtifacts(t *testing.T) {
+	root := t.TempDir()
+	if err := extractReader(root, "runtime/renderer", strings.NewReader("first"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractReader(root, "runtime/renderer", strings.NewReader("second"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(root, "runtime", "renderer")
+	data, err := os.ReadFile(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "first" {
+		t.Fatalf("artifact = %q", data)
+	}
+	info, err := os.Stat(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("mode = %v", info.Mode().Perm())
+	}
+}
+
+func TestPruneRuntimeDirectoriesRemovesUnusedCopies(t *testing.T) {
+	base := t.TempDir()
+	locked, err := newRuntimeLock(filepath.Join(base, "bifrost-runtime-locked"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer locked.release()
+	current := filepath.Join(base, "bifrost-runtime-current")
+	unused := filepath.Join(base, "bifrost-runtime-unused")
+	unrelated := filepath.Join(base, "unrelated")
+	for _, root := range []string{current, unused, unrelated} {
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pruneRuntimeDirectories(base, current)
+	for _, kept := range []string{filepath.Join(base, "bifrost-runtime-locked"), current, unrelated} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Fatalf("%s was removed: %v", kept, err)
+		}
+	}
+	if _, err := os.Stat(unused); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("unused copy survived: %v", err)
+	}
+}
+
+func TestRemoveRuntimeDirectoryKeepsLockedRuntime(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "bifrost-runtime-locked")
+	lock, err := newRuntimeLock(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := removeRuntimeDirectory(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("locked runtime was removed: %v", err)
+	}
+	lock.release()
+	if err := removeRuntimeDirectory(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(root); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("runtime directory survived removal: %v", err)
 	}
 }
