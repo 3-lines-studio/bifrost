@@ -314,8 +314,18 @@ func discoverRoutes(root string) ([]appRoute, error) {
 		} else if skip {
 			return filepath.SkipDir
 		}
-		if entry.IsDir() || entry.Name() != "page.tsx" {
+		if entry.IsDir() {
 			return nil
+		}
+		if entry.Name() != "page.tsx" {
+			if !isRouteView(entry.Name()) || !hasHeadExport(filePath) {
+				return nil
+			}
+			relative, err := filepath.Rel(root, filePath)
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("bifrost: %s exports Head; keep it in page.tsx", filepath.ToSlash(relative))
 		}
 		directory := filepath.Dir(filePath)
 		relative, err := filepath.Rel(root, directory)
@@ -672,6 +682,14 @@ func writeImport(imports *strings.Builder, filePath, name, local string) error {
 func hasHeadExport(filePath string) bool {
 	data, err := os.ReadFile(filePath)
 	return err == nil && headExportPattern.Match(data)
+}
+
+func isRouteView(name string) bool {
+	switch name {
+	case "layout.tsx", "template.tsx", "error.tsx", "not-found.tsx", "loading.tsx":
+		return true
+	}
+	return false
 }
 
 func hasMetadataExport(filePath string) bool {
