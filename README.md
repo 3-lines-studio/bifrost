@@ -301,6 +301,7 @@ make integration
 make dev-integration
 make reproducible
 make bench
+make throughput
 ```
 
 The integration scripts serve on `127.0.0.1:8080`, `:8081` and `:8082`. Set `BIFROST_TEST_PORT` to move the whole range, for example `BIFROST_TEST_PORT=8090 make integration` when 8080 is taken.

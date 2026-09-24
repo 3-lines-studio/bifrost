@@ -1,4 +1,4 @@
-.PHONY: check test race vet gate demo bench fuzz integration dev-integration reproducible
+.PHONY: check test race vet gate demo bench fuzz throughput integration dev-integration reproducible
 
 check: test race vet gate demo
 
@@ -26,6 +26,9 @@ fuzz:
 	go test -run '^$$' -fuzz FuzzParseManifest -fuzztime=10s .
 	go test -run '^$$' -fuzz FuzzDocumentPath -fuzztime=10s .
 	go test -run '^$$' -fuzz FuzzRawProps -fuzztime=10s .
+
+throughput:
+	bash ./scripts/throughput.sh
 
 integration:
 	bun install --frozen-lockfile
