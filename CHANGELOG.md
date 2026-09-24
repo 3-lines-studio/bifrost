@@ -12,6 +12,7 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
 - `build --render-queue N` sets the queue depth of the generated App Router main, the same knob `Config.RenderQueue` has in the classic router. Zero keeps the default of 64.
 - `bifrost build` uses the module in the working tree when the CLI reports a commit pseudo-version as its own version, instead of asking the module proxy for a commit that may not be published yet.
+- The CLI reports the error when an app package does not load, instead of silently ignoring `Load`, `Cache`, `Serve`, `Middleware` and the HTTP methods of that package. Two packages in the same directory, which is easy to hit with a `page.go` next to `server.go` in `app/`, used to disable all of them without a word.
 
 ## v1.3.10
 
