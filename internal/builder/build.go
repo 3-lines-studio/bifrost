@@ -4,7 +4,6 @@ package builder
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -209,9 +208,6 @@ func Build(ctx context.Context, options Options) error {
 			return err
 		}
 	}
-	if err := os.Remove(filepath.Join(temporary, "runtime", "bifrost-renderer")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
 	if !embedRuntime {
 		if err := os.RemoveAll(filepath.Join(temporary, "runtime")); err != nil {
 			return err
@@ -247,9 +243,6 @@ func Build(ctx context.Context, options Options) error {
 		Routes:      routes,
 		ClientFiles: clientFiles,
 		Public:      public,
-	}
-	if runtimeRef != nil {
-		manifest.RuntimeCompression = "gzip"
 	}
 	if manifest.Toolchain.Bun == "" {
 		return errors.New("bifrost: cannot determine Bun version")
@@ -583,40 +576,7 @@ func buildRuntime(ctx context.Context, sourceRoot, output string) (protocol.File
 	if err := command.Run(); err != nil {
 		return protocol.FileRef{}, commandError(command, err)
 	}
-	compressed := destination + ".gz"
-	if err := gzipFile(destination, compressed); err != nil {
-		return protocol.FileRef{}, err
-	}
-	return fileRef(output, compressed)
-}
-
-func gzipFile(sourcePath, destination string) error {
-	source, err := os.Open(sourcePath)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = source.Close() }()
-	output, err := os.Create(destination)
-	if err != nil {
-		return err
-	}
-	writer, err := gzip.NewWriterLevel(output, gzip.DefaultCompression)
-	if err != nil {
-		_ = output.Close()
-		return err
-	}
-	writer.ModTime = time.Time{}
-	writer.Name = ""
-	_, copyErr := io.Copy(writer, source)
-	closeGzipErr := writer.Close()
-	closeOutputErr := output.Close()
-	if copyErr != nil {
-		return copyErr
-	}
-	if closeGzipErr != nil {
-		return closeGzipErr
-	}
-	return closeOutputErr
+	return fileRef(output, destination)
 }
 
 type viteManifestEntry struct {

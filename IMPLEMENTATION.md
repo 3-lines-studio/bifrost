@@ -45,7 +45,7 @@ This file separates the accepted scope from ideas explicitly deferred by the que
 ### Runtime
 
 - One default deployable Go binary.
-- Gzip-compressed embedded standalone Bun renderer.
+- Embedded standalone Bun renderer, extracted on first start into a per-build directory that is reused and pruned.
 - Linux Unix-socket renderer transport.
 - JSON request followed by length-prefixed binary head/body/done/error frames.
 - SSR head and body streaming.
@@ -109,7 +109,7 @@ AMD Ryzen 5 9600X, Go 1.26.5 toolchain, Bun 1.3.14:
 - Server Go-side handler overhead with fake renderer and document-metadata handling: about 246 ns/op.
 - Model startup: about 132 µs for 100 routes and 1.35 ms for 1,000 routes.
 - 32 KiB response frame decode: NDJSON about 140 µs/110 allocs; binary about 0.52 µs/35 allocs.
-- Mixed Vite SSR binary: about 45.0 MB after renderer compression and removal of build-only Static entries.
+- Mixed Vite SSR binary: about 95 MB with the embedded renderer, or 13 MB without server routes.
 - Static/client-only Vite binary: about 7.4 MB; it embeds neither the renderer nor SSR output.
 - Idle local RSS: about 55 MB for Go plus 40 MB for the renderer process.
 
