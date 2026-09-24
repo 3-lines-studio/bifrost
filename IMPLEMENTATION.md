@@ -92,7 +92,7 @@ This file separates the accepted scope from ideas explicitly deferred by the que
 - Unit tests for declarations, plugins, manifests, paths, build phases, renderer framing, handlers, hooks, errors, assets, and static generation.
 - Race tests and `go vet`.
 - Fuzz targets for manifests, static paths, and raw props.
-- Request and startup benchmarks.
+- Request and startup benchmarks, plus a throughput run against the real Bun renderer.
 - Vite/Bun/React end-to-end builds and real Chromium checks for Tailwind, virtual-module plugins, CSS Modules, assets, hydration, Suspense, renderer-kill recovery, and HTTP behavior.
 - Development browser tests covering Vite HMR, live SSR invalidation, Go process replacement, build-ID polling, and full reload.
 - Static-only build check confirming no production renderer is embedded.
@@ -114,6 +114,15 @@ AMD Ryzen 5 9600X, Go 1.26.5 toolchain, Bun 1.3.14:
 - Idle local RSS: about 55 MB for Go plus 40 MB for the renderer process.
 
 These are regression references, not broad throughput claims.
+
+`make throughput` drives `example/basic` through the real Bun renderer: one server page with a loader, one Suspense page, and one static asset route, 200 requests per concurrency level. On an AMD EPYC 9655P container, with the page as the only work per request:
+
+- Static assets (`/about`, no renderer): 13,100 requests/s at one client, 62,000/s at 16, p50 0.06–0.23 ms.
+- Server page (`/?name=Bench`) with `RenderConcurrency: 2`: 2,850/s at one client, 13,500/s at 16, p50 0.27–1.09 ms, p95 1.63 ms.
+- The same page with `RenderConcurrency: 1`: 3,590/s at one client, 6,500/s at 16, p95 3.60 ms. With 4: 16,300/s at 4 clients.
+- No 503 at any level: the 64-deep render queue never filled with 16 concurrent clients.
+
+A single render worker caps the page at about half the throughput of two and doubles the tail latency at 16 clients. The generated app router `main.go` has no way to raise `RenderConcurrency`.
 
 ## Explicitly deferred, not missing work
 

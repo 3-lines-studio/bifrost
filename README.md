@@ -301,6 +301,7 @@ make integration
 make dev-integration
 make reproducible
 make bench
+make throughput
 ```
 
 See [DESIGN.md](DESIGN.md), [QUESTIONNAIRE.md](QUESTIONNAIRE.md), and [IMPLEMENTATION.md](IMPLEMENTATION.md) for the model, decisions, completed scope, and measured limits.
