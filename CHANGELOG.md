@@ -18,9 +18,13 @@ Notable changes. Releases are tagged `vMAJOR.MINOR.PATCH`; this file covers what
 - `bifrost routes` lists the API handlers and middleware.
 - Trailing slashes redirect, matching the App Router.
 - Apps with routes but no pages build.
+- `init` scaffolds an App Router app by default; `--classic` keeps the classic router.
+- `init` resolves the latest release with `go get`, runs `go mod tidy`, and leaves the port to `BIFROST_ADDR`.
+- `build --render-concurrency N` sets the renderer worker count of the generated App Router main.
 
 ### Runtime and build
 
+- Two renderer workers by default, about 40 MB of RSS each: one capped a Server page at half the throughput and doubled the tail latency.
 - The renderer runtime ships uncompressed, and gzip support is gone.
 - The runtime directory is cached per build id, shared across processes with a lock, and pruned when nothing is using it: runs no longer pile directories and sockets into `/tmp`, and a warm start is a fraction of what it was.
 - The `describe` and `generate` phases no longer embed the previous build's output, so the Go build cache hits them and rebuilds skip recompiling and relinking the embedded output.
@@ -35,4 +39,5 @@ Notable changes. Releases are tagged `vMAJOR.MINOR.PATCH`; this file covers what
 ### Checks
 
 - `make check` also runs the App Router demo.
+- `make integration` runs the navigation browser checks, and the integration scripts take their ports from `BIFROST_TEST_PORT`.
 - `make throughput` drives an app through the real renderer and reports throughput, p50, p95, p99 and the 503 count per concurrency level.
