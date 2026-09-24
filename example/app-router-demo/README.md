@@ -6,7 +6,7 @@ An app that exercises every App Router feature on purpose, and a script that ass
 make build     # go run ../../cmd/bifrost build .
 make dev       # development server with HMR
 make serve     # build and serve on 127.0.0.1:18700
-make check     # build, then run scripts/check.sh (72 assertions)
+make check     # build, then run scripts/check.sh (74 assertions)
 ```
 
 ## The tree

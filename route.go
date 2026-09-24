@@ -65,12 +65,13 @@ func (k routeKind) String() string {
 // Route is an immutable page declaration. Use Server, Static, or Client to
 // construct one.
 type Route struct {
-	pattern    string
-	view       string
-	kind       routeKind
-	load       Loader
-	generate   Generator
-	navigation bool
+	pattern      string
+	view         string
+	kind         routeKind
+	load         Loader
+	generate     Generator
+	navigation   bool
+	cacheControl string
 }
 
 // Server declares a page rendered on each request. A nil loader supplies empty
@@ -106,5 +107,15 @@ func Client(pattern, view string) Route {
 
 func (r Route) WithNavigation() Route {
 	r.navigation = true
+	return r
+}
+
+// WithCache sets the Cache-Control header of the server-rendered document.
+// Routes default to no-store, which keeps browsers and shared caches from
+// serving a page whose props came from a request. The client-side navigation
+// response is never cacheable, and a static route caches the HTML the build
+// prerendered.
+func (r Route) WithCache(cacheControl string) Route {
+	r.cacheControl = cacheControl
 	return r
 }

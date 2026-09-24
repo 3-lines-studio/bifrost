@@ -563,6 +563,32 @@ func TestPublicWebManifestHeaders(t *testing.T) {
 	}
 }
 
+func TestDocumentCacheControlFollowsTheRoute(t *testing.T) {
+	for name, testCase := range map[string]struct {
+		route string
+		want  string
+	}{
+		"default":  {route: "", want: "no-store"},
+		"declared": {route: "public, s-maxage=60", want: "public, s-maxage=60"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			sink := &httpRenderSink{
+				writer:       response,
+				status:       http.StatusOK,
+				limits:       Limits{MaxHeadBytes: 1 << 20, MaxFrameBytes: 1 << 20},
+				cacheControl: testCase.route,
+			}
+			if err := sink.Head([]byte("<title>cached</title>")); err != nil {
+				t.Fatal(err)
+			}
+			if got := response.Header().Get("Cache-Control"); got != testCase.want {
+				t.Fatalf("Cache-Control = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
 func TestPublicAssetHeadersCanOverrideDefaults(t *testing.T) {
 	data := []byte(`{"name":"app"}`)
 	handler := &publicAssetHandler{
