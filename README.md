@@ -88,7 +88,7 @@ Build phases execute the application to collect immutable declarations, so code 
 
 ## SSR concurrency contract
 
-Bifrost uses one isolated Bun renderer process by default; `RenderConcurrency: N` starts N production renderers, each handling one render at a time. Development always serializes SSR through its one Vite module graph. This keeps simultaneous requests from racing through one JavaScript module graph while allowing explicit production scaling.
+Bifrost uses two isolated Bun renderer processes by default, about 40 MB of RSS each; `RenderConcurrency: N` starts N production renderers, each handling one render at a time, and `RenderConcurrency: 1` is enough for a single-core box. Development always serializes SSR through its one Vite module graph. This keeps simultaneous requests from racing through one JavaScript module graph while allowing explicit production scaling.
 
 Module globals persist between sequential requests handled by the same worker, so keep locale, user, authentication, and request data out of module-level variables: derive them from props or request-local React context.
 

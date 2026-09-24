@@ -48,7 +48,7 @@ func (a *App) initializeProduction(config Config) error {
 		return errors.New("bifrost: RenderConcurrency must not be negative")
 	}
 	if concurrency == 0 {
-		concurrency = 1
+		concurrency = 2
 	}
 	queue := config.RenderQueue
 	if queue <= 0 {

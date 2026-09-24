@@ -50,7 +50,7 @@ This file separates the accepted scope from ideas explicitly deferred by the que
 - JSON request followed by length-prefixed binary head/body/done/error frames.
 - SSR head and body streaming.
 - Request-scoped props and validated root document language, class, and direction.
-- One isolated renderer process by default, with an explicit multi-process worker pool for production concurrency; JavaScript module globals persist only between sequential requests on the same worker.
+- Two isolated renderer processes by default, with an explicit multi-process worker pool for production concurrency; JavaScript module globals persist only between sequential requests on the same worker.
 - End-to-end request cancellation through the Go transport, Bun request signal, React render signal, and body reader.
 - Bounded renderer concurrency and queue with 503 overload response.
 - Public renderer readiness checks across every worker.
@@ -111,7 +111,7 @@ AMD Ryzen 5 9600X, Go 1.26.5 toolchain, Bun 1.3.14:
 - 32 KiB response frame decode: NDJSON about 140 µs/110 allocs; binary about 0.52 µs/35 allocs.
 - Mixed Vite SSR binary: about 95 MB with the embedded renderer, or 13 MB without server routes.
 - Static/client-only Vite binary: about 7.4 MB; it embeds neither the renderer nor SSR output.
-- Idle local RSS: about 55 MB for Go plus 40 MB for the renderer process.
+- Idle local RSS: about 55 MB for Go plus about 40 MB per renderer worker.
 
 These are regression references, not broad throughput claims.
 

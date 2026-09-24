@@ -33,7 +33,7 @@ type Config struct {
 	Assets fs.FS
 
 	// RenderConcurrency is the number of isolated production renderer processes.
-	// Each process handles one render at a time. Zero uses one process. Development
+	// Each process handles one render at a time. Zero uses two processes. Development
 	// always uses one process because it owns one Vite module graph.
 	RenderConcurrency int
 	// RenderQueue bounds requests waiting for renderer capacity. Zero uses 64.
