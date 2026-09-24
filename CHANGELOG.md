@@ -10,7 +10,7 @@ Notable changes. Releases are tagged `vMAJOR.MINOR.PATCH`; this file covers what
 - Generated routes inject `params`, `searchParams` and `pathname`, render `generateMetadata`, and accept default exports in views.
 - Client-side navigation through `Route.WithNavigation()`: `<Link>`, `navigate`, `replace`, `refresh` and the navigation hooks from `virtual:bifrost/navigation`, with shared layouts and scroll, hash, focus, head and document-attribute handling.
 - `Head` is only valid in `page.tsx`. Exporting it from a layout, template, error, not-found or loading view is a build error.
-- A route can declare the `Cache-Control` of its document: `Route.WithCache` in Go, or a `Cache` export next to `Load` for an App Router page. Rendered documents stay `no-store` by default and the navigation response is never cacheable.
+- A route can declare the `Cache-Control` of its document: `Route.WithCache` in Go, or a `Cache` export next to `Load` for an App Router page. Rendered documents stay uncacheable by default and the navigation response is never cacheable.
 - `bifrost.NotFound()` from a loader works without a `not-found.tsx` next to the route: the loader not-found and error branches keep the request props.
 - `example/app-router-demo` is a self-checking demo app.
 

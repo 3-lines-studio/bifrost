@@ -568,7 +568,7 @@ func TestDocumentCacheControlFollowsTheRoute(t *testing.T) {
 		route string
 		want  string
 	}{
-		"default":  {route: "", want: "no-store"},
+		"default":  {route: "", want: "private, no-cache, no-store, max-age=0, must-revalidate"},
 		"declared": {route: "public, s-maxage=60", want: "public, s-maxage=60"},
 	} {
 		t.Run(name, func(t *testing.T) {

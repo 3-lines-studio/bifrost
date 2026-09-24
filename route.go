@@ -111,8 +111,9 @@ func (r Route) WithNavigation() Route {
 }
 
 // WithCache sets the Cache-Control header of the server-rendered document.
-// Routes default to no-store, which keeps browsers and shared caches from
-// serving a page whose props came from a request. The client-side navigation
+// Routes default to private, no-cache, no-store, max-age=0, must-revalidate,
+// which keeps browsers and shared caches from serving a page whose props came
+// from a request. The client-side navigation
 // response is never cacheable, and a static route caches the HTML the build
 // prerendered.
 func (r Route) WithCache(cacheControl string) Route {
