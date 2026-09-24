@@ -15,13 +15,14 @@ var moduleCleaner = regexp.MustCompile(`[^a-zA-Z0-9._/-]+`)
 
 func runInit(args []string) error {
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
-	noInstall := flags.Bool("no-install", false, "skip running bun install after scaffolding")
+	noInstall := flags.Bool("no-install", false, "skip running go get, go mod tidy, and bun install after scaffolding")
+	classic := flags.Bool("classic", false, "scaffold the classic router instead of the App Router")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	rest := flags.Args()
 	if len(rest) != 1 {
-		return fmt.Errorf("usage: bifrost init [--no-install] <directory>")
+		return fmt.Errorf("usage: bifrost init [--no-install] [--classic] <directory>")
 	}
 	directory, err := filepath.Abs(rest[0])
 	if err != nil {
@@ -43,6 +44,9 @@ func runInit(args []string) error {
 	// The scaffold uses context in main.
 	files["main.go"] = strings.Replace(files["main.go"], "import (\n", "import (\n\t\"context\"\n", 1)
 	files["main.go"] = strings.Replace(files["main.go"], "import (\n", "import (\n\t\"os\"\n", 1)
+	if !*classic {
+		files = appRouterScaffold(module)
+	}
 	for name := range files {
 		path := filepath.Join(directory, filepath.FromSlash(name))
 		if _, err := os.Stat(path); err == nil {
@@ -85,5 +89,113 @@ func runScaffoldStep(directory string, args ...string) {
 	fmt.Printf("Running %s...\n", strings.Join(args, " "))
 	if err := command.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "bifrost: %s failed; run it manually before bifrost dev\n", strings.Join(args, " "))
+	}
+}
+
+func appRouterScaffold(module string) map[string]string {
+	return map[string]string{
+		"go.mod": "module " + module + "\n\ngo 1.25.0\n",
+		"package.json": `{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.5",
+    "tailwindcss": "4.3.3",
+    "vite": "8.2.1"
+  }
+}
+`,
+		"vite.config.ts": `import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+
+export default defineConfig({ plugins: [react(), tailwindcss()] });
+`,
+		"bifrost.d.ts": `declare module 'virtual:bifrost/routes' {
+  export interface BifrostRoute {
+    pattern: string;
+    view: string;
+    kind: 'server' | 'static' | 'client';
+  }
+
+  export const routes: BifrostRoute[];
+
+  export function href(pattern: string, params?: Record<string, string | string[]>): string;
+}
+
+declare module 'virtual:bifrost/navigation' {
+  export function navigate(href: string): Promise<void>;
+  export function replace(href: string): Promise<void>;
+  export function refresh(): Promise<void>;
+  export function Link(props: { href: string; children?: unknown } & Record<string, unknown>): any;
+  export function usePathname(): string;
+  export function useParams(): Record<string, string | string[]>;
+  export function useSearchParams(): URLSearchParams;
+  export function useRouter(): {
+    push(href: string): Promise<void>;
+    replace(href: string): Promise<void>;
+    refresh(): Promise<void>;
+    back(): void;
+    forward(): void;
+  };
+}
+`,
+		"app/layout.tsx": `import type { ReactNode } from "react";
+import "./style.css";
+
+export const metadata = {
+  title: "Bifrost",
+};
+
+export function Layout({ children }: { children: ReactNode }) {
+  return (
+    <>
+      <header className="p-4">
+        <a href="/">Bifrost</a>
+      </header>
+      <main className="p-4">{children}</main>
+    </>
+  );
+}
+`,
+		"app/page.tsx": `export default function Page({ name }: { name: string }) {
+  return (
+    <>
+      <h1 className="text-2xl">Hello {name}</h1>
+      <p>
+        The App Router found this page at <code>app/page.tsx</code>, and <code>app/page.go</code> loads its props.
+      </p>
+    </>
+  );
+}
+`,
+		"app/page.go": `package app
+
+import (
+	"net/http"
+
+	"github.com/3-lines-studio/bifrost"
+)
+
+func Load(r *http.Request) (any, error) {
+	return bifrost.PageData{
+		Props:    map[string]string{"name": r.URL.Query().Get("name")},
+		Document: bifrost.Document{Lang: "es", Class: "theme-dark", Dir: "ltr"},
+	}, nil
+}
+`,
+		"app/style.css": `@import "tailwindcss";
+`,
+		".gitignore": `.bifrost/*
+!.bifrost/embed.placeholder
+node_modules/
+`,
 	}
 }

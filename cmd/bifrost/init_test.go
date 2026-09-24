@@ -12,14 +12,26 @@ func TestRunInitCreatesFormattedScaffoldAndRefusesOverwrite(t *testing.T) {
 	if err := runInit([]string{"--no-install", target}); err != nil {
 		t.Fatal(err)
 	}
-	mainData, err := os.ReadFile(filepath.Join(target, "main.go"))
+	for _, name := range []string{"app/layout.tsx", "app/page.tsx", "app/page.go", "app/style.css", "package.json", "vite.config.ts", "bifrost.d.ts"} {
+		if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(name))); err != nil {
+			t.Fatalf("the scaffold is missing %s: %v", name, err)
+		}
+	}
+	pageData, err := os.ReadFile(filepath.Join(target, "app", "page.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"bifrost.Building()", "bifrost.Server", "app.Close", "BIFROST_ADDR"} {
-		if !strings.Contains(string(mainData), expected) {
-			t.Fatalf("main.go does not contain %q", expected)
+	for _, expected := range []string{"func Load(r *http.Request) (any, error)", "bifrost.PageData"} {
+		if !strings.Contains(string(pageData), expected) {
+			t.Fatalf("app/page.go does not contain %q", expected)
 		}
+	}
+	layoutData, err := os.ReadFile(filepath.Join(target, "app", "layout.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(layoutData), "export function Layout") || !strings.Contains(string(layoutData), "./style.css") {
+		t.Fatalf("app/layout.tsx is incomplete:\n%s", layoutData)
 	}
 	viteData, err := os.ReadFile(filepath.Join(target, "vite.config.ts"))
 	if err != nil {
@@ -46,6 +58,28 @@ func TestRunInitCreatesFormattedScaffoldAndRefusesOverwrite(t *testing.T) {
 	}
 	if err := runInit([]string{"--no-install", target}); err == nil || !strings.Contains(err.Error(), "refusing to overwrite") {
 		t.Fatalf("second init error = %v", err)
+	}
+}
+
+func TestRunInitScaffoldsTheClassicRouterWithClassic(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "classic")
+	if err := runInit([]string{"--no-install", "--classic", target}); err != nil {
+		t.Fatal(err)
+	}
+	mainData, err := os.ReadFile(filepath.Join(target, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"bifrost.Building()", "bifrost.Server", "app.Close", "BIFROST_ADDR"} {
+		if !strings.Contains(string(mainData), expected) {
+			t.Fatalf("main.go does not contain %q", expected)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(target, "pages", "home.tsx")); err != nil {
+		t.Fatalf("the classic scaffold is missing pages/home.tsx: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "app")); !os.IsNotExist(err) {
+		t.Fatalf("the classic scaffold wrote an app directory: %v", err)
 	}
 }
 
