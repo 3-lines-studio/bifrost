@@ -806,7 +806,7 @@ func TestAppRouterLayoutsComposeOuterToInner(t *testing.T) {
 	if !strings.Contains(text, "pageKey?: string") || !strings.Contains(text, "<Fragment key={pageKey}>") {
 		t.Fatalf("generated page branch is not keyed:\n%s", text)
 	}
-	if !strings.Contains(text, `<Layout0 key={"layout.tsx"} params={props.params}><Layout1 key={"dashboard/layout.tsx"} params={props.params}>`) || !strings.Contains(text, "props.__bifrostError") || !strings.Contains(text, "props.__bifrostNotFound") || !strings.Contains(text, "export { Head }") {
+	if !strings.Contains(text, `<Layout0 key={"layout.tsx"} params={props.params}><Layout1 key={"dashboard/layout.tsx"} params={props.params}>`) || !strings.Contains(text, "props.__bifrostError") || !strings.Contains(text, "props.__bifrostNotFound") || !strings.Contains(text, `export * from `) {
 		t.Fatalf("generated view is incomplete:\n%s", text)
 	}
 }

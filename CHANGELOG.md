@@ -2,6 +2,12 @@
 
 Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
+## Unreleased
+
+### App Router
+
+- The generated view re-exports the whole page module, so a page that re-exports `Head` from another file keeps its head instead of rendering an empty one.
+
 ## v1.3.10
 
 ### App Router
