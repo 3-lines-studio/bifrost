@@ -82,7 +82,7 @@ handler := sharedMiddleware(app.ResolveMarkdown(mux))
 
 Use `/{$}` for an exact root page; the standard `/` pattern is a subtree fallback. Bifrost does not add router-specific adapters.
 
-Rendered documents are `Cache-Control: no-store` by default, because their props usually come from the request. Declare a route as cacheable with `Route.WithCache` in Go or with a `Cache` export next to `Load` in the App Router, for example `public, s-maxage=60` to let a CDN hold it. The document keeps `Vary: Accept`, and the client-side navigation response stays `no-store` and never reaches a shared cache.
+Rendered documents are `Cache-Control: private, no-cache, no-store, max-age=0, must-revalidate` by default, because their props usually come from the request. Declare a route as cacheable with `Route.WithCache` in Go or with a `Cache` export next to `Load` in the App Router, for example `public, s-maxage=60` to let a CDN hold it. The document keeps `Vary: Accept`, and the client-side navigation response stays `no-store` and never reaches a shared cache.
 
 ## Build and runtime boundary
 

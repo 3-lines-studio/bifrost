@@ -356,6 +356,10 @@ func (h *serverPageHandler) serveError(w http.ResponseWriter, request *http.Requ
 	serveDefaultError(w, request, err)
 }
 
+// defaultDocumentCacheControl keeps a rendered document with request props out
+// of browsers and shared caches, including the ones that only read max-age.
+const defaultDocumentCacheControl = "private, no-cache, no-store, max-age=0, must-revalidate"
+
 type httpRenderSink struct {
 	writer       http.ResponseWriter
 	shell        dochtml.Shell
@@ -377,7 +381,7 @@ func (s *httpRenderSink) Head(head []byte) error {
 	}
 	cacheControl := s.cacheControl
 	if cacheControl == "" {
-		cacheControl = "no-store"
+		cacheControl = defaultDocumentCacheControl
 	}
 	s.writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 	s.writer.Header().Set("Cache-Control", cacheControl)
