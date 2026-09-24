@@ -82,6 +82,8 @@ handler := sharedMiddleware(app.ResolveMarkdown(mux))
 
 Use `/{$}` for an exact root page; the standard `/` pattern is a subtree fallback. Bifrost does not add router-specific adapters.
 
+Rendered documents are `Cache-Control: no-store` by default, because their props usually come from the request. Declare a route as cacheable with `Route.WithCache` in Go or with a `Cache` export next to `Load` in the App Router, for example `public, s-maxage=60` to let a CDN hold it. The document keeps `Vary: Accept`, and the client-side navigation response stays `no-store` and never reaches a shared cache.
+
 ## Build and runtime boundary
 
 Build phases execute the application to collect immutable declarations, so code that constructs `Config`, routes, loaders, and generators must be side-effect free. Check `bifrost.Building()` immediately after `New`, before opening listeners, databases, queues, or background workers. When declarations live in an internal package, pass the generated package-local `bifrostAssets` from `main` into that package; `example/structured` shows the layout that keeps one generated embedded tree instead of a second copied embed.
@@ -165,7 +167,7 @@ The other files in a route directory are optional:
 - `template.tsx` exports `Template`, wraps everything below it like a layout, and remounts on every navigation.
 - `loading.tsx` exports `Loading`, and shows while a navigation to that route runs. It covers a route and everything below it, like `layout.tsx`, and the deepest one wins.
 - `error.tsx` exports `Error`, and `not-found.tsx` exports `NotFound`. `Error` receives an `error` object and a `reset` function that re-fetches the route.
-- `page.go` exports `Load`, the Go loader for `page.tsx`.
+- `page.go` exports `Load`, the Go loader for `page.tsx`, and can export `Cache`, the `Cache-Control` of the rendered document.
 - `route.go` exports any of `Get`, `Post`, `Put`, `Patch`, `Delete`, `Head`, and `Options`.
 - `middleware.go` exports `Middleware`, which wraps every route below it.
 - `server.go` exports `Serve` and is only valid at the route root.

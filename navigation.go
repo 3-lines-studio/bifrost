@@ -74,5 +74,5 @@ func (h *serverPageHandler) newSink(w http.ResponseWriter, request *http.Request
 			limits: h.limits,
 		}
 	}
-	return &httpRenderSink{writer: w, shell: h.shell, props: props, document: document, status: status, limits: h.limits}
+	return &httpRenderSink{writer: w, shell: h.shell, props: props, document: document, status: status, limits: h.limits, cacheControl: h.cacheControl}
 }

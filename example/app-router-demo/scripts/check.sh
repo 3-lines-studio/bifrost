@@ -64,6 +64,9 @@ expect_body "home shows the map" "Everything the App Router does" "/"
 expect_header "root middleware header" "X-Demo-Root: 1" "/"
 expect_body "root template wraps the tree" 'data-template="root"' "/"
 expect_body "root metadata is applied" "Bifrost App Router demo" "/"
+expect_header "document declares its cache" "Cache-Control: public, s-maxage=60" "/"
+navigation=$(curl -sS --max-time 10 -D - -o /dev/null -H "Accept: application/vnd.bifrost.navigation+json" "$base/")
+if grep -qiF -- "Cache-Control: no-store" <<<"$navigation"; then ok "navigation is never cacheable"; else bad "navigation is never cacheable" "the navigation response is missing no-store"; fi
 expect_body "stylesheet is linked" "styles.css" "/"
 expect_status "public file" 200 "/styles.css"
 expect_status "public download file" 200 "/report.txt"

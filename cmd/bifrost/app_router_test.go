@@ -726,6 +726,31 @@ func TestGeneratedMainSetsRenderConcurrency(t *testing.T) {
 	}
 }
 
+func TestGeneratedMainDeclaresTheRouteCache(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	routes := []appRoute{
+		{Pattern: "/cached", View: "page.tsx", Alias: "route0", ImportPath: "example.com/app/cached", HasCache: true},
+		{Pattern: "/plain", View: "page.tsx", Alias: "route1", ImportPath: "example.com/app/plain"},
+	}
+	if err := writeAppRouterMain(root, generated, routes, nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), ".WithNavigation().WithCache(route0.Cache()),") {
+		t.Fatalf("generated main does not cache the declared route:\n%s", source)
+	}
+	if !strings.Contains(string(source), `bifrost.Server("/plain", "page.tsx", load1).WithNavigation(),`) {
+		t.Fatalf("generated main caches a route that did not ask for it:\n%s", source)
+	}
+}
+
 func TestGeneratedMainRenamesPathValuesForGo(t *testing.T) {
 	root := t.TempDir()
 	generated := filepath.Join(root, ".bifrost", "app")

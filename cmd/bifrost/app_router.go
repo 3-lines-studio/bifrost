@@ -45,6 +45,7 @@ type appRoute struct {
 	Alias        string
 	PageGo       bool
 	HasLoader    bool
+	HasCache     bool
 	HasHead      bool
 	ErrorViews   []string
 	NotFoundView string
@@ -224,6 +225,7 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 			routes[index].ImportPath = modulePath + "/" + filepath.ToSlash(routes[index].ImportPath)
 		}
 		routes[index].HasLoader = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Load")
+		routes[index].HasCache = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Cache")
 	}
 	for index := range goDirs {
 		if goDirs[index].Directory == "." {
@@ -1076,7 +1078,11 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 		} else {
 			fmt.Fprintf(&loaders, "func %s(r *http.Request) (any, error) {\n\treturn requestPage(r, %s, nil, %d)\n}\n\n", loader, params, len(route.ErrorViews))
 		}
-		fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, %s).WithNavigation(),\n", strconv.Quote(route.Pattern), strconv.Quote(route.View), loader)
+		cache := ""
+		if route.HasCache {
+			cache = ".WithCache(" + route.Alias + ".Cache())"
+		}
+		fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, %s).WithNavigation()%s,\n", strconv.Quote(route.Pattern), strconv.Quote(route.View), loader, cache)
 	}
 	if hasNotFoundPage {
 		fmt.Fprintf(&loaders, "func loadNotFound(r *http.Request) (any, error) {\n\treturn bifrost.PageData{Props: map[string]any{\"pathname\": r.URL.EscapedPath()}, Status: http.StatusNotFound}, nil\n}\n\n")

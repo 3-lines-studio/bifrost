@@ -127,14 +127,15 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 			}
 			state.serverPatterns["GET "+pattern] = struct{}{}
 			page := &serverPageHandler{
-				pattern: pattern,
-				load:    declaration.load,
-				entry:   serverEntry,
-				shell:   shell,
-				render:  render,
-				hooks:   app.hooks,
-				limits:  app.limits,
-				logger:  app.logger,
+				pattern:      pattern,
+				load:         declaration.load,
+				entry:        serverEntry,
+				shell:        shell,
+				render:       render,
+				hooks:        app.hooks,
+				limits:       app.limits,
+				logger:       app.logger,
+				cacheControl: declaration.cacheControl,
 			}
 			if declaration.navigation {
 				page.navigationView = view.ID
@@ -198,6 +199,7 @@ type serverPageHandler struct {
 	hooks           registeredHooks
 	limits          Limits
 	logger          *slog.Logger
+	cacheControl    string
 }
 
 func (h *serverPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
@@ -355,14 +357,15 @@ func (h *serverPageHandler) serveError(w http.ResponseWriter, request *http.Requ
 }
 
 type httpRenderSink struct {
-	writer   http.ResponseWriter
-	shell    dochtml.Shell
-	props    json.RawMessage
-	document Document
-	status   int
-	started  bool
-	finished bool
-	limits   Limits
+	writer       http.ResponseWriter
+	shell        dochtml.Shell
+	props        json.RawMessage
+	document     Document
+	status       int
+	started      bool
+	finished     bool
+	limits       Limits
+	cacheControl string
 }
 
 func (s *httpRenderSink) Head(head []byte) error {
@@ -372,8 +375,12 @@ func (s *httpRenderSink) Head(head []byte) error {
 	if s.started {
 		return errors.New("bifrost: renderer emitted head more than once")
 	}
+	cacheControl := s.cacheControl
+	if cacheControl == "" {
+		cacheControl = "no-store"
+	}
 	s.writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-	s.writer.Header().Set("Cache-Control", "no-store")
+	s.writer.Header().Set("Cache-Control", cacheControl)
 	s.writer.WriteHeader(s.status)
 	s.started = true
 	if err := s.shell.WritePreamble(s.writer, head, protocolDocument(s.document)); err != nil {
