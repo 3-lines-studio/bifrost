@@ -4,6 +4,7 @@ import path from "node:path";
 const socket = process.env.BIFROST_SOCKET;
 if (!socket) throw new Error("BIFROST_SOCKET is required");
 
+const modules = new Map<string, any>();
 const encoder = new TextEncoder();
 const HEAD = 1;
 const BODY = 2;
@@ -37,7 +38,11 @@ async function handleRender(request: Request): Promise<Response> {
 
   try {
     const absolute = path.resolve(input.entry);
-    const module = await import(pathToFileURL(absolute).href);
+    let module = modules.get(absolute);
+    if (!module) {
+      module = await import(pathToFileURL(absolute).href);
+      modules.set(absolute, module);
+    }
     if (typeof module.render !== "function") {
       throw new Error(`module ${input.entry} does not export render`);
     }
