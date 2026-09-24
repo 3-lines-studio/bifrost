@@ -128,16 +128,15 @@ A single render worker caps the page at about half the throughput of two and dou
 
 The questionnaire marked these as later work, optional plugins, or features requiring evidence:
 
-- File-based routing, route groups, and nested layout discovery.
-- Bifrost-owned client-side navigation.
 - React Server Components, server actions, and new route kinds.
 - Incremental static regeneration.
-- Markdown negotiation.
 - Automatic critical CSS.
 - Built-in Prometheus or OpenTelemetry adapters.
 - Built-in CSP nonce rewriting and SRI.
 - A public multi-framework renderer API.
 - Serverless runtime ownership.
 - Windows support.
+
+File-based routing, route groups, nested layout discovery, client-side navigation, and markdown negotiation were on that list and are now implemented: see [the App Router files and navigation sections of the README](README.md#app-router-files).
 
 Vite plugins own frontend extensions. The typed Go `AppRegistry` can gain additive server hooks. ISR, RSC, and new route or render kinds still require a versioned core decision rather than an unrestricted server escape hatch.

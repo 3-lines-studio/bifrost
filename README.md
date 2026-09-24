@@ -295,7 +295,7 @@ Linux amd64 and arm64 production, containers, and macOS development. Windows is 
 ## Checks
 
 ```sh
-make check # test race vet, and the App Router release gate
+make check # test race vet, the App Router release gate, and the App Router demo
 make gate # only the App Router release gate
 make integration
 make dev-integration
