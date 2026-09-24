@@ -3,7 +3,6 @@
 package bifrost
 
 import (
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -325,13 +324,7 @@ func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency
 	if manifest.manifest.Runtime == nil {
 		return fail(errors.New("bifrost: manifest has no renderer runtime"))
 	}
-	runtimePath := manifest.manifest.Runtime.Path
-	if manifest.manifest.RuntimeCompression == "gzip" {
-		runtimePath = strings.TrimSuffix(runtimePath, ".gz")
-		if err := extractGzipArtifact(assets, root, *manifest.manifest.Runtime, runtimePath, 0o700); err != nil {
-			return fail(err)
-		}
-	} else if err := extractArtifact(assets, root, *manifest.manifest.Runtime, 0o700); err != nil {
+	if err := extractArtifact(assets, root, *manifest.manifest.Runtime, 0o700); err != nil {
 		return fail(err)
 	}
 	extracted := make(map[string]struct{})
@@ -350,7 +343,7 @@ func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency
 			extracted[file.Path] = struct{}{}
 		}
 	}
-	executable := filepath.Join(root, filepath.FromSlash(runtimePath))
+	executable := filepath.Join(root, filepath.FromSlash(manifest.manifest.Runtime.Path))
 	renderer := &productionRenderer{
 		assets:      assets,
 		manifest:    manifest,
@@ -462,20 +455,6 @@ func newAttachedDevelopmentRenderer(socket string, queue int, logger *slog.Logge
 		logger:     logger,
 		queueHooks: slices.Clone(queueHooks),
 	}, nil
-}
-
-func extractGzipArtifact(assets fs.FS, root string, ref protocol.FileRef, destinationPath string, mode fs.FileMode) error {
-	source, err := assets.Open(ref.Path)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = source.Close() }()
-	reader, err := gzip.NewReader(source)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = reader.Close() }()
-	return extractReader(root, destinationPath, reader, mode)
 }
 
 func extractArtifact(assets fs.FS, root string, ref protocol.FileRef, mode fs.FileMode) error {

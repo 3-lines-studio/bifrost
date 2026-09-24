@@ -169,9 +169,6 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 		return nil, errors.New("bifrost: server routes require an embedded renderer runtime")
 	}
 	if manifest.Runtime != nil {
-		if manifest.RuntimeCompression != "" && manifest.RuntimeCompression != "gzip" {
-			return nil, fmt.Errorf("bifrost: unsupported runtime compression %q", manifest.RuntimeCompression)
-		}
 		if err := validateFileRef(*manifest.Runtime); err != nil {
 			return nil, fmt.Errorf("bifrost: invalid renderer runtime: %w", err)
 		}
