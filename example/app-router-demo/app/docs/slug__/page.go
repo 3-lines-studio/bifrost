@@ -12,10 +12,7 @@ func Load(r *http.Request) (any, error) {
 	path := r.PathValue("slug")
 	doc, ok := store.FindDoc(path)
 	if !ok {
-		return bifrost.PageData{
-			Props:  map[string]any{"missing": path, "docs": store.DocPaths()},
-			Status: http.StatusNotFound,
-		}, nil
+		return nil, bifrost.NotFound()
 	}
 	return map[string]any{
 		"title":      doc.Title,

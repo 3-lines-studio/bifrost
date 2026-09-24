@@ -276,7 +276,7 @@ func (h *serverPageHandler) renderProps(w http.ResponseWriter, request *http.Req
 	}
 	if err != nil {
 		if !sink.committed() && errorFallbacks > 0 {
-			if h.renderError(w, request, document, err, errorFallbacks) {
+			if h.renderError(w, request, document, propsJSON, err, errorFallbacks) {
 				return
 			}
 		}
@@ -288,13 +288,13 @@ func (h *serverPageHandler) renderProps(w http.ResponseWriter, request *http.Req
 	}
 }
 
-func (h *serverPageHandler) renderError(w http.ResponseWriter, request *http.Request, document Document, renderErr error, fallbacks int) bool {
+func (h *serverPageHandler) renderError(w http.ResponseWriter, request *http.Request, document Document, propsJSON json.RawMessage, renderErr error, fallbacks int) bool {
 	message := http.StatusText(http.StatusInternalServerError)
 	if os.Getenv("BIFROST_DEV_DIR") != "" {
 		message = renderErr.Error()
 	}
 	for level := fallbacks - 1; level >= 0; level-- {
-		props, err := marshalProps(map[string]any{"__bifrostError": message, "__bifrostErrorLevel": level})
+		props, err := errorProps(propsJSON, message, level)
 		if err != nil {
 			return false
 		}
@@ -314,6 +314,17 @@ func (h *serverPageHandler) renderError(w http.ResponseWriter, request *http.Req
 		}
 	}
 	return false
+}
+
+func errorProps(base json.RawMessage, message string, level int) (json.RawMessage, error) {
+	props := map[string]any{}
+	if err := json.Unmarshal(base, &props); err != nil {
+		props = map[string]any{}
+	}
+	delete(props, "__bifrostNotFound")
+	props["__bifrostError"] = message
+	props["__bifrostErrorLevel"] = level
+	return marshalProps(props)
 }
 
 type developmentStaticPage struct {

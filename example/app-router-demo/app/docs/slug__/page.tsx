@@ -1,25 +1,11 @@
-export function generateMetadata(props: { title?: string; missing?: string; params: { slug: string[] } }) {
-  if (props.missing) {
-    return { title: "No doc · docs" };
-  }
+export function generateMetadata(props: { title?: string; params: { slug: string[] } }) {
   return {
     title: (props.title ?? "Docs") + " · docs",
     description: "Documentation for " + props.params.slug.join("/") + ".",
   };
 }
 
-export default function Page(props: { title: string; body: string; docs: string[]; middleware: string[]; loads: number; missing?: string; params: { slug: string[] } }) {
-  if (props.missing) {
-    return (
-      <article data-missing={props.missing}>
-        <h2>No doc at /{props.params.slug.join("/")}</h2>
-        <p className="note warn">
-          The catch-all loader answered 404 itself. See the README: the same page with <code>bifrost.NotFound()</code> and no
-          not-found view of its own returns a 500 today.
-        </p>
-      </article>
-    );
-  }
+export default function Page(props: { title: string; body: string; docs: string[]; middleware: string[]; loads: number; params: { slug: string[] } }) {
   return (
     <article data-doc={props.params.slug.join("/")}>
       <h2>{props.title}</h2>

@@ -111,6 +111,40 @@ func TestServerHandlerUsesErrorFallbackBeforeCommit(t *testing.T) {
 	}
 }
 
+func TestServerHandlerKeepsRoutePropsInErrorFallback(t *testing.T) {
+	calls := 0
+	render := &fakeRenderer{render: func(_ context.Context, request renderRequest, sink renderSink) error {
+		calls++
+		if calls == 1 {
+			return errors.New("secret render failure")
+		}
+		var props map[string]any
+		if err := json.Unmarshal(request.Props, &props); err != nil {
+			t.Fatalf("fallback props = %s", request.Props)
+		}
+		if _, marked := props["__bifrostNotFound"]; marked {
+			t.Fatalf("fallback props kept the not-found marker: %s", request.Props)
+		}
+		if params, ok := props["params"].(map[string]any); !ok || params["slug"] != "bifrost" {
+			t.Fatalf("fallback props lost the route params: %s", request.Props)
+		}
+		if err := sink.Head(nil); err != nil {
+			return err
+		}
+		return sink.Body([]byte("<main>fallback</main>"))
+	}}
+	_, state := runtimeFixture(t, render)
+	handler := state.handlers["/server"].(*serverPageHandler)
+	handler.load = func(*http.Request) (any, error) {
+		return PageData{Props: map[string]any{"params": map[string]any{"slug": "bifrost"}, "__bifrostNotFound": true}, Status: http.StatusNotFound, ErrorFallbacks: 1}, nil
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/server", nil))
+	if response.Code != http.StatusInternalServerError || calls != 2 || !strings.Contains(response.Body.String(), "fallback") {
+		t.Fatalf("response = %d calls = %d body = %q", response.Code, calls, response.Body.String())
+	}
+}
+
 func TestServerHandlerFallsBackToPlainError(t *testing.T) {
 	calls := 0
 	render := &fakeRenderer{render: func(context.Context, renderRequest, renderSink) error {
