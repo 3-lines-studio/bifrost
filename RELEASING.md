@@ -14,7 +14,7 @@ make fuzz
 git status --short
 ```
 
-`git status --short` must print nothing. CI runs `make check` on Linux and macOS before accepting the tag; `make integration` and `make dev-integration` need Chromium and are not part of CI.
+`git status --short` must print nothing. The release workflow runs `make check` and `make bench` when a `v*` tag is pushed; `make integration` and `make dev-integration` need Chromium and never run on CI.
 
 ## Tag
 
