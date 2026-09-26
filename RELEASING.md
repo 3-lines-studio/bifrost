@@ -14,7 +14,7 @@ make fuzz
 git status --short
 ```
 
-`git status --short` must print nothing. CI runs `make check` on Linux and macOS before accepting the tag; `make integration` and `make dev-integration` need Chromium and are not part of CI.
+`git status --short` must print nothing. Nothing above runs on CI; `make integration` and `make dev-integration` need Chromium.
 
 ## Tag
 
@@ -25,4 +25,4 @@ git tag -a v1.1.0 -m "bifrost v1.1.0"
 git push origin v1.1.0
 ```
 
-The release workflow reruns `make check` for the tag.
+The release workflow only waits for the tag to appear on proxy.golang.org.
