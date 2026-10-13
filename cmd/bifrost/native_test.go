@@ -66,7 +66,7 @@ func TestNativeProjectMirrorsTheRouteTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	native := filepath.Join(projectRoot, ".bifrost", "native")
-	if err := writeNativeProject(native, prepared, "http://example.test"); err != nil {
+	if err := writeNativeProject(native, prepared, "http://example.test", filepath.Join(projectRoot, "native")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -107,7 +107,7 @@ func TestNativeProjectDropsStaleRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	native := filepath.Join(projectRoot, ".bifrost", "native")
-	if err := writeNativeProject(native, prepared, ""); err != nil {
+	if err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
 		t.Fatal(err)
 	}
 	stale := filepath.Join(native, "app", "gone.tsx")
@@ -121,7 +121,7 @@ func TestNativeProjectDropsStaleRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeNativeProject(native, prepared, ""); err != nil {
+	if err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
@@ -169,7 +169,7 @@ func TestNativeClientHandsBackTheRedirectItGets(t *testing.T) {
 		t.Fatal(err)
 	}
 	native := filepath.Join(projectRoot, ".bifrost", "native")
-	if err := writeNativeProject(native, prepared, server.URL); err != nil {
+	if err := writeNativeProject(native, prepared, server.URL, filepath.Join(projectRoot, "native")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -224,6 +224,115 @@ func nodeRunsTypeScript(t *testing.T, node string) bool {
 		return false
 	}
 	return major > 22 || major == 22 && minor >= 6
+}
+
+func TestNativeProjectKeepsTheAppFilesItWasGiven(t *testing.T) {
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// What an app contributes: a session module of its own, an overridden layout
+	// and a client it talks to the server with, plus the dependency it needs.
+	overlay := filepath.Join(projectRoot, "native")
+	files := map[string]string{
+		"bifrost/session.ts": "export const session = null;\n",
+		"bifrost/data.ts":    "export const replaced = true;\n",
+		"app/_layout.tsx":    "export default function Layout() { return null; }\n",
+		"package.json":       `{"dependencies":{"expo-secure-store":"~15.0.7"},"devDependencies":{"prettier":"^3.0.0"},"scripts":{"start":"expo start"}}`,
+	}
+	for name, content := range files {
+		path := filepath.Join(overlay, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	prepared, err := prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(projectRoot, ".bifrost", "native")
+	for run := 1; run <= 2; run++ {
+		if err := writeNativeProject(native, prepared, "", overlay); err != nil {
+			t.Fatalf("run %d: %v", run, err)
+		}
+		for name, want := range files {
+			if name == "package.json" {
+				continue
+			}
+			content, err := os.ReadFile(filepath.Join(native, filepath.FromSlash(name)))
+			if err != nil {
+				t.Fatalf("run %d: %s did not survive: %v", run, name, err)
+			}
+			if string(content) != want {
+				t.Fatalf("run %d: %s was overwritten:\n%s", run, name, content)
+			}
+		}
+	}
+
+	// A generated file nobody overrode stays generated.
+	if _, err := os.Stat(filepath.Join(native, "bifrost", "screen.tsx")); err != nil {
+		t.Fatalf("the overlay dropped a generated file: %v", err)
+	}
+
+	// The manifest keeps what the generator owns and gains what the app declared.
+	content, err := os.ReadFile(filepath.Join(native, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Main          string            `json:"main"`
+		Dependencies  map[string]string `json:"dependencies"`
+		DevDependency map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(content, &manifest); err != nil {
+		t.Fatalf("the merged manifest is not valid JSON: %v\n%s", err, content)
+	}
+	if manifest.Main != "expo-router/entry" {
+		t.Fatalf("main = %q", manifest.Main)
+	}
+	if manifest.Dependencies["expo-secure-store"] != "~15.0.7" {
+		t.Fatalf("the app dependency was not merged: %s", content)
+	}
+	if manifest.Dependencies["expo-router"] == "" {
+		t.Fatalf("the generated dependencies were lost: %s", content)
+	}
+	if manifest.DevDependency["prettier"] != "^3.0.0" {
+		t.Fatalf("the app dev dependency was not merged: %s", content)
+	}
+}
+
+func TestNativeProjectRefusesAnOverlayRouteTheServerDoesNotServe(t *testing.T) {
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	overlay := filepath.Join(projectRoot, "native")
+	if err := os.MkdirAll(filepath.Join(overlay, "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(overlay, "app", "invented.tsx"), []byte("export default function Screen() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = writeNativeProject(filepath.Join(projectRoot, ".bifrost", "native"), prepared, "", overlay)
+	if err == nil || !strings.Contains(err.Error(), "not a route") {
+		t.Fatalf("err = %v", err)
+	}
 }
 
 func TestNativeNamesFromProjectDirectory(t *testing.T) {
