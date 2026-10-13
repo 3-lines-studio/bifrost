@@ -6,8 +6,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -19,27 +21,6 @@ type nativeFile struct {
 	Name    string
 	Content string
 }
-
-const nativePackageJSON = `{
-  "private": true,
-  "main": "expo-router/entry",
-  "dependencies": {
-    "expo": "~57.0.28",
-    "expo-constants": "~57.0.21",
-    "expo-linking": "~57.0.12",
-    "expo-router": "~57.0.26",
-    "expo-status-bar": "~57.0.1",
-    "react": "19.2.3",
-    "react-native": "0.86.3",
-    "react-native-safe-area-context": "5.10.1",
-    "react-native-screens": "4.29.0"
-  },
-  "devDependencies": {
-    "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
-  }
-}
-`
 
 const nativeTSConfig = `{
   "extends": "expo/tsconfig.base",
@@ -347,7 +328,6 @@ const styles = StyleSheet.create({
 `
 
 var nativeProjectFiles = []nativeFile{
-	{"package.json", nativePackageJSON},
 	{"tsconfig.json", nativeTSConfig},
 	{"metro.config.js", nativeMetroConfig},
 	{"app/_layout.tsx", nativeLayout},
@@ -357,10 +337,50 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/screen.tsx", nativeScreen},
 }
 
+func nativePackageManifest() map[string]any {
+	return map[string]any{
+		"private": true,
+		"main":    "expo-router/entry",
+		"dependencies": map[string]any{
+			"expo":                           "~57.0.28",
+			"expo-constants":                 "~57.0.21",
+			"expo-linking":                   "~57.0.12",
+			"expo-router":                    "~57.0.26",
+			"expo-status-bar":                "~57.0.1",
+			"react":                          "19.2.3",
+			"react-native":                   "0.86.3",
+			"react-native-safe-area-context": "5.10.1",
+			"react-native-screens":           "4.29.0",
+		},
+		"devDependencies": map[string]any{
+			"@types/react": "~19.2.2",
+			"typescript":   "~6.0.3",
+		},
+	}
+}
+
+func nativeAppManifest(projectRoot string) map[string]any {
+	name, slug := nativeNames(projectRoot)
+	identifier := "com.bifrost." + strings.ReplaceAll(slug, "-", "")
+	return map[string]any{"expo": map[string]any{
+		"name":               name,
+		"slug":               slug,
+		"scheme":             slug,
+		"version":            "1.0.0",
+		"orientation":        "portrait",
+		"userInterfaceStyle": "automatic",
+		"newArchEnabled":     true,
+		"plugins":            []string{"expo-router"},
+		"ios":                map[string]any{"bundleIdentifier": identifier},
+		"android":            map[string]any{"package": identifier},
+	}}
+}
+
 func runNative(args []string) error {
 	flags := flag.NewFlagSet("native", flag.ContinueOnError)
 	dir := flags.String("C", ".", "working directory")
 	origin := flags.String("origin", "", "base URL of the Go server; by default the host alias of each platform")
+	from := flags.String("from", "native", "directory of app files copied over the generated project")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -384,15 +404,19 @@ func runNative(args []string) error {
 		return err
 	}
 	native := filepath.Join(projectRoot, ".bifrost", "native")
-	if err := writeNativeProject(native, prepared, *origin); err != nil {
+	overlay := filepath.Join(projectRoot, *from)
+	if err := writeNativeProject(native, prepared, *origin, overlay); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(os.Stdout, "Bifrost native project: %s\n", filepath.ToSlash(native))
+	if overlayExists(overlay) {
+		_, _ = fmt.Fprintf(os.Stdout, "  app files from: %s\n", filepath.ToSlash(overlay))
+	}
 	_, _ = fmt.Fprintf(os.Stdout, "  cd %s && bun install && bunx expo start\n", filepath.ToSlash(native))
 	return nil
 }
 
-func writeNativeProject(native string, app appRouter, origin string) error {
+func writeNativeProject(native string, app appRouter, origin, overlay string) error {
 	screens := make(map[string]appRoute, len(app.Routes))
 	for _, route := range app.Routes {
 		view, err := expoRouterPath(route.Pattern)
@@ -414,23 +438,14 @@ func writeNativeProject(native string, app appRouter, origin string) error {
 			return err
 		}
 	}
-	name, slug := nativeNames(app.ProjectRoot)
-	manifest, err := json.MarshalIndent(map[string]any{"expo": map[string]any{
-		"name":               name,
-		"slug":               slug,
-		"scheme":             slug,
-		"version":            "1.0.0",
-		"orientation":        "portrait",
-		"userInterfaceStyle": "automatic",
-		"newArchEnabled":     true,
-		"plugins":            []string{"expo-router"},
-		"ios":                map[string]any{"bundleIdentifier": "com.bifrost." + strings.ReplaceAll(slug, "-", "")},
-		"android":            map[string]any{"package": "com.bifrost." + strings.ReplaceAll(slug, "-", "")},
-	}}, "", "  ")
-	if err != nil {
+	manifest := nativePackageManifest()
+	if err := mergeNativeOverlayManifest(overlay, manifest); err != nil {
 		return err
 	}
-	if err := writeNativeFile(native, "app.json", string(manifest)+"\n", 0o644); err != nil {
+	if err := writeNativeJSON(native, "package.json", manifest); err != nil {
+		return err
+	}
+	if err := writeNativeJSON(native, "app.json", nativeAppManifest(app.ProjectRoot)); err != nil {
 		return err
 	}
 	if err := writeNativeFile(native, "bifrost/origin.ts", nativeOrigin(origin), 0o644); err != nil {
@@ -445,6 +460,107 @@ func writeNativeProject(native string, app appRouter, origin string) error {
 		if err := writeNativeFile(native, filepath.Join("app", filepath.FromSlash(view)+".tsx"), source, 0o644); err != nil {
 			return err
 		}
+	}
+	return copyNativeOverlay(native, overlay, screens)
+}
+
+// App files are copied last, so an app owns its screens, its layout and the
+// client it talks to the server with, while the route table keeps owning which
+// routes exist.
+func copyNativeOverlay(native, overlay string, screens map[string]appRoute) error {
+	names, err := nativeOverlayFiles(overlay)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		if err := checkNativeOverlayRoute(name, screens); err != nil {
+			return err
+		}
+		if name == "package.json" {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(overlay, filepath.FromSlash(name)))
+		if err != nil {
+			return err
+		}
+		if err := writeNativeFile(native, name, string(content), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// The web tree and the native tree come from one route table, so an app may
+// restyle a screen but never add one the server does not serve.
+func checkNativeOverlayRoute(name string, screens map[string]appRoute) error {
+	rest, ok := strings.CutPrefix(name, "app/")
+	if !ok || rest == "_layout.tsx" {
+		return nil
+	}
+	if _, exists := screens[strings.TrimSuffix(rest, ".tsx")]; exists {
+		return nil
+	}
+	return fmt.Errorf("bifrost: %s is not a route of the App Router tree", name)
+}
+
+func nativeOverlayFiles(overlay string) ([]string, error) {
+	if !overlayExists(overlay) {
+		return nil, nil
+	}
+	var names []string
+	err := filepath.WalkDir(overlay, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("bifrost: native file symlink %q is not allowed", path)
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(overlay, path)
+		if err != nil {
+			return err
+		}
+		names = append(names, filepath.ToSlash(relative))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func overlayExists(overlay string) bool {
+	info, err := os.Stat(overlay)
+	return err == nil && info.IsDir()
+}
+
+// An app adds the modules its own screens need to the manifest the generator
+// owns; every other key stays generated.
+func mergeNativeOverlayManifest(overlay string, manifest map[string]any) error {
+	content, err := os.ReadFile(filepath.Join(overlay, "package.json"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var declared map[string]any
+	if err := json.Unmarshal(content, &declared); err != nil {
+		return fmt.Errorf("bifrost: native package.json: %w", err)
+	}
+	for _, key := range []string{"dependencies", "devDependencies"} {
+		added, ok := declared[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		base, _ := manifest[key].(map[string]any)
+		for name, version := range added {
+			base[name] = version
+		}
+		manifest[key] = base
 	}
 	return nil
 }
@@ -545,4 +661,12 @@ func writeNativeFile(native, name, content string, mode os.FileMode) error {
 		return err
 	}
 	return os.WriteFile(filePath, []byte(content), mode)
+}
+
+func writeNativeJSON(native, name string, value any) error {
+	content, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeNativeFile(native, name, string(content)+"\n", 0o644)
 }

@@ -272,6 +272,20 @@ declare module "virtual:bifrost/navigation" {
 
 Run `bash scripts/navigation-integration.sh` for production and development browser checks (requires Chromium).
 
+## Native target
+
+`bifrost native [dir]` writes an Expo Router project to `.bifrost/native`: one screen per route, each a stub that calls the same `renderPage` the web entry hydrates and reads its props from the data endpoint. Both routers come from one route table, so `/docs/{slug}` becomes `app/docs/[slug].tsx` and nothing is written twice. `--origin` sets the base URL the client talks to; by default it is the host alias of each platform, `10.0.2.2` on Android and `localhost` elsewhere.
+
+The generated project is a build artifact. Every run rewrites `app/` and `bifrost/`, so a screen the route table no longer has disappears, and nothing written there is worth keeping.
+
+An app keeps its own files in a directory next to `app/`: `native/` by default, `--from` to move it. They are copied over the generated project after everything else, so they win, and `bifrost native` never writes them. A session store, a login screen, the client the app talks to the server with: all of it goes there and survives every regeneration. When the directory exists, the command prints where it read them from.
+
+Its `package.json` contributes `dependencies` and `devDependencies`, which are merged into the generated manifest; every other key still comes from the generator, so the shell keeps owning the modules it needs.
+
+Its `app/` may restyle a screen the route table already has, but it may not add one. An overlay screen the server does not serve is an error, because a route the server does not know would take the two routers apart. Symlinks are refused as well, so the project can be rebuilt anywhere.
+
+Sessions need nothing extra from the client: an Expo app sends its cookie jar with every request, so a cookie a login route sets reaches the next data request. A route a session middleware protects answers with a redirect instead of props, and the screen moves the router to it rather than rendering the destination under the path that was asked for.
+
 ## Browser performance
 
 Bifrost emits render-blocking styles first, preloads every static client import, and gives module preloads low fetch priority so they do not compete with high-priority LCP images. Vite owns tree shaking and chunking; hashed build assets use one-year immutable caching.
