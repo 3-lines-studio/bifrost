@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -25,6 +26,8 @@ func main() {
 		err = runDev(os.Args[2:])
 	case "init":
 		err = runInit(os.Args[2:])
+	case "native":
+		err = runNative(os.Args[2:])
 	case "routes":
 		err = runRoutes(os.Args[2:])
 	case "version":
@@ -51,7 +54,7 @@ func reportError(err error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: bifrost <build|dev|init|routes|version> [options]")
+	fmt.Fprintln(os.Stderr, "usage: bifrost <build|dev|init|native|routes|version> [options]")
 }
 
 func runBuild(args []string) error {
@@ -75,7 +78,7 @@ func runBuild(args []string) error {
 	}
 	var app *appRouter
 	options := builder.Options{Package: packagePath, Dir: *dir, Output: *output, StaticWorkers: *staticWorkers, SourceMaps: *sourceMaps, ViteConfig: *viteConfig, OnDescribe: func(description protocol.DescribeResult) {
-		printRouteTable(description, app.routeRows())
+		printRouteTable(description, app.routeRows(), app.routeParams(), false)
 	}, Version: bifrost.Version}
 	projectRoot, routeRoot, isAppRouter, err := appRouterRoots(*dir, packagePath)
 	if err != nil {
@@ -98,19 +101,30 @@ func runBuild(args []string) error {
 }
 
 type routeRow struct {
-	kind    string
-	pattern string
-	source  string
+	Kind    string   `json:"kind"`
+	Pattern string   `json:"pattern"`
+	Source  string   `json:"source"`
+	Params  []string `json:"params,omitempty"`
 }
 
-func printRouteTable(description protocol.DescribeResult, extra []routeRow) {
+func routeTable(description protocol.DescribeResult, extra []routeRow, params map[string][]string) []routeRow {
 	rows := make([]routeRow, 0, len(description.Spec.Routes)+len(extra))
 	for _, route := range description.Spec.Routes {
-		rows = append(rows, routeRow{kind: route.Kind, pattern: route.Pattern, source: route.View})
+		rows = append(rows, routeRow{Kind: route.Kind, Pattern: route.Pattern, Source: route.View, Params: params[route.Pattern]})
 	}
-	rows = append(rows, extra...)
+	return append(rows, extra...)
+}
+
+func printRouteTable(description protocol.DescribeResult, extra []routeRow, params map[string][]string, asJSON bool) error {
+	rows := routeTable(description, extra, params)
+	if asJSON {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetEscapeHTML(false)
+		return encoder.Encode(rows)
+	}
 	_, _ = fmt.Fprintln(os.Stdout, "Bifrost routes:")
 	for _, row := range rows {
-		_, _ = fmt.Fprintf(os.Stdout, "  %-12s %-30s %s\n", row.kind, row.pattern, row.source)
+		_, _ = fmt.Fprintf(os.Stdout, "  %-12s %-30s %s\n", row.Kind, row.Pattern, row.Source)
 	}
+	return nil
 }

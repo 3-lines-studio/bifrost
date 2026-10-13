@@ -156,6 +156,7 @@ type appRouter struct {
 	Package     string
 	Output      string
 	Executable  string
+	Routes      []appRoute
 	RouteParams map[string][]string
 	Rows        []routeRow
 }
@@ -167,14 +168,21 @@ func (a *appRouter) routeRows() []routeRow {
 	return a.Rows
 }
 
+func (a *appRouter) routeParams() map[string][]string {
+	if a == nil {
+		return nil
+	}
+	return a.RouteParams
+}
+
 func goRouteRows(goDirs []goDir) []routeRow {
 	var rows []routeRow
 	for _, directory := range goDirs {
 		for _, method := range directory.HTTPMethods {
-			rows = append(rows, routeRow{kind: "api", pattern: strings.ToUpper(method) + " " + directory.Pattern, source: path.Join(directory.Directory, "route.go")})
+			rows = append(rows, routeRow{Kind: "api", Pattern: strings.ToUpper(method) + " " + directory.Pattern, Source: path.Join(directory.Directory, "route.go")})
 		}
 		if directory.Middleware {
-			rows = append(rows, routeRow{kind: "middleware", pattern: middlewareScope(directory.Pattern), source: path.Join(directory.Directory, "middleware.go")})
+			rows = append(rows, routeRow{Kind: "middleware", Pattern: middlewareScope(directory.Pattern), Source: path.Join(directory.Directory, "middleware.go")})
 		}
 	}
 	return rows
@@ -292,7 +300,7 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 	if err := command.Run(); err != nil {
 		return appRouter{}, fmt.Errorf("bifrost: prepare generated module: %w", err)
 	}
-	return appRouter{ProjectRoot: projectRoot, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(projectRoot, ".bifrost", "bifrost-app"), RouteParams: routeParams(routes), Rows: goRouteRows(goDirs)}, nil
+	return appRouter{ProjectRoot: projectRoot, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(projectRoot, ".bifrost", "bifrost-app"), Routes: routes, RouteParams: routeParams(routes), Rows: goRouteRows(goDirs)}, nil
 }
 
 func routeParams(routes []appRoute) map[string][]string {

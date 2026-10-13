@@ -12,6 +12,7 @@ func runRoutes(args []string) error {
 	flags := flag.NewFlagSet("routes", flag.ContinueOnError)
 	dir := flags.String("C", ".", "working directory")
 	viteConfig := flags.String("vite-config", "", "path to the Vite configuration file")
+	asJSON := flags.Bool("json", false, "print the route table as JSON")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -42,6 +43,11 @@ func runRoutes(args []string) error {
 	if err != nil {
 		return appRouterHint(projectRoot, err)
 	}
-	printRouteTable(description, app.routeRows())
-	return nil
+	var extra []routeRow
+	var params map[string][]string
+	if app != nil {
+		extra = app.routeRows()
+		params = app.RouteParams
+	}
+	return printRouteTable(description, extra, params, *asJSON)
 }

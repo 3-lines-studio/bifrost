@@ -34,7 +34,7 @@ go run github.com/3-lines-studio/bifrost/cmd/bifrost routes ./cmd/web
 go run github.com/3-lines-studio/bifrost/cmd/bifrost version
 ```
 
-Flags precede the package path. `init` runs `bun install` automatically (`--no-install` skips it). `build` accepts `--sourcemaps`, `--static-workers`, `--output`, `--vite-config`, and `--render-concurrency` and `--render-queue` (the App Router takes its renderer worker count and its queue depth here). `dev` accepts `--poll`, `--vite-port` (zero picks a free port), and `--vite-config`. `routes` prints the route table (views, API handlers, and middleware) without building the app (`-C` and `--vite-config`).
+Flags precede the package path. `init` runs `bun install` automatically (`--no-install` skips it). `build` accepts `--sourcemaps`, `--static-workers`, `--output`, `--vite-config`, and `--render-concurrency` and `--render-queue` (the App Router takes its renderer worker count and its queue depth here). `dev` accepts `--poll`, `--vite-port` (zero picks a free port), and `--vite-config`. `routes` prints the route table (views, API handlers, and middleware) without building the app (`-C`, `--vite-config`, and `--json` for the route table a code generator can read, including the parameter names of dynamic patterns).
 
 `dev` runs one validated bootstrap build, then owns a Bun process hosting Vite's development server and the SSR bridge. The bridge outlives Go child restarts, so a Go edit never discards frontend module state. Browser assets are proxied through your Go origin at `/_bifrost/dev/`, so HMR, module loads, and page requests share one origin and the Vite server never has to be reachable from the browser. Server and Static pages include stylesheet links from Vite's live SSR module graph, so development pages keep their styles instead of flashing unstyled content. Go replacement is detected by a long-poll to `/_bifrost/build-id` that holds until the process is replaced, so idle development generates almost no requests.
 
@@ -79,6 +79,19 @@ handler := sharedMiddleware(app.ResolveMarkdown(mux))
 ```
 
 `ResolveMarkdown` serves server-rendered routes as Markdown for a `.md` path suffix or a preferred `Accept: text/markdown` media type. It leaves static pages, client pages, public files, and other mux handlers unchanged. `Handler` applies it automatically, and so do generated App Router apps.
+
+A server route also answers `Accept: application/vnd.bifrost.data+json` with the props its loader produced, and nothing else:
+
+```json
+{"pattern":"/docs/{slug...}","props":{"slug":"intro"},"document":{"lang":"en"},"status":200}
+```
+
+A native client renders the same view itself, so it needs the loader's data and not a rendered document. The response never reaches the renderer, so it costs no render and no JavaScript runtime. It is `Cache-Control: no-store`, a loader error becomes JSON with its own status, and a loader `Redirect` keeps its `Location` with no body. Server routes carry `Vary: Accept`, because the same URL has two representations.
+
+```go
+request, _ := http.NewRequest(http.MethodGet, "/docs/intro", nil)
+request.Header.Set("Accept", "application/vnd.bifrost.data+json")
+```
 
 Use `/{$}` for an exact root page; the standard `/` pattern is a subtree fallback. Bifrost does not add router-specific adapters.
 
