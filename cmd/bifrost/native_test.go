@@ -71,7 +71,7 @@ func TestNativeProjectMirrorsTheRouteTable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range []string{"app/index.tsx", "app/about.tsx", "app/docs/[slug].tsx", "app/_layout.tsx", "bifrost/data.ts", "bifrost/host.tsx", "bifrost/jsx-runtime.ts", "bifrost/screen.tsx", "bifrost/origin.ts", "metro.config.js", "app.json"} {
+	for _, name := range []string{"app/index.tsx", "app/about.tsx", "app/docs/[slug].tsx", "app/_layout.tsx", "bifrost/data.ts", "bifrost/host.tsx", "bifrost/jsx-runtime.ts", "bifrost/metro.js", "bifrost/screen.tsx", "bifrost/origin.ts", "metro.config.js", "app.json"} {
 		if _, err := os.Stat(filepath.Join(native, filepath.FromSlash(name))); err != nil {
 			t.Fatalf("missing %s: %v", name, err)
 		}
@@ -414,7 +414,7 @@ func TestNativeRuntimeLeavesNamesItDoesNotKnowAlone(t *testing.T) {
 	if !strings.Contains(nativeHost, "return undefined;") {
 		t.Fatal("the tag map does not report a name it does not know")
 	}
-	if !strings.Contains(nativeMetroConfig, "originModulePath.startsWith") {
+	if !strings.Contains(nativeMetroHelper, "originModulePath.startsWith") {
 		t.Fatal("the runtime would resolve its own import and recurse")
 	}
 }
@@ -535,5 +535,104 @@ func TestNativeScreenAppliesTheDocumentAttributes(t *testing.T) {
 	// whose document carries neither is mounted exactly where it was.
 	if !strings.Contains(nativeScreen, "if (document.class === undefined && direction === undefined)") {
 		t.Fatal("the screen wraps every page whether or not the document says anything")
+	}
+}
+
+func TestNativeMetroConfigKeepsTheResolverThatWasAlreadyThere(t *testing.T) {
+	// Metro gives the last resolver only the default one, so a second resolver
+	// that reached for that would drop the first. An app that adds NativeWind, or
+	// anything else with a resolver of its own, replaces metro.config.js whole and
+	// wraps this helper, so the seams have to survive that.
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(projectRoot, ".bifrost", "native")
+	if err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
+		t.Fatal(err)
+	}
+
+	probe := `import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const { withBifrost } = require("./bifrost/metro.js");
+const reached = [];
+const earlier = (context, moduleName, platform) => {
+  reached.push(moduleName);
+  return { type: "sourceFile", filePath: "earlier:" + moduleName };
+};
+const config = withBifrost({
+  projectRoot: process.cwd(),
+  watchFolders: [],
+  resolver: { nodeModulesPaths: [], resolveRequest: earlier },
+});
+const context = { originModulePath: "/app/page.tsx", resolveRequest: () => { throw new Error("the default resolver was reached"); } };
+const ask = (name) => config.resolver.resolveRequest(context, name, "android").filePath;
+console.log(JSON.stringify({
+  navigation: ask("virtual:bifrost/navigation"),
+  runtime: ask("react/jsx-runtime"),
+  other: ask("some-package"),
+  reached,
+}));
+`
+	if err := os.WriteFile(filepath.Join(native, "probe.mjs"), []byte(probe), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	command := exec.CommandContext(ctx, node, "probe.mjs")
+	command.Dir = native
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("the generated metro helper failed: %v", err)
+	}
+	want := map[string]string{
+		"navigation": "bifrost/navigation.tsx",
+		"runtime":    "bifrost/jsx-runtime.ts",
+		"other":      "earlier:some-package",
+	}
+	var got struct {
+		Navigation string   `json:"navigation"`
+		Runtime    string   `json:"runtime"`
+		Other      string   `json:"other"`
+		Reached    []string `json:"reached"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(output))), &got); err != nil {
+		t.Fatalf("%v: %s", err, output)
+	}
+	for name, value := range map[string]string{"navigation": got.Navigation, "runtime": got.Runtime} {
+		if !strings.HasSuffix(value, want[name]) {
+			t.Fatalf("%s resolved to %q, want one ending in %q", name, value, want[name])
+		}
+	}
+	if got.Other != want["other"] {
+		t.Fatalf("an unowned module resolved to %q, want %q", got.Other, want["other"])
+	}
+	if len(got.Reached) != 1 || got.Reached[0] != "some-package" {
+		t.Fatalf("the resolver that was already there was reached for %v", got.Reached)
+	}
+}
+
+func TestNativeScreenDoesNotReuseTheLoadingViewAsTheDocumentWrapper(t *testing.T) {
+	// The loading view and the wrapper are both a View at the root of the screen,
+	// so React keeps the instance and the document class arrives after the first
+	// render. react-native-css reads that as the theme changing under the tree and
+	// remounts every child, which is a warning an app author would chase.
+	if !strings.Contains(nativeScreen, `<View key="loading" style={styles.center}>`) {
+		t.Fatal("the loading view has no key to keep it apart from the wrapper")
+	}
+	if !strings.Contains(nativeScreen, `<View key="failed" style={styles.center}>`) {
+		t.Fatal("the failed view has no key to keep it apart from the wrapper")
 	}
 }

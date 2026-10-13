@@ -280,6 +280,18 @@ The generated project is a build artifact. Every run rewrites `app/` and `bifros
 
 An app keeps its own files in a directory next to `app/`: `native/` by default, `--from` to move it. They are copied over the generated project after everything else, so they win, and `bifrost native` never writes them. A session store, a login screen, the client the app talks to the server with: all of it goes there and survives every regeneration. When the directory exists, the command prints where it read them from.
 
+A resolver belongs to that directory too. The two seams a native target needs, the navigation module and the jsx runtime, live in `bifrost/metro.js` as `withBifrost`, and the generated `metro.config.js` is the three lines that install them. An app that needs a resolver of its own replaces `metro.config.js` whole and wraps the helper, so nothing has to be written twice:
+
+```js
+const { getDefaultConfig } = require("expo/metro-config");
+const { withBifrost } = require("./bifrost/metro");
+const { withNativewind } = require("nativewind/metro");
+
+module.exports = withNativewind(withBifrost(getDefaultConfig(__dirname)), { input: "./global.css" });
+```
+
+Order does not matter. Metro hands the last resolver only the default one, so a resolver that reached for that would drop whoever was there before; `withBifrost` keeps the one the config already had and hands it everything it does not own.
+
 Its `package.json` contributes `dependencies`, `devDependencies` and `overrides`, which are merged into the generated manifest; every other key still comes from the generator, so the shell keeps owning the modules it needs. `overrides` is there because a dependency that an app adds is not necessarily the one that gets installed: a package the generator already pins with a range that a newer release also satisfies lets the manager hoist that release instead, and a pin is the only way to say which copy wins.
 
 Its `app/` may restyle a screen the route table already has, but it may not add one. An overlay screen the server does not serve is an error, because a route the server does not know would take the two routers apart. Symlinks are refused as well, so the project can be rebuilt anywhere.

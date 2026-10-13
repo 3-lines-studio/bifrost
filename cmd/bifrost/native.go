@@ -30,38 +30,58 @@ const nativeTSConfig = `{
 }
 `
 
-const nativeMetroConfig = `const path = require("node:path");
-const { getDefaultConfig } = require("expo/metro-config");
+const nativeMetroConfig = `const { getDefaultConfig } = require("expo/metro-config");
+const { withBifrost } = require("./bifrost/metro");
 
-const projectRoot = __dirname;
-const workspaceRoot = path.resolve(projectRoot, "../..");
+module.exports = withBifrost(getDefaultConfig(__dirname));
+`
 
-const config = getDefaultConfig(projectRoot);
-config.watchFolders = [workspaceRoot];
-config.resolver.nodeModulesPaths = [
-  path.join(projectRoot, "node_modules"),
-  path.join(workspaceRoot, "node_modules"),
-];
+// The two seams of a native target live here and not in metro.config.js, because
+// an app that needs a resolver of its own replaces that file whole. It imports
+// this and wraps it instead, and the seams survive.
+const nativeMetroHelper = `const path = require("node:path");
 
-const navigation = path.join(projectRoot, "bifrost", "navigation.tsx");
-const runtime = path.join(projectRoot, "bifrost", "jsx-runtime.ts");
+// Install the two seams of a native target on a Metro config that may already
+// have a resolver of its own, and keep that one: this runs first and hands over
+// everything it does not own. Metro gives the last resolver only the default, so
+// one that called that instead would drop whoever was there before.
+function withBifrost(config) {
+  const projectRoot = config.projectRoot;
+  const bifrost = path.join(projectRoot, "bifrost");
+  const workspaceRoot = path.resolve(projectRoot, "../..");
 
-config.resolver.resolveRequest = (context, moduleName, platform) => {
-  if (moduleName === "virtual:bifrost/navigation") {
-    return { type: "sourceFile", filePath: navigation };
-  }
-  // Every element the compiler builds goes through the runtime, which is where a
-  // tag written for the web becomes the component that paints it natively. The
-  // wrapper needs the real one, so its own import is left alone.
-  const runtimeImport =
-    moduleName === "react/jsx-runtime" || moduleName === "react/jsx-dev-runtime";
-  if (runtimeImport && !context.originModulePath.startsWith(path.join(projectRoot, "bifrost"))) {
-    return { type: "sourceFile", filePath: runtime };
-  }
-  return context.resolveRequest(context, moduleName, platform);
-};
+  config.watchFolders = [...(config.watchFolders ?? []), workspaceRoot];
+  config.resolver.nodeModulesPaths = [
+    ...(config.resolver.nodeModulesPaths ?? []),
+    path.join(projectRoot, "node_modules"),
+    path.join(workspaceRoot, "node_modules"),
+  ];
 
-module.exports = config;
+  const navigation = path.join(bifrost, "navigation.tsx");
+  const runtime = path.join(bifrost, "jsx-runtime.ts");
+  const inherited =
+    config.resolver.resolveRequest ??
+    ((context, moduleName, platform) => context.resolveRequest(context, moduleName, platform));
+
+  config.resolver.resolveRequest = (context, moduleName, platform) => {
+    if (moduleName === "virtual:bifrost/navigation") {
+      return { type: "sourceFile", filePath: navigation };
+    }
+    // Every element the compiler builds goes through the runtime, which is where
+    // a tag written for the web becomes the component that paints it natively.
+    // The wrapper needs the real one, so its own import is left alone.
+    const runtimeImport =
+      moduleName === "react/jsx-runtime" || moduleName === "react/jsx-dev-runtime";
+    if (runtimeImport && !context.originModulePath.startsWith(bifrost)) {
+      return { type: "sourceFile", filePath: runtime };
+    }
+    return inherited(context, moduleName, platform);
+  };
+
+  return config;
+}
+
+module.exports = { withBifrost };
 `
 
 const nativeLayout = `import { Stack } from "expo-router";
@@ -321,11 +341,15 @@ export function Screen({ render, params }: ScreenProps) {
     return () => { live = false; };
   }, [href, nonce, focused]);
 
+  // Each state carries a key, because two of them are a View at the root of this
+  // component: without it React keeps the instance and a class arrives after the
+  // first render, which reads as the theme changing under the tree and remounts
+  // everything below it.
   if (state.status === "loading") {
-    return <View style={styles.center}><ActivityIndicator /></View>;
+    return <View key="loading" style={styles.center}><ActivityIndicator /></View>;
   }
   if (state.status === "failed") {
-    return <View style={styles.center}><Text style={styles.error}>{state.message}</Text></View>;
+    return <View key="failed" style={styles.center}><Text style={styles.error}>{state.message}</Text></View>;
   }
 
   const data = state.data;
@@ -348,7 +372,7 @@ export function Screen({ render, params }: ScreenProps) {
   };
 
   if (fallback !== null && fallback.level < 0) {
-    return <View style={styles.center}><Text style={styles.error}>{fallback.message}</Text></View>;
+    return <View key="uncaught" style={styles.center}><Text style={styles.error}>{fallback.message}</Text></View>;
   }
 
   const props: Record<string, unknown> = fallback === null
@@ -571,6 +595,7 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/data.ts", nativeData},
 	{"bifrost/host.tsx", nativeHost},
 	{"bifrost/jsx-runtime.ts", nativeJSXRuntime},
+	{"bifrost/metro.js", nativeMetroHelper},
 	{"bifrost/refresh.ts", nativeRefresh},
 	{"bifrost/navigation.tsx", nativeNavigation},
 	{"bifrost/screen.tsx", nativeScreen},
