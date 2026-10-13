@@ -203,9 +203,7 @@ type serverPageHandler struct {
 }
 
 func (h *serverPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
-	if h.navigationView != "" {
-		w.Header().Add("Vary", "Accept")
-	}
+	w.Header().Add("Vary", "Accept")
 	props := any(nil)
 	if h.load != nil {
 		var started time.Time
@@ -256,6 +254,12 @@ func (h *serverPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 }
 
 func (h *serverPageHandler) renderProps(w http.ResponseWriter, request *http.Request, propsJSON json.RawMessage, document Document, status, errorFallbacks int) {
+	if dataRequested(request) {
+		if err := writeDataPage(w, h.pattern, propsJSON, document, status); err != nil && h.logger != nil {
+			h.logger.Error("bifrost data response failed", "pattern", h.pattern, "error", err)
+		}
+		return
+	}
 	var sink pageRenderSink
 	if markdownRequested(request.Context()) {
 		sink = &markdownRenderSink{writer: w, limits: h.limits}
@@ -351,6 +355,10 @@ func (h *developmentStaticHandler) ServeHTTP(w http.ResponseWriter, request *htt
 func (h *serverPageHandler) serveError(w http.ResponseWriter, request *http.Request, err error) {
 	if h.hooks.errorHandler != nil {
 		h.hooks.errorHandler(w, request, err)
+		return
+	}
+	if dataRequested(request) {
+		serveDataError(w, request, err)
 		return
 	}
 	serveDefaultError(w, request, err)

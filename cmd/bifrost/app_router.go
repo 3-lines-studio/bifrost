@@ -167,14 +167,21 @@ func (a *appRouter) routeRows() []routeRow {
 	return a.Rows
 }
 
+func (a *appRouter) routeParams() map[string][]string {
+	if a == nil {
+		return nil
+	}
+	return a.RouteParams
+}
+
 func goRouteRows(goDirs []goDir) []routeRow {
 	var rows []routeRow
 	for _, directory := range goDirs {
 		for _, method := range directory.HTTPMethods {
-			rows = append(rows, routeRow{kind: "api", pattern: strings.ToUpper(method) + " " + directory.Pattern, source: path.Join(directory.Directory, "route.go")})
+			rows = append(rows, routeRow{Kind: "api", Pattern: strings.ToUpper(method) + " " + directory.Pattern, Source: path.Join(directory.Directory, "route.go")})
 		}
 		if directory.Middleware {
-			rows = append(rows, routeRow{kind: "middleware", pattern: middlewareScope(directory.Pattern), source: path.Join(directory.Directory, "middleware.go")})
+			rows = append(rows, routeRow{Kind: "middleware", Pattern: middlewareScope(directory.Pattern), Source: path.Join(directory.Directory, "middleware.go")})
 		}
 	}
 	return rows

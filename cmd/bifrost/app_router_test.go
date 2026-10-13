@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -933,12 +934,12 @@ func TestGoRouteRows(t *testing.T) {
 		{Directory: "posts/api/slug_", Pattern: "/posts/api/{slug}", HTTPMethods: []string{"Get", "Post"}},
 	}
 	want := []routeRow{
-		{kind: "middleware", pattern: "/*", source: "middleware.go"},
-		{kind: "middleware", pattern: "/posts/*", source: "posts/middleware.go"},
-		{kind: "api", pattern: "GET /posts/api/{slug}", source: "posts/api/slug_/route.go"},
-		{kind: "api", pattern: "POST /posts/api/{slug}", source: "posts/api/slug_/route.go"},
+		{Kind: "middleware", Pattern: "/*", Source: "middleware.go"},
+		{Kind: "middleware", Pattern: "/posts/*", Source: "posts/middleware.go"},
+		{Kind: "api", Pattern: "GET /posts/api/{slug}", Source: "posts/api/slug_/route.go"},
+		{Kind: "api", Pattern: "POST /posts/api/{slug}", Source: "posts/api/slug_/route.go"},
 	}
-	if rows := goRouteRows(goDirs); !slices.Equal(rows, want) {
+	if rows := goRouteRows(goDirs); !reflect.DeepEqual(rows, want) {
 		t.Fatalf("goRouteRows() = %+v, want %+v", rows, want)
 	}
 	if rows := (*appRouter)(nil).routeRows(); rows != nil {
