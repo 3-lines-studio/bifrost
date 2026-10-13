@@ -44,10 +44,19 @@ config.resolver.nodeModulesPaths = [
 ];
 
 const navigation = path.join(projectRoot, "bifrost", "navigation.tsx");
+const runtime = path.join(projectRoot, "bifrost", "jsx-runtime.ts");
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName === "virtual:bifrost/navigation") {
     return { type: "sourceFile", filePath: navigation };
+  }
+  // Every element the compiler builds goes through the runtime, which is where a
+  // tag written for the web becomes the component that paints it natively. The
+  // wrapper needs the real one, so its own import is left alone.
+  const runtimeImport =
+    moduleName === "react/jsx-runtime" || moduleName === "react/jsx-dev-runtime";
+  if (runtimeImport && !context.originModulePath.startsWith(path.join(projectRoot, "bifrost"))) {
+    return { type: "sourceFile", filePath: runtime };
   }
   return context.resolveRequest(context, moduleName, platform);
 };
@@ -251,7 +260,7 @@ export function useRouter() {
 }
 `
 
-const nativeScreen = `import { router, useGlobalSearchParams, usePathname } from "expo-router";
+const nativeScreen = `import { router, useIsFocused, useLocalSearchParams, usePathname } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { loadPage, type PageData } from "./data";
@@ -269,7 +278,12 @@ export type ScreenProps = {
 
 export function Screen({ render, params }: ScreenProps) {
   const pathname = usePathname();
-  const search = useGlobalSearchParams() as Record<string, unknown>;
+  // A stack keeps the screens behind the current one mounted, so the global
+  // params belong to whichever route is on top. Reading them here would give
+  // this screen another route's url, and it would fetch and render the page
+  // that route points at, under a pathname that is no longer this one.
+  const search = useLocalSearchParams() as Record<string, unknown>;
+  const focused = useIsFocused();
   const [state, setState] = useState<State>({ status: "loading" });
   const [nonce, setNonce] = useState(0);
   const href = pathname + query(search, params);
@@ -277,6 +291,9 @@ export function Screen({ render, params }: ScreenProps) {
   useEffect(() => onRefresh(() => { setNonce((value) => value + 1); }), []);
 
   useEffect(() => {
+    if (!focused) {
+      return;
+    }
     let live = true;
     setState({ status: "loading" });
     loadPage(href).then(
@@ -293,7 +310,7 @@ export function Screen({ render, params }: ScreenProps) {
       (failure) => { if (live) setState({ status: "failed", message: String(failure) }); },
     );
     return () => { live = false; };
-  }, [href, nonce]);
+  }, [href, nonce, focused]);
 
   if (state.status === "loading") {
     return <View style={styles.center}><ActivityIndicator /></View>;
@@ -327,11 +344,164 @@ const styles = StyleSheet.create({
 });
 `
 
+// A page is written once, for the browser, and the tags in it are what the
+// screen paints. This table is the vocabulary a native target supports, so the
+// runtime and the tests read the same list.
+const nativeHost = `import { Children, isValidElement, type ReactNode } from "react";
+import { Image, Linking, Pressable, Text, TextInput, View } from "react-native";
+import { navigate } from "virtual:bifrost/navigation";
+
+// Blocks. They hold other blocks, which a View can.
+const BOXES = ["address", "article", "aside", "caption", "dd", "details", "dialog", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form", "header", "legend", "li", "main", "nav", "ol", "output", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul"];
+
+// Everything whose content is text.
+const TEXTS = ["abbr", "b", "br", "cite", "code", "em", "h1", "h2", "h3", "h4", "h5", "h6", "i", "label", "mark", "p", "pre", "q", "s", "small", "span", "strong", "time", "u"];
+
+// Sheet links, metadata and scripts have nothing to paint.
+const HIDDEN = ["base", "head", "link", "meta", "noscript", "script", "style", "title"];
+
+// Only a Text may hold a string, so a block that holds text has to become one.
+// A run of text and inline elements is wrapped together; everything else keeps
+// its own component, which is what a block child already is.
+function Box({ children, ...rest }: { children?: ReactNode } & Record<string, unknown>) {
+  const runs: ReactNode[] = [];
+  let text: ReactNode[] = [];
+  const close = () => {
+    if (text.length > 0) {
+      runs.push(<Text key={"text-" + runs.length}>{text}</Text>);
+      text = [];
+    }
+  };
+  for (const child of Children.toArray(children)) {
+    if (typeof child === "string" || typeof child === "number" || (isValidElement(child) && child.type === Text)) {
+      text.push(child);
+      continue;
+    }
+    close();
+    runs.push(child);
+  }
+  close();
+  return <View {...rest}>{runs}</View>;
+}
+
+function Anchor({ href, children, ...rest }: { href?: string; children?: unknown } & Record<string, unknown>) {
+  return (
+    <Pressable
+      accessibilityRole="link"
+      onPress={() => {
+        if (typeof href !== "string") {
+          return;
+        }
+        if (href.charAt(0) === "/") {
+          void navigate(href);
+          return;
+        }
+        void Linking.openURL(href);
+      }}
+      {...rest}
+    >
+      <Text>{children}</Text>
+    </Pressable>
+  );
+}
+
+function Button({ children, ...rest }: { children?: unknown } & Record<string, unknown>) {
+  return <Pressable accessibilityRole="button" {...rest}><Text>{children}</Text></Pressable>;
+}
+
+function Input({ value, defaultValue, ...rest }: Record<string, unknown>) {
+  return <TextInput defaultValue={defaultValue === undefined ? (value as string) : (defaultValue as string)} {...rest} />;
+}
+
+function ImageTag({ src, alt, ...rest }: { src?: string; alt?: string } & Record<string, unknown>) {
+  return <Image source={{ uri: typeof src === "string" ? src : undefined }} accessibilityLabel={alt} {...rest} />;
+}
+
+function Rule() {
+  return <View style={{ height: 1, backgroundColor: "#e9dfd2" }} />;
+}
+
+function Nothing() {
+  return null;
+}
+
+const NAMED: Record<string, unknown> = {
+  a: Anchor,
+  button: Button,
+  hr: Rule,
+  img: ImageTag,
+  input: Input,
+  textarea: TextInput,
+};
+for (const name of BOXES) {
+  NAMED[name] = Box;
+}
+for (const name of TEXTS) {
+  NAMED[name] = Text;
+}
+for (const name of HIDDEN) {
+  NAMED[name] = Nothing;
+}
+
+// React Native builds its own views out of strings too, so a name this table
+// does not know has to stay exactly as it is: replacing it would tear the
+// native views apart.
+export function hostComponent(name: string): unknown {
+  const component = NAMED[name];
+  if (component !== undefined) {
+    return component;
+  }
+  // A name that is all lowercase is a tag this table is missing, and it is
+  // about to fail deep inside the renderer. Say which one.
+  if (__DEV__ && name === name.toLowerCase()) {
+    console.warn("bifrost: no native counterpart for <" + name + ">");
+  }
+  return undefined;
+}
+`
+
+const nativeJSXRuntime = `import * as runtime from "react/jsx-runtime";
+
+// This module is evaluated before the app's own runtime is ready, because the
+// compiler needs it to build the first element. It must therefore pull nothing
+// in by itself: importing react-native here would land it ahead of the URL and
+// TextEncoder patches expo installs, and the app would die before it renders.
+type Host = { hostComponent(name: string): unknown };
+
+let host: Host | null = null;
+
+function component(name: string): unknown {
+  if (host === null) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    host = require("./host") as Host;
+  }
+  const mapped = host.hostComponent(name);
+  return mapped === undefined ? name : mapped;
+}
+
+// A tag a page wrote for the web becomes the component that paints it natively;
+// a name this table does not know is left alone, because react-native builds
+// its own views out of strings too.
+const wrap = (create: unknown) =>
+  (type: unknown, ...rest: unknown[]) =>
+    (create as (type: unknown, ...rest: unknown[]) => unknown)(
+      typeof type === "string" ? component(type) : type,
+      ...rest,
+    );
+
+export const jsx = wrap(runtime.jsx);
+export const jsxs = wrap(runtime.jsxs);
+export const jsxDEV = wrap(runtime.jsxDEV);
+export const Fragment = runtime.Fragment;
+`
+
 var nativeProjectFiles = []nativeFile{
 	{"tsconfig.json", nativeTSConfig},
 	{"metro.config.js", nativeMetroConfig},
 	{"app/_layout.tsx", nativeLayout},
 	{"bifrost/data.ts", nativeData},
+	{"bifrost/host.tsx", nativeHost},
+	{"bifrost/jsx-runtime.ts", nativeJSXRuntime},
 	{"bifrost/refresh.ts", nativeRefresh},
 	{"bifrost/navigation.tsx", nativeNavigation},
 	{"bifrost/screen.tsx", nativeScreen},

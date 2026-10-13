@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,7 +71,7 @@ func TestNativeProjectMirrorsTheRouteTable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range []string{"app/index.tsx", "app/about.tsx", "app/docs/[slug].tsx", "app/_layout.tsx", "bifrost/screen.tsx", "bifrost/origin.ts", "metro.config.js", "app.json"} {
+	for _, name := range []string{"app/index.tsx", "app/about.tsx", "app/docs/[slug].tsx", "app/_layout.tsx", "bifrost/data.ts", "bifrost/host.tsx", "bifrost/jsx-runtime.ts", "bifrost/screen.tsx", "bifrost/origin.ts", "metro.config.js", "app.json"} {
 		if _, err := os.Stat(filepath.Join(native, filepath.FromSlash(name))); err != nil {
 			t.Fatalf("missing %s: %v", name, err)
 		}
@@ -333,6 +334,135 @@ func TestNativeProjectRefusesAnOverlayRouteTheServerDoesNotServe(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not a route") {
 		t.Fatalf("err = %v", err)
 	}
+}
+
+func TestNativeTagMapCoversWhatAPageUses(t *testing.T) {
+	groups := map[string]map[string]bool{}
+	for _, name := range []string{"BOXES", "TEXTS", "HIDDEN"} {
+		tags, err := nativeTagGroup(nativeHost, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tags) == 0 {
+			t.Fatalf("%s is empty", name)
+		}
+		groups[name] = tags
+	}
+	for outer, tags := range groups {
+		for _, other := range []string{"BOXES", "TEXTS", "HIDDEN"} {
+			if other == outer {
+				continue
+			}
+			for tag := range tags {
+				if groups[other][tag] {
+					t.Fatalf("%q is in both %s and %s", tag, outer, other)
+				}
+			}
+		}
+	}
+
+	// The tags the demo pages and fonnso use in a page, and the ones the map
+	// answers with a component of its own. Measured by grep over both trees; a
+	// tag outside this list and outside the groups renders nothing here.
+	wanted := []string{
+		"a", "article", "button", "code", "div", "footer", "form", "h1", "h2",
+		"h3", "header", "img", "input", "label", "legend", "li", "link", "main",
+		"nav", "ol", "p", "pre", "section", "small", "span", "table", "tbody",
+		"td", "textarea", "tfoot", "th", "thead", "title", "tr", "ul",
+	}
+	for _, tag := range wanted {
+		if groups["BOXES"][tag] || groups["TEXTS"][tag] || groups["HIDDEN"][tag] {
+			continue
+		}
+		if nativeTagIsNamed(tag) || tag == "hr" {
+			continue
+		}
+		t.Errorf("no native counterpart for <%s>", tag)
+	}
+}
+
+func TestNativeTagMapDoesNotPretendToPaintAControl(t *testing.T) {
+	// A dropdown is behaviour, not a tag: it needs a picker, so the map would
+	// have to lie about it. It stays out of the vocabulary on purpose and says so
+	// in development, which is how the app learns it needs a native counterpart
+	// of its own. fonnso has one, in the primitives a screen is built from.
+	for _, name := range []string{"BOXES", "TEXTS", "HIDDEN"} {
+		tags, err := nativeTagGroup(nativeHost, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tag := range []string{"select", "option", "optgroup"} {
+			if tags[tag] {
+				t.Fatalf("<%s> is claimed as %s", tag, name)
+			}
+		}
+	}
+}
+
+func TestNativeRuntimeLeavesNamesItDoesNotKnowAlone(t *testing.T) {
+	// react-native builds its own views out of strings (`codegenNativeComponent`
+	// returns "RCTView"), so replacing an unknown name would tear them apart.
+	if !strings.Contains(nativeJSXRuntime, "mapped === undefined ? name : mapped") {
+		t.Fatal("the runtime does not fall back to the name it was given")
+	}
+	if !strings.Contains(nativeHost, "return undefined;") {
+		t.Fatal("the tag map does not report a name it does not know")
+	}
+	if !strings.Contains(nativeMetroConfig, "originModulePath.startsWith") {
+		t.Fatal("the runtime would resolve its own import and recurse")
+	}
+}
+
+func TestNativeScreensOnlyFetchWhileFocused(t *testing.T) {
+	// A stack keeps the screens behind the current one mounted, so a screen that
+	// reads global params would fetch the url of whichever route is on top and
+	// render that page under a pathname that is no longer its own.
+	if strings.Contains(nativeScreen, "useGlobalSearchParams") {
+		t.Fatal("the screen reads the global params")
+	}
+	if !strings.Contains(nativeScreen, "useLocalSearchParams") {
+		t.Fatal("the screen does not read its own params")
+	}
+	if !strings.Contains(nativeScreen, "if (!focused)") {
+		t.Fatal("the screen fetches while it is not focused")
+	}
+	if !strings.Contains(nativeScreen, "[href, nonce, focused]") {
+		t.Fatal("the screen does not refetch when it comes back into focus")
+	}
+}
+
+// nativeTagGroup reads one of the tag lists out of the generated runtime, so the
+// test checks the table the app is written against and not a copy of it.
+func nativeTagGroup(source, name string) (map[string]bool, error) {
+	opening := "const " + name + " = ["
+	start := strings.Index(source, opening)
+	if start < 0 {
+		return nil, fmt.Errorf("the runtime has no %s", name)
+	}
+	rest := source[start+len(opening):]
+	end := strings.Index(rest, "]")
+	if end < 0 {
+		return nil, fmt.Errorf("%s is not closed", name)
+	}
+	tags := map[string]bool{}
+	for _, quoted := range strings.Split(rest[:end], ",") {
+		tag := strings.TrimSpace(quoted)
+		if tag == "" {
+			continue
+		}
+		parsed, err := strconv.Unquote(tag)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		tags[parsed] = true
+	}
+	return tags, nil
+}
+
+// nativeTagIsNamed reports whether the map answers a tag with a component of its
+// own instead of a group.
+func nativeTagIsNamed(tag string) bool {
+	return strings.Contains(nativeHost, "\n  "+tag+": ")
 }
 
 func TestNativeNamesFromProjectDirectory(t *testing.T) {
