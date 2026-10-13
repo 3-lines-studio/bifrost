@@ -286,6 +286,14 @@ Its `app/` may restyle a screen the route table already has, but it may not add 
 
 Sessions need nothing extra from the client: an Expo app sends its cookie jar with every request, so a cookie a login route sets reaches the next data request. A route a session middleware protects answers with a redirect instead of props, and the screen moves the router to it rather than rendering the destination under the path that was asked for.
 
+### One page, two targets
+
+A page is written once, for the browser, and the tags in it are what the native screen paints. Metro resolves `react/jsx-runtime` to a wrapper that turns a lowercase tag into the component that draws it: `div` and the other blocks become a `View` that groups any text inside it into a `Text`, `p`, `h1`, `span` and the rest become `Text`, `a` becomes a `Pressable` that navigates a path and opens a url, `button`, `input`, `textarea` and `img` become their controls. Sheet links, metadata and scripts have nothing to paint, so they render nothing.
+
+The vocabulary is the set of tags a native target supports. A lowercase tag outside it is one the map is missing: it warns in development with its own name, and the element is left exactly as it was, so the failure is loud instead of a paragraph that quietly disappears. Anything that is not a lowercase tag is untouched too, because React Native builds its own views out of strings and replacing one would tear them apart.
+
+A tag that is behaviour and not presentation is left out on purpose. `select` needs a picker, so claiming it would be a lie: it stays unsupported, and the app gives it a native counterpart next to the screen. A form's `method` and `action` are the same kind of thing, and a `button type="submit"` does nothing on its own.
+
 ## Browser performance
 
 Bifrost emits render-blocking styles first, preloads every static client import, and gives module preloads low fetch priority so they do not compete with high-priority LCP images. Vite owns tree shaking and chunking; hashed build assets use one-year immutable caching.
