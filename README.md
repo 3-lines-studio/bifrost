@@ -280,11 +280,23 @@ The generated project is a build artifact. Every run rewrites `app/` and `bifros
 
 An app keeps its own files in a directory next to `app/`: `native/` by default, `--from` to move it. They are copied over the generated project after everything else, so they win, and `bifrost native` never writes them. A session store, a login screen, the client the app talks to the server with: all of it goes there and survives every regeneration. When the directory exists, the command prints where it read them from.
 
-Its `package.json` contributes `dependencies` and `devDependencies`, which are merged into the generated manifest; every other key still comes from the generator, so the shell keeps owning the modules it needs.
+Its `package.json` contributes `dependencies`, `devDependencies` and `overrides`, which are merged into the generated manifest; every other key still comes from the generator, so the shell keeps owning the modules it needs. `overrides` is there because a dependency that an app adds is not necessarily the one that gets installed: a package the generator already pins with a range that a newer release also satisfies lets the manager hoist that release instead, and a pin is the only way to say which copy wins.
 
 Its `app/` may restyle a screen the route table already has, but it may not add one. An overlay screen the server does not serve is an error, because a route the server does not know would take the two routers apart. Symlinks are refused as well, so the project can be rebuilt anywhere.
 
 Sessions need nothing extra from the client: an Expo app sends its cookie jar with every request, so a cookie a login route sets reaches the next data request. A route a session middleware protects answers with a redirect instead of props, and the screen moves the router to it rather than rendering the destination under the path that was asked for.
+
+A status is part of what a loader returns, so it travels with the props. When a loader answers `bifrost.NotFound()` or `bifrost.Status`, the props already carry `__bifrostNotFound` or `__bifrostError`, and the view the generator wrote picks the app's `not-found.tsx` or `error.tsx` out of them without the screen knowing anything about it.
+
+A page that throws while it renders is the other half. The server catches it and re-renders into the nearest `error.tsx`; a native client is the one rendering, so the screen puts a boundary around the view and walks the same ladder, deepest `error.tsx` first and one level up on every further throw. How deep the ladder goes is a number the server counts, so the data endpoint sends it as `errorFallbacks`, and the message is the one the page threw, because it was thrown here and not on a server that would have replaced it with a status text.
+
+The root document attributes travel with every page too, because they were the attributes of the root element: `class` becomes the class of a view around the page, which is how a loader hands the screen a theme for the whole tree, and `dir` becomes the direction. `lang` has no counterpart on a native target, because a text node there inherits no language to read from, so it is dropped rather than faked.
+
+```go
+func Load(r *http.Request) (any, error) {
+	return bifrost.PageData{Props: map[string]any{}, Document: bifrost.Document{Class: "dark"}}, nil
+}
+```
 
 ### One page, two targets
 

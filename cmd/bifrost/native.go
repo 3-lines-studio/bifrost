@@ -101,6 +101,9 @@ export type PageData = {
   props: Record<string, unknown>;
   document: { lang: string; class?: string; dir?: string };
   status: number;
+  // How many error.tsx views the route has above it. The view the generator
+  // wrote picks one by __bifrostErrorLevel, counting down from this.
+  errorFallbacks: number;
 };
 
 export type PageResult =
@@ -261,7 +264,7 @@ export function useRouter() {
 `
 
 const nativeScreen = `import { router, useIsFocused, useLocalSearchParams, usePathname } from "expo-router";
-import { useEffect, useState } from "react";
+import { Component, useEffect, useState, type ReactNode } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { loadPage, type PageData } from "./data";
 import { onRefresh } from "./refresh";
@@ -270,6 +273,10 @@ type State =
   | { status: "loading" }
   | { status: "ready"; data: PageData }
   | { status: "failed"; message: string };
+
+// The props to render with when the page did not survive its own render: the
+// error.tsx the generator put at this level, and what it should be told.
+type Fallback = { level: number; message: string };
 
 export type ScreenProps = {
   render: (props: Record<string, unknown>, pageKey?: string) => unknown;
@@ -285,6 +292,7 @@ export function Screen({ render, params }: ScreenProps) {
   const search = useLocalSearchParams() as Record<string, unknown>;
   const focused = useIsFocused();
   const [state, setState] = useState<State>({ status: "loading" });
+  const [fallback, setFallback] = useState<Fallback | null>(null);
   const [nonce, setNonce] = useState(0);
   const href = pathname + query(search, params);
 
@@ -296,6 +304,7 @@ export function Screen({ render, params }: ScreenProps) {
     }
     let live = true;
     setState({ status: "loading" });
+    setFallback(null);
     loadPage(href).then(
       (result) => {
         if (!live) {
@@ -318,8 +327,68 @@ export function Screen({ render, params }: ScreenProps) {
   if (state.status === "failed") {
     return <View style={styles.center}><Text style={styles.error}>{state.message}</Text></View>;
   }
-  const props = state.data.props;
-  return <>{render(props, typeof props.pathname === "string" ? props.pathname : pathname)}</>;
+
+  const data = state.data;
+  const document = data.document ?? ({} as PageData["document"]);
+
+  // A page that throws falls into its nearest error.tsx, and the generator
+  // already wrote that branch into the view. What the view is missing is which
+  // level to show, and the server that would walk that ladder is not the one
+  // rendering. So the boundary walks it here: the deepest error view first, one
+  // level up on every further throw, and the message when there is nowhere left
+  // to catch it. The message is the one the page threw, because it was thrown
+  // here and not on a server that would have replaced it with a status text.
+  const onError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    setFallback((current) =>
+      current === null
+        ? { level: (data.errorFallbacks ?? 0) - 1, message }
+        : { level: current.level - 1, message },
+    );
+  };
+
+  if (fallback !== null && fallback.level < 0) {
+    return <View style={styles.center}><Text style={styles.error}>{fallback.message}</Text></View>;
+  }
+
+  const props: Record<string, unknown> = fallback === null
+    ? data.props
+    : { ...data.props, __bifrostError: fallback.message, __bifrostErrorLevel: fallback.level };
+  const pageKey = typeof props.pathname === "string" ? props.pathname : pathname;
+  const content = (
+    <Boundary key={fallback === null ? "page" : "error-" + fallback.level} onError={onError}>
+      {render(props, pageKey)}
+    </Boundary>
+  );
+
+  // The document attributes travel with the page the way the root element of a
+  // document carries them. A class is the theme the whole tree reads, and the
+  // direction is the writing direction of the tree; a language has no native
+  // counterpart, because a text node here inherits no language to read from.
+  const direction = document.dir === "rtl" || document.dir === "ltr" ? document.dir : undefined;
+  if (document.class === undefined && direction === undefined) {
+    return content;
+  }
+  return <View className={document.class} style={direction === undefined ? undefined : { direction }}>{content}</View>;
+}
+
+// The boundary hands the failure up instead of painting it: what replaces the
+// page is a decision of the screen, which is the only one that knows how many
+// error views the route has and which one comes next.
+class Boundary extends Component<{ onError: (error: unknown) => void; children?: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    this.props.onError(error);
+  }
+
+  render() {
+    return <>{this.state.failed ? null : this.props.children}</>;
+  }
 }
 
 function query(search: Record<string, unknown>, params: string[]): string {
@@ -727,10 +796,21 @@ func mergeNativeOverlayManifest(overlay string, manifest map[string]any) error {
 			continue
 		}
 		base, _ := manifest[key].(map[string]any)
+		if base == nil {
+			base = map[string]any{}
+		}
 		for name, version := range added {
 			base[name] = version
 		}
 		manifest[key] = base
+	}
+	// A dependency that is added is not necessarily the one that gets installed:
+	// the generator's own packages ask for ranges that a newer release also
+	// satisfies, and the package manager is free to hoist that one instead. An
+	// `overrides` block is the only way an app can say which copy wins, so it is
+	// merged like the dependencies are.
+	if declared["overrides"] != nil {
+		manifest["overrides"] = declared["overrides"]
 	}
 	return nil
 }

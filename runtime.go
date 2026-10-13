@@ -255,7 +255,7 @@ func (h *serverPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 
 func (h *serverPageHandler) renderProps(w http.ResponseWriter, request *http.Request, propsJSON json.RawMessage, document Document, status, errorFallbacks int) {
 	if dataRequested(request) {
-		if err := writeDataPage(w, h.pattern, propsJSON, document, status); err != nil && h.logger != nil {
+		if err := writeDataPage(w, h.pattern, propsJSON, document, status, errorFallbacks); err != nil && h.logger != nil {
 			h.logger.Error("bifrost data response failed", "pattern", h.pattern, "error", err)
 		}
 		return

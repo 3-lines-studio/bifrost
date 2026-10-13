@@ -243,7 +243,7 @@ func TestNativeProjectKeepsTheAppFilesItWasGiven(t *testing.T) {
 		"bifrost/session.ts": "export const session = null;\n",
 		"bifrost/data.ts":    "export const replaced = true;\n",
 		"app/_layout.tsx":    "export default function Layout() { return null; }\n",
-		"package.json":       `{"dependencies":{"expo-secure-store":"~15.0.7"},"devDependencies":{"prettier":"^3.0.0"},"scripts":{"start":"expo start"}}`,
+		"package.json":       `{"dependencies":{"expo-secure-store":"~15.0.7"},"devDependencies":{"prettier":"^3.0.0"},"overrides":{"lightningcss":"1.30.1"},"scripts":{"start":"expo start"}}`,
 	}
 	for name, content := range files {
 		path := filepath.Join(overlay, filepath.FromSlash(name))
@@ -292,6 +292,7 @@ func TestNativeProjectKeepsTheAppFilesItWasGiven(t *testing.T) {
 		Main          string            `json:"main"`
 		Dependencies  map[string]string `json:"dependencies"`
 		DevDependency map[string]string `json:"devDependencies"`
+		Overrides     map[string]string `json:"overrides"`
 	}
 	if err := json.Unmarshal(content, &manifest); err != nil {
 		t.Fatalf("the merged manifest is not valid JSON: %v\n%s", err, content)
@@ -307,6 +308,11 @@ func TestNativeProjectKeepsTheAppFilesItWasGiven(t *testing.T) {
 	}
 	if manifest.DevDependency["prettier"] != "^3.0.0" {
 		t.Fatalf("the app dev dependency was not merged: %s", content)
+	}
+	// A version pin is the one thing a dependency entry cannot express, because
+	// the package manager may hoist another copy that the range also satisfies.
+	if manifest.Overrides["lightningcss"] != "1.30.1" {
+		t.Fatalf("the app version pin was not merged: %s", content)
 	}
 }
 
@@ -475,5 +481,59 @@ func TestNativeNamesFromProjectDirectory(t *testing.T) {
 		if got := [2]string{name, slug}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("nativeNames(%q) = %v, want %v", base, got, want)
 		}
+	}
+}
+
+func TestNativeScreenFallsIntoTheErrorViewsTheResponseCounts(t *testing.T) {
+	// The generator writes the branch into the view (props.__bifrostError and
+	// props.__bifrostErrorLevel), but the server is not the one rendering on a
+	// native target, so nothing fills them. Without a boundary around the view
+	// the throw reaches whoever mounts the route and the error.tsx of the app is
+	// never painted.
+	opened := strings.Index(nativeScreen, "<Boundary")
+	rendered := strings.Index(nativeScreen, "{render(props, pageKey)}")
+	closed := strings.Index(nativeScreen, "</Boundary>")
+	if opened < 0 || rendered < 0 || closed < 0 || !(opened < rendered && rendered < closed) {
+		t.Fatal("the screen renders the view outside a boundary")
+	}
+	if !strings.Contains(nativeScreen, "onError={onError}") {
+		t.Fatal("the boundary does not hand the failure to the screen")
+	}
+	if !strings.Contains(nativeScreen, "__bifrostError: fallback.message") ||
+		!strings.Contains(nativeScreen, "__bifrostErrorLevel: fallback.level") {
+		t.Fatal("the screen does not tell the view which error view it fell into")
+	}
+	// The deepest error view comes first, and every further throw climbs one
+	// level, which is the order the server walks them in.
+	if !strings.Contains(nativeScreen, "{ level: (data.errorFallbacks ?? 0) - 1, message }") {
+		t.Fatal("the screen does not start at the innermost error view")
+	}
+	if !strings.Contains(nativeScreen, "{ level: current.level - 1, message }") {
+		t.Fatal("the screen does not climb to the next error view")
+	}
+	// A remount is what makes the boundary try again instead of staying failed.
+	if !strings.Contains(nativeScreen, `key={fallback === null ? "page" : "error-" + fallback.level}`) {
+		t.Fatal("the boundary is not remounted when the level changes")
+	}
+}
+
+func TestNativeScreenAppliesTheDocumentAttributes(t *testing.T) {
+	// lang, class and dir travel with every page because they were the
+	// attributes of the root element of the document. A class is the theme the
+	// tree reads and a direction is how the tree is laid out; a language has no
+	// counterpart here, because a text node inherits none to read from.
+	if !strings.Contains(nativeScreen, "className={document.class}") {
+		t.Fatal("the screen drops the document class")
+	}
+	if !strings.Contains(nativeScreen, "{ direction }") {
+		t.Fatal("the screen drops the document direction")
+	}
+	if !strings.Contains(nativeScreen, `document.dir === "rtl" || document.dir === "ltr"`) {
+		t.Fatal("the screen forwards a direction react-native cannot take")
+	}
+	// The wrapper is only there when there is something to put on it, so a page
+	// whose document carries neither is mounted exactly where it was.
+	if !strings.Contains(nativeScreen, "if (document.class === undefined && direction === undefined)") {
+		t.Fatal("the screen wraps every page whether or not the document says anything")
 	}
 }
