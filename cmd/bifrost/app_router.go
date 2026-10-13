@@ -156,6 +156,7 @@ type appRouter struct {
 	Package     string
 	Output      string
 	Executable  string
+	Routes      []appRoute
 	RouteParams map[string][]string
 	Rows        []routeRow
 }
@@ -299,7 +300,7 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 	if err := command.Run(); err != nil {
 		return appRouter{}, fmt.Errorf("bifrost: prepare generated module: %w", err)
 	}
-	return appRouter{ProjectRoot: projectRoot, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(projectRoot, ".bifrost", "bifrost-app"), RouteParams: routeParams(routes), Rows: goRouteRows(goDirs)}, nil
+	return appRouter{ProjectRoot: projectRoot, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(projectRoot, ".bifrost", "bifrost-app"), Routes: routes, RouteParams: routeParams(routes), Rows: goRouteRows(goDirs)}, nil
 }
 
 func routeParams(routes []appRoute) map[string][]string {
