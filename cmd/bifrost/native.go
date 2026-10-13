@@ -113,8 +113,20 @@ export type PageData = {
   status: number;
 };
 
-export async function loadPage(pathname: string): Promise<PageData> {
+export type PageResult =
+  | { kind: "page"; data: PageData }
+  | { kind: "redirect"; href: string };
+
+export async function loadPage(pathname: string): Promise<PageResult> {
+  // A server answers a redirect before the route runs: a session middleware
+  // pushing an anonymous client to the login page. The runtime follows it and
+  // only reports where it landed, so a moved url is the redirect, and rendering
+  // the destination under the path that was asked for would be a silent lie.
   const response = await fetch(ORIGIN + pathname, { headers: { Accept: DATA_MEDIA_TYPE } });
+  const target = redirectTarget(response, pathname);
+  if (target !== undefined) {
+    return { kind: "redirect", href: target };
+  }
   const type = response.headers.get("content-type") || "";
   if (type.indexOf(DATA_MEDIA_TYPE) < 0) {
     throw new Error("bifrost: " + pathname + " answered " + response.status + " with " + (type || "no content type"));
@@ -126,7 +138,35 @@ export async function loadPage(pathname: string): Promise<PageData> {
   if (!body || typeof body.props !== "object" || body.props === null) {
     throw new Error("bifrost: " + pathname + " answered without props");
   }
-  return body as PageData;
+  return { kind: "page", data: body as PageData };
+}
+
+function redirectTarget(response: Response, pathname: string): string | undefined {
+  // The url is compared by path, so a runtime that normalizes it cannot be
+  // mistaken for a redirect and send the router in a circle.
+  if (response.url) {
+    const landed = appHref(response.url);
+    if (landed !== pathname) {
+      return landed;
+    }
+  }
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get("location");
+    if (location) {
+      return appHref(location);
+    }
+  }
+  return undefined;
+}
+
+function appHref(location: string): string {
+  if (location.charAt(0) === "/") {
+    return location;
+  }
+  if (location.indexOf(ORIGIN) === 0) {
+    return location.slice(ORIGIN.length) || "/";
+  }
+  throw new Error("bifrost: the server answered a url outside the app: " + location);
 }
 `
 
@@ -230,7 +270,7 @@ export function useRouter() {
 }
 `
 
-const nativeScreen = `import { useGlobalSearchParams, usePathname } from "expo-router";
+const nativeScreen = `import { router, useGlobalSearchParams, usePathname } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { loadPage, type PageData } from "./data";
@@ -259,7 +299,16 @@ export function Screen({ render, params }: ScreenProps) {
     let live = true;
     setState({ status: "loading" });
     loadPage(href).then(
-      (data) => { if (live) setState({ status: "ready", data }); },
+      (result) => {
+        if (!live) {
+          return;
+        }
+        if (result.kind === "redirect") {
+          router.replace(result.href as never);
+          return;
+        }
+        setState({ status: "ready", data: result.data });
+      },
       (failure) => { if (live) setState({ status: "failed", message: String(failure) }); },
     );
     return () => { live = false; };
