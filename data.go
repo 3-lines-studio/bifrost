@@ -18,6 +18,11 @@ type dataPage struct {
 	Props    json.RawMessage             `json:"props"`
 	Document protocol.DocumentAttributes `json:"document"`
 	Status   int                         `json:"status"`
+	// A page that throws while it renders falls into the nearest error.tsx, and
+	// the view the generator wrote picks which one out of `__bifrostErrorLevel`.
+	// The server walks that ladder itself; a client that renders the same view
+	// has to walk it too, so it has to know how deep it goes.
+	ErrorFallbacks int `json:"errorFallbacks"`
 }
 
 type dataError struct {
@@ -29,15 +34,16 @@ func dataRequested(request *http.Request) bool {
 	return request.Method == http.MethodGet && request.Header.Get("Accept") == dataMediaType
 }
 
-func writeDataPage(w http.ResponseWriter, pattern string, props json.RawMessage, document Document, status int) error {
+func writeDataPage(w http.ResponseWriter, pattern string, props json.RawMessage, document Document, status, errorFallbacks int) error {
 	w.Header().Set("Content-Type", dataMediaType)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	return json.NewEncoder(w).Encode(dataPage{
-		Pattern:  pattern,
-		Props:    props,
-		Document: protocolDocument(document),
-		Status:   status,
+		Pattern:        pattern,
+		Props:          props,
+		Document:       protocolDocument(document),
+		Status:         status,
+		ErrorFallbacks: errorFallbacks,
 	})
 }
 

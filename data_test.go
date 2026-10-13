@@ -153,3 +153,30 @@ func TestDataKeepsRedirects(t *testing.T) {
 		t.Fatalf("redirect wrote a body: %s", response.Body)
 	}
 }
+
+func TestDataTellsTheClientHowDeepTheErrorViewsGo(t *testing.T) {
+	// A page can throw while it renders, and a client that renders the view
+	// itself is the one that has to fall into error.tsx. Which one it lands in
+	// is a number the server counts, so the answer has to travel with the props.
+	render := &fakeRenderer{render: func(_ context.Context, _ renderRequest, _ renderSink) error {
+		return errors.New("the renderer must not run for a data request")
+	}}
+	_, state := runtimeFixture(t, render)
+	handler := state.handlers["/server"].(*serverPageHandler)
+	handler.load = func(*http.Request) (any, error) {
+		return PageData{Props: map[string]any{}, ErrorFallbacks: 2}, nil
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/server", nil)
+	request.Header.Set("Accept", dataMediaType)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	var page dataPage
+	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if page.ErrorFallbacks != 2 {
+		t.Fatalf("errorFallbacks = %d, want 2", page.ErrorFallbacks)
+	}
+}
