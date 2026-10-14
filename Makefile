@@ -1,6 +1,6 @@
-.PHONY: check test race vet gate demo native-html bench fuzz throughput integration dev-integration reproducible
+.PHONY: check test race vet gate demo native-html native-row bench fuzz throughput integration dev-integration reproducible
 
-check: test race vet gate native-html demo
+check: test race vet gate native-html native-row demo
 
 test:
 	@test -z "$$(gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'))" || (gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'); exit 1)
@@ -24,6 +24,11 @@ gate:
 native-html:
 	bun ./scripts/native-html.mjs
 
+# The pass that gives a flex container the direction a browser gives it is
+# generated as a string of Go, so nothing else executes it.
+native-row:
+	bun ./scripts/native-row.mjs
+
 bench:
 	go test -run '^$$' -bench . -benchmem ./...
 
@@ -45,6 +50,7 @@ integration:
 	bash ./scripts/navigation-integration.sh
 	bash ./scripts/structured-integration.sh
 	bun ./scripts/native-html.mjs
+	bun ./scripts/native-row.mjs
 
 dev-integration:
 	bash ./scripts/dev-integration.sh

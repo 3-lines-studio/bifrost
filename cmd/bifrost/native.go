@@ -169,6 +169,11 @@ function withBifrost(config) {
     // The wrapper needs the real one, so its own import is left alone, and so is
     // every import inside the generated project.
     const insideBifrost = context.originModulePath.startsWith(bifrost);
+    // The one collection of styles reads this module, and a flex container has
+    // to mean a row before a rule is merged with another.
+    if (moduleName === "react-native-css/native-internal" && !insideBifrost) {
+      return { type: "sourceFile", filePath: path.join(bifrost, "native-internal.js") };
+    }
     // Every element the compiler builds goes through the runtime, which is where
     // a tag written for the web becomes the component that paints it natively.
     const runtimeImport =
@@ -219,6 +224,85 @@ function withBifrostWarnings(config) {
 }
 
 module.exports = { withBifrost, withBifrostWarnings, pathAliases };
+`
+
+// A browser lays a flex container out along the row; a native view lays its
+// children down the page, so a `display: flex` on its own means a column here.
+// Tailwind's `.flex` and `.inline-flex` are that display and nothing else, and
+// with them every row an app writes comes out a column -- measured on device:
+// two boxes of `h-4 w-8` under `flex` stacked one above the other, and the same
+// two under `flex-row` went side by side. The direction goes into the rule that
+// asked for the flex, and not into a rule of its own, because the runtime
+// settles two rules by their place in the stylesheet: a rule of its own would
+// land after the `.flex-col` Tailwind emits and win. Inside the rule the later
+// `.flex-col` still wins, which is what the browser does, and a rule that
+// already names a direction is left alone.
+const nativeRowDirection = `// The display of a flex container is a row in the browser, and a native view is
+// a column until it is told otherwise. This writes the direction the browser
+// would have used into the rule that asked for the flex, and leaves a rule that
+// already names one untouched -- so running this twice is running it once.
+
+const FLEX = /^(inline-)?flex$/i;
+
+// A declaration whose value is a variable is written as an array, and one the
+// compiler resolved is an object. Only the second can be read here, and a
+// direction that arrives through a variable is left to the variable.
+function names(declarations, property) {
+  let found = false;
+  for (const group of declarations) {
+    if (Array.isArray(group) || !group) {
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(group, property)) {
+      found = true;
+    }
+  }
+  return found;
+}
+
+function withRowDirection(stylesheet) {
+  for (const entry of (stylesheet && stylesheet.s) || []) {
+    for (const rule of entry[1] || []) {
+      const declarations = rule && rule.d;
+      if (!Array.isArray(declarations) || names(declarations, "flexDirection")) {
+        continue;
+      }
+      for (const group of declarations) {
+        if (Array.isArray(group) || !group) {
+          continue;
+        }
+        if (typeof group.display === "string" && FLEX.test(group.display.trim())) {
+          group.flexDirection = "row";
+          break;
+        }
+      }
+    }
+  }
+  return stylesheet;
+}
+
+module.exports = { withRowDirection };
+`
+
+// A flex container means a row to a browser and a column to a native view, and
+// the collection of styles is the last place where a rule still says what it
+// asked for, before another rule for the same element is merged into it. The
+// module is patched where it is read and never copied: the app's generated
+// stylesheets and the library's own modules hold this same collection.
+const nativeNativeInternal = `// The runtime keeps one collection of styles for the whole app, and everything
+// that reads it reads this one. Every stylesheet the compiler produces is handed
+// in here, which is the only place that sees a rule before it is merged with the
+// rules of the same element.
+const upstream = require("react-native-css/native-internal");
+const { withRowDirection } = require("./row-direction");
+
+const collection = upstream.StyleCollection;
+if (collection && typeof collection.inject === "function") {
+  const inject = collection.inject.bind(collection);
+  collection.inject = (stylesheet) => inject(withRowDirection(stylesheet));
+}
+
+module.exports = upstream;
 `
 
 // Runs in the transformer, in place of whatever react-native-css installed, and
@@ -1761,6 +1845,8 @@ var nativeProjectFiles = []nativeFile{
 	{"tsconfig.json", nativeTSConfig},
 	{"metro.config.js", nativeMetroConfig},
 	{"bifrost/css-warnings.js", nativeCSSWarnings},
+	{"bifrost/native-internal.js", nativeNativeInternal},
+	{"bifrost/row-direction.js", nativeRowDirection},
 	{"bifrost/data.ts", nativeData},
 	{"bifrost/dom.js", nativeDOM},
 	{"bifrost/form.tsx", nativeForm},
