@@ -311,9 +311,19 @@ The other quiet failure is a prop whose whole meaning is the document. A rendere
 bifrost: a native target drops dangerouslySetInnerHTML on <div>
 ```
 
+Three things a client of a web app needs are installed here, because none of them is the app's business.
+
+TypeScript paths are read from the app's `tsconfig.json`, so an import spelled `@/components/x` resolves the moment the web one does and an app never has to write its imports twice. Metro has never read them, because the web bundler gets them from a config of its own; the tsconfig is the one place they are written down. A pattern with no wildcard names a single module and is left to the resolver that would have found it anyway. A comment and a trailing comma are read too, because an editor leaves both behind and a JSON parser refuses them.
+
+`React.createElement` reaches the tag map as well. A library built before the automatic runtime builds its elements by hand and the jsx runtime alias never sees them, so a tag written for the web would paint a tag for the web; measured, this is what `@base-ui` does. The module object is patched in place rather than copied, because a copy holds the own enumerable keys only and a library that imports React as a namespace would get `undefined` for everything else.
+
+A relative request gets the origin in front of it. A page asks its server for `/api/...` and the browser puts the origin back; a native client has none, so the request goes looking for a host that is not the one the app talks to. The shim is the browser's rule and nothing else, and it runs before the first screen does, because the generated layout imports it.
+
 Its `package.json` contributes `dependencies`, `devDependencies` and `overrides`, which are merged into the generated manifest; every other key still comes from the generator, so the shell keeps owning the modules it needs. `overrides` is there because a dependency that an app adds is not necessarily the one that gets installed: a package the generator already pins with a range that a newer release also satisfies lets the manager hoist that release instead, and a pin is the only way to say which copy wins.
 
 Its `app/` may restyle a screen the route table already has, but it may not add one. An overlay screen the server does not serve is an error, because a route the server does not know would take the two routers apart. Symlinks are refused as well, so the project can be rebuilt anywhere.
+
+The layout is the one file an app is most tempted to replace, to add a line to the shell the generator writes. Two files it can ship instead are imported for it. One is `global.css` at the root of the overlay, which is where the utilities come from and which is not the one the web app has, because Tailwind needs different `@source` paths and none of the font packages. The other is a module of its own, `bifrost/setup.ts`, for whatever a native target has to install before the first screen renders. Both are imported before the network shim, so the app can install what the shim wraps.
 
 Sessions need nothing extra from the client: an Expo app sends its cookie jar with every request, so a cookie a login route sets reaches the next data request. A route a session middleware protects answers with a redirect instead of props, and the screen moves the router to it rather than rendering the destination under the path that was asked for.
 

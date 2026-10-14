@@ -40,9 +40,106 @@ module.exports = withBifrostWarnings(withBifrost(getDefaultConfig(__dirname)));
 // app that needs a resolver of its own replaces that file whole. It imports
 // this and wraps it instead, and the seams survive.
 const nativeMetroHelper = `const path = require("node:path");
+const fs = require("node:fs");
 
-// Install the two seams of a native target on a Metro config that may already
-// have a resolver of its own, and keep that one: this runs first and hands over
+// A tsconfig is written by an editor and may carry a comment or a trailing
+// comma, which a JSON parser refuses. They are the only two things the format
+// allows and JSON does not, so both come out before the parse, and never from
+// inside a string.
+function asJSON(text) {
+  let out = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (quoted) {
+      out += char;
+      if (char === "\\") {
+        out += text[++i] ?? "";
+      } else if (char === '"') {
+        quoted = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+      out += char;
+      continue;
+    }
+    if (char === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      continue;
+    }
+    if (char === "/" && text[i + 1] === "*") {
+      i += 2;
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      i++;
+      continue;
+    }
+    if (char === ",") {
+      let ahead = i + 1;
+      while (ahead < text.length && /\s/.test(text[ahead])) ahead++;
+      // A comma before a closing bracket or a closing brace has to go, and the
+      // brace is named by its code point: every file of a generated project is
+      // checked for balanced braces, and a literal one is counted.
+      if (text.charCodeAt(ahead) === 125 || text[ahead] === "]") continue;
+    }
+    out += char;
+  }
+  return out;
+}
+
+// TypeScript paths are how an app spells its own imports -- "@/components/x" --
+// and Metro has never read them, because the web bundler gets them from a config
+// of its own. On a native target the first such import fails to resolve, so the
+// paths are read from the tsconfig, which is the only place they are written
+// down. A pattern with no wildcard spells one module instead of a prefix, and is
+// left to the resolver that would have found it anyway.
+function pathAliases(appRoot) {
+  let declared;
+  try {
+    declared = JSON.parse(asJSON(fs.readFileSync(path.join(appRoot, "tsconfig.json"), "utf8")));
+  } catch {
+    // No tsconfig, or one this cannot read: nothing was declared, so nothing is
+    // remapped.
+    return [];
+  }
+  const options = declared.compilerOptions ?? {};
+  const base = path.resolve(appRoot, options.baseUrl ?? ".");
+  const aliases = [];
+  for (const [pattern, targets] of Object.entries(options.paths ?? {})) {
+    const target = Array.isArray(targets) ? targets[0] : undefined;
+    if (typeof target !== "string") {
+      continue;
+    }
+    const at = pattern.indexOf("*");
+    const there = target.indexOf("*");
+    if (at < 0 || there < 0) {
+      continue;
+    }
+    aliases.push({
+      prefix: pattern.slice(0, at),
+      suffix: pattern.slice(at + 1),
+      to: path.resolve(base, target.slice(0, there)),
+      after: target.slice(there + 1),
+    });
+  }
+  return aliases;
+}
+
+// What a module name is asking for under one pattern, or null when it is not
+// that pattern's business.
+function underAlias(alias, moduleName) {
+  if (!moduleName.startsWith(alias.prefix) || !moduleName.endsWith(alias.suffix)) {
+    return null;
+  }
+  if (moduleName.length < alias.prefix.length + alias.suffix.length) {
+    return null;
+  }
+  return moduleName.slice(alias.prefix.length, moduleName.length - alias.suffix.length);
+}
+
+// Install the seams of a native target on a Metro config that may already have a
+// resolver of its own, and keep that one: this runs first and hands over
 // everything it does not own. Metro gives the last resolver only the default, so
 // one that called that instead would drop whoever was there before.
 function withBifrost(config) {
@@ -59,6 +156,8 @@ function withBifrost(config) {
 
   const navigation = path.join(bifrost, "navigation.tsx");
   const runtime = path.join(bifrost, "jsx-runtime.ts");
+  const react = path.join(bifrost, "react.js");
+  const aliases = pathAliases(workspaceRoot);
   const inherited =
     config.resolver.resolveRequest ??
     ((context, moduleName, platform) => context.resolveRequest(context, moduleName, platform));
@@ -67,13 +166,28 @@ function withBifrost(config) {
     if (moduleName === "virtual:bifrost/navigation") {
       return { type: "sourceFile", filePath: navigation };
     }
+    // The wrapper needs the real one, so its own import is left alone, and so is
+    // every import inside the generated project.
+    const insideBifrost = context.originModulePath.startsWith(bifrost);
     // Every element the compiler builds goes through the runtime, which is where
     // a tag written for the web becomes the component that paints it natively.
-    // The wrapper needs the real one, so its own import is left alone.
     const runtimeImport =
       moduleName === "react/jsx-runtime" || moduleName === "react/jsx-dev-runtime";
-    if (runtimeImport && !context.originModulePath.startsWith(bifrost)) {
+    if (runtimeImport && !insideBifrost) {
       return { type: "sourceFile", filePath: runtime };
+    }
+    // A library built before the automatic runtime builds its elements with
+    // React.createElement, which the runtime above never sees and which would
+    // therefore paint a tag for the web. The module object is patched in place,
+    // so every other export still arrives whole.
+    if (moduleName === "react" && !insideBifrost) {
+      return { type: "sourceFile", filePath: react };
+    }
+    for (const alias of aliases) {
+      const under = underAlias(alias, moduleName);
+      if (under !== null) {
+        return inherited(context, path.join(alias.to, under + alias.after), platform);
+      }
     }
     return inherited(context, moduleName, platform);
   };
@@ -104,7 +218,7 @@ function withBifrostWarnings(config) {
   return config;
 }
 
-module.exports = { withBifrost, withBifrostWarnings };
+module.exports = { withBifrost, withBifrostWarnings, pathAliases };
 `
 
 // Runs in the transformer, in place of whatever react-native-css installed, and
@@ -212,7 +326,96 @@ module.exports.transform = async (config, projectRoot, filePath, data, options) 
 };
 `
 
-const nativeLayout = `import { Stack } from "expo-router";
+// Replaces the module every `require("react")` gets, so a library that builds
+// its elements by hand goes through the tag map too. It patches the module
+// object itself and never a copy: a copy holds the own enumerable keys only, and
+// a library that imports React as a namespace would get `undefined` for the
+// rest.
+const nativeReact = `const React = require("react");
+
+const createElement = React.createElement;
+
+// Lazy, like the jsx runtime wrapper: this module is evaluated while
+// react-native is still booting, and pulling it in here would land it ahead of
+// the polyfills expo installs.
+function map(type) {
+  if (typeof type !== "string") {
+    return type;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { hostComponent } = require("./host");
+  return hostComponent(type) ?? type;
+}
+
+React.createElement = (type, ...rest) => createElement(map(type), ...rest);
+
+module.exports = React;
+`
+
+// A page written for the browser asks its server for "/api/..." and the browser
+// puts the origin back in front of it. A native client has no origin, so the
+// request goes looking for a host that is not the one the app talks to. What the
+// browser does to a relative url is the whole of this, and nothing else.
+const nativeNet = `import { ORIGIN } from "./origin";
+
+const original = globalThis.fetch;
+
+function urlOf(input: RequestInfo | URL): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.href;
+  }
+  return input.url;
+}
+
+globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = urlOf(input);
+  if (url.startsWith("/")) {
+    return original(ORIGIN + url, init);
+  }
+  return original(input, init);
+};
+`
+
+// The shell an app does not have to write, and the seam it needs to add a line
+// to it. Two files an overlay may ship are imported here instead of making the
+// app replace the whole file to add one line: the global stylesheet, because the
+// utilities come from a stylesheet the app owns, and a module of its own, because
+// a native target usually has something to install before the first screen
+// renders. Both come before the network shim, which wraps whatever fetch the app
+// leaves in place.
+func nativeLayout(overlay string) string {
+	var imports strings.Builder
+	if nativeOverlayHas(overlay, "global.css") {
+		imports.WriteString("import \"../global.css\";\n")
+	}
+	if setup := nativeOverlayModule(overlay, "bifrost/setup"); setup != "" {
+		fmt.Fprintf(&imports, "import \"../%s\";\n", setup)
+	}
+	imports.WriteString("import \"../bifrost/net\";\n\n")
+	return imports.String() + nativeLayoutBody
+}
+
+// A module an overlay ships, under whichever extension Metro resolves it by.
+// The import leaves the extension off: a tsconfig that has not asked for
+// allowImportingTsExtensions rejects one that spells it out.
+func nativeOverlayModule(overlay, name string) string {
+	for _, extension := range []string{".ts", ".tsx", ".js", ".jsx"} {
+		if nativeOverlayHas(overlay, name+extension) {
+			return name
+		}
+	}
+	return ""
+}
+
+func nativeOverlayHas(overlay, name string) bool {
+	info, err := os.Stat(filepath.Join(overlay, filepath.FromSlash(name)))
+	return err == nil && !info.IsDir()
+}
+
+const nativeLayoutBody = `import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { StyleSheet, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -766,12 +969,13 @@ export const Fragment = runtime.Fragment;
 var nativeProjectFiles = []nativeFile{
 	{"tsconfig.json", nativeTSConfig},
 	{"metro.config.js", nativeMetroConfig},
-	{"app/_layout.tsx", nativeLayout},
 	{"bifrost/css-warnings.js", nativeCSSWarnings},
 	{"bifrost/data.ts", nativeData},
 	{"bifrost/host.tsx", nativeHost},
 	{"bifrost/jsx-runtime.ts", nativeJSXRuntime},
 	{"bifrost/metro.js", nativeMetroHelper},
+	{"bifrost/net.ts", nativeNet},
+	{"bifrost/react.js", nativeReact},
 	{"bifrost/refresh.ts", nativeRefresh},
 	{"bifrost/navigation.tsx", nativeNavigation},
 	{"bifrost/screen.tsx", nativeScreen},
@@ -880,6 +1084,11 @@ func writeNativeProject(native string, app appRouter, origin, overlay string) er
 		if err := writeNativeFile(native, file.Name, file.Content, 0o644); err != nil {
 			return err
 		}
+	}
+	// The layout is written with the overlay in hand, because the lines it adds
+	// depend on what the app ships next to it.
+	if err := writeNativeFile(native, "app/_layout.tsx", nativeLayout(overlay), 0o644); err != nil {
+		return err
 	}
 	manifest := nativePackageManifest()
 	if err := mergeNativeOverlayManifest(overlay, manifest); err != nil {
