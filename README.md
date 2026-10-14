@@ -325,6 +325,14 @@ Its `app/` may restyle a screen the route table already has, but it may not add 
 
 The layout is the one file an app is most tempted to replace, to add a line to the shell the generator writes. Two files it can ship instead are imported for it. One is `global.css` at the root of the overlay, which is where the utilities come from and which is not the one the web app has, because Tailwind needs different `@source` paths and none of the font packages. The other is a module of its own, `bifrost/setup.ts`, for whatever a native target has to install before the first screen renders. Both are imported before the network shim, so the app can install what the shim wraps.
 
+A page written for the browser reaches for a document from places the tag map cannot cover -- a measurement, a media query, somewhere to keep a preference -- and none of them has a native counterpart. The generator writes that shim to `bifrost/dom.js` and **imports none of it**: a module nothing imports is never bundled, so a page that never touches a document pays nothing. A page that does turns it on with one line of its own:
+
+```ts
+import "./dom";
+```
+
+It answers what it can and answers as absent everything else: a query returns null, an attribute is not there, a measurement is zero, and reading a cookie says there is none rather than inventing one. `localStorage` really stores, `innerWidth` and `innerHeight` come from the window dimensions, and the clipboard borrows `expo-clipboard` when the app has it instead of pretending the copy happened. Every assignment is a fallback, so anything the app or the target already installed stays.
+
 Sessions need nothing extra from the client: an Expo app sends its cookie jar with every request, so a cookie a login route sets reaches the next data request. A route a session middleware protects answers with a redirect instead of props, and the screen moves the router to it rather than rendering the destination under the path that was asked for.
 
 A status is part of what a loader returns, so it travels with the props. When a loader answers `bifrost.NotFound()` or `bifrost.Status`, the props already carry `__bifrostNotFound` or `__bifrostError`, and the view the generator wrote picks the app's `not-found.tsx` or `error.tsx` out of them without the screen knowing anything about it.

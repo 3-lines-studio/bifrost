@@ -734,6 +734,48 @@ func TestNativeTagMapTakesWhatTheAppShipsOnTopOfIt(t *testing.T) {
 	}
 }
 
+func TestNativeShipsTheDocumentShimWithoutTurningItOn(t *testing.T) {
+	// A page written for the browser reaches for a document from places the tag
+	// map cannot cover, and every app that needs one writes the same shim. It is
+	// written for every app and imported by none: a module nothing imports is
+	// never bundled, and the app turns it on with a line in its own setup.
+	files := map[string]string{}
+	for _, file := range nativeProjectFiles {
+		files[file.Name] = file.Content
+	}
+	dom, ok := files["bifrost/dom.js"]
+	if !ok {
+		t.Fatal("an app that touches a document has nothing to turn on")
+	}
+	for _, said := range []string{
+		"target.document ??=",
+		"target.localStorage ??=",
+		"target.matchMedia ??=",
+		"target.ResizeObserver ??= ResizeObserver",
+		"target.Node ??=",
+		"target.navigator.clipboard",
+	} {
+		if !strings.Contains(dom, said) {
+			t.Fatalf("the shim does not answer %s", said)
+		}
+	}
+	// A shim that lied about the cookie it hands back is worse than one that says
+	// there is none.
+	if !strings.Contains(dom, "get cookie() {") || !strings.Contains(dom, "return String();") {
+		t.Fatal("the shim hands back a cookie that is not there")
+	}
+	// Nothing of it is installed at the cost of what is already there: every
+	// assignment is a fallback, so an app that filled one in keeps its own.
+	if strings.Contains(dom, "target.document =") || strings.Contains(dom, "target.window =") {
+		t.Fatal("the shim overwrites what the app or the target already installed")
+	}
+	// The generated layout imports the app's setup and the network shim, and the
+	// document shim only when the app asks for it.
+	if strings.Contains(nativeLayout(""), "dom") {
+		t.Fatal("the document shim is turned on for every app")
+	}
+}
+
 func TestNativeTagMapCoversWhatAPageUses(t *testing.T) {
 	groups := map[string]map[string]bool{}
 	for _, name := range []string{"BOXES", "TEXTS", "HIDDEN"} {
