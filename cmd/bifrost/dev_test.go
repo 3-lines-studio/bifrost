@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -242,5 +243,36 @@ func TestDevelopmentBinaryGenerationDoesNotOverwriteTheRunningOne(t *testing.T) 
 	}
 	if first == filepath.Join(directory, "app") {
 		t.Fatal("a generation writes over the binary that is running")
+	}
+}
+
+func TestDevelopmentLockNamesTheProcessThatHoldsIt(t *testing.T) {
+	// Measured: the message out of a taken lock was "already running for this
+	// directory", which is the one thing the reader already knew, and the lock
+	// file was empty, so there was nothing to find the process by.
+	base := t.TempDir()
+	name := "bifrost-dev-1111111111111111"
+	directory := filepath.Join(base, "web")
+
+	held, err := claimDevelopmentServer(base, name, directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = held.Close() }()
+	if holder := heldBy(filepath.Join(base, name+".lock")); holder == "" {
+		t.Fatal("the lock names no process")
+	}
+
+	// A second run of the same directory is refused, and told which one holds it.
+	_, err = claimDevelopmentServer(base, name, directory)
+	if err == nil {
+		t.Fatal("a second run took the lock of the first")
+	}
+	said := err.Error()
+	if !strings.Contains(said, directory) {
+		t.Fatalf("the message does not name the directory:\n%s", said)
+	}
+	if !strings.Contains(said, "pid "+strconv.Itoa(os.Getpid())) {
+		t.Fatalf("the message does not name the process that holds it:\n%s", said)
 	}
 }

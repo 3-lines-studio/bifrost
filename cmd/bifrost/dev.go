@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -94,18 +95,16 @@ func runDev(args []string) error {
 	}
 	digest := sha256.Sum256([]byte(absolute))
 	name := "bifrost-dev-" + hex.EncodeToString(digest[:8])
-	lock, err := os.OpenFile(filepath.Join(os.TempDir(), name+".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := claimDevelopmentServer(os.TempDir(), name, absolute)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = lock.Close() }()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return errors.New("bifrost: development server is already running for this directory")
-	}
 	pruneStaleDevelopmentFiles(os.TempDir(), name+".lock")
 	socketDir := filepath.Join(os.TempDir(), name+"-"+fmt.Sprint(os.Getpid()))
 	defer func() { _ = os.RemoveAll(socketDir) }()
 	socket := filepath.Join(socketDir, "vite.sock")
+	fmt.Fprintf(os.Stderr, "bifrost: development server for %s, pid %d\n", filepath.ToSlash(absolute), os.Getpid())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -379,6 +378,40 @@ func routeTreeStamp(routeRoot string) (string, error) {
 	}
 	sort.Strings(names)
 	return strings.Join(names, "\n"), nil
+}
+
+// claimDevelopmentServer takes the lock of a directory's development server, or
+// says which process holds it. The lock is a file whose only content is the pid
+// of the run that took it: measured, the message that came out of a taken lock
+// was "already running for this directory", which is the one thing the reader
+// already knew, and a run whose app had to be killed by hand left a lock with
+// nothing in it to find the process by.
+func claimDevelopmentServer(base, name, dir string) (*os.File, error) {
+	path := filepath.Join(base, name+".lock")
+	lock, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = lock.Close()
+		if holder := heldBy(path); holder != "" {
+			return nil, fmt.Errorf("bifrost: development server is already running for %s, pid %s", filepath.ToSlash(dir), holder)
+		}
+		return nil, fmt.Errorf("bifrost: development server is already running for %s", filepath.ToSlash(dir))
+	}
+	if err := lock.Truncate(0); err == nil {
+		_, _ = lock.WriteAt([]byte(strconv.Itoa(os.Getpid())), 0)
+	}
+	return lock, nil
+}
+
+// heldBy reads the pid a lock file names, or nothing when it names none.
+func heldBy(path string) string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(content))
 }
 
 // requireViteInstalled fails early with an actionable message when Vite is
