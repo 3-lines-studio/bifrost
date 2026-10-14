@@ -560,12 +560,43 @@ func buildFrontend(ctx context.Context, describe protocol.DescribeResult, output
 	command.Dir = describe.SourceRoot
 	command.Stdin = bytes.NewReader(data)
 	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
+	// What the runner says is streamed to stderr as it is written, and that same
+	// stream is kept: a command whose stderr is set leaves the error with nothing
+	// of its own -- only Output fills ExitError.Stderr -- so without a copy the
+	// failure of a frontend build is an "exit status 1" with the reason already
+	// scrolled away.
+	said := new(bytes.Buffer)
+	command.Stderr = io.MultiWriter(os.Stderr, said)
 	command.Env = append(os.Environ(), "BIFROST=1", "BIFROST_BUILD=1")
 	if err := command.Run(); err != nil {
-		return commandError(command, err)
+		return frontendBuildError(command, err, said.String())
 	}
 	return nil
+}
+
+// frontendBuildError names the runner that failed and keeps the end of what it
+// said, which is where a bundler puts the file it could not resolve.
+func frontendBuildError(command *exec.Cmd, err error, said string) error {
+	tail := lastLines(said, 40)
+	if tail == "" {
+		return commandError(command, err)
+	}
+	return fmt.Errorf("bifrost: %s: %w\n%s", strings.Join(command.Args, " "), err, tail)
+}
+
+// lastLines keeps the end of a build log and drops the rest.
+func lastLines(text string, wanted int) string {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return ""
+	}
+	for index := range lines {
+		lines[index] = strings.TrimRight(lines[index], "\r")
+	}
+	if len(lines) > wanted {
+		lines = lines[len(lines)-wanted:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func buildRuntime(ctx context.Context, sourceRoot, output string) (protocol.FileRef, error) {

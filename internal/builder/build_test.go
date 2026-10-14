@@ -1,7 +1,10 @@
 package builder
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -264,5 +267,46 @@ func TestWriteEntriesAddsReloadOnlyInDevelopment(t *testing.T) {
 	data, _ = os.ReadFile(plan.ClientFile)
 	if strings.Contains(string(data), "/_bifrost/build-id") {
 		t.Fatal("production entry contains reload polling")
+	}
+}
+
+func TestFrontendBuildErrorKeepsTheEndOfWhatTheRunnerSaid(t *testing.T) {
+	// Measured: the failure of a frontend build reached the caller as "exit
+	// status 1", because a command whose stderr is set leaves ExitError with
+	// nothing of its own -- only Output fills it -- and the reason a bundler
+	// gives is the end of what it said.
+	command := exec.Command("bun", "run", "vite-runner.ts")
+	log := "vite v8.0.0 building for production\n" +
+		"error: Could not resolve \"../../app/probe/page.tsx\" from .bifrost/views/page-2.tsx\n"
+	said := frontendBuildError(command, errors.New("exit status 1"), log)
+	if !strings.Contains(said.Error(), "Could not resolve") {
+		t.Fatalf("the failure does not carry what the runner said:\n%s", said)
+	}
+	if !strings.Contains(said.Error(), "vite-runner.ts") {
+		t.Fatalf("the failure does not name the runner:\n%s", said)
+	}
+	if quiet := frontendBuildError(command, errors.New("exit status 1"), ""); strings.Contains(quiet.Error(), "\n") {
+		t.Fatalf("a runner that said nothing left an empty tail:\n%s", quiet)
+	}
+}
+
+func TestLastLinesKeepsTheEndOfTheLog(t *testing.T) {
+	var log strings.Builder
+	for index := 0; index < 100; index++ {
+		fmt.Fprintf(&log, "line %d\n", index)
+	}
+	kept := lastLines(log.String(), 40)
+	lines := strings.Split(kept, "\n")
+	if len(lines) != 40 {
+		t.Fatalf("kept %d lines, want 40:\n%s", len(lines), kept)
+	}
+	if lines[0] != "line 60" || lines[39] != "line 99" {
+		t.Fatalf("the end of the log is not what was kept:\n%s", kept)
+	}
+	if lastLines("only one line\n", 40) != "only one line" {
+		t.Fatal("a log of one line lost it")
+	}
+	if lastLines("", 40) != "" {
+		t.Fatal("an empty log is not empty")
 	}
 }
