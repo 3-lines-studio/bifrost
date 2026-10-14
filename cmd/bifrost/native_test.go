@@ -36,7 +36,10 @@ func TestExpoRouterPathFollowsTheServeMuxPattern(t *testing.T) {
 }
 
 func TestNativeProjectFilesAreWellFormed(t *testing.T) {
-	for _, file := range nativeProjectFiles {
+	// The layout is not in the table because its imports depend on the overlay,
+	// and it is still a file the generator writes whole.
+	files := append([]nativeFile{{"app/_layout.tsx", nativeLayout("")}}, nativeProjectFiles...)
+	for _, file := range files {
 		if filepath.Ext(file.Name) == ".json" {
 			var value map[string]any
 			if err := json.Unmarshal([]byte(file.Content), &value); err != nil {
@@ -475,6 +478,136 @@ func TestNativeOverlayThatReplacesTheMetroConfigHasToInstallTheWarnings(t *testi
 	}
 	if warning := nativeOverlayWarning(overlay); warning != "" {
 		t.Fatalf("an overlay with no metro config is told it is wrong: %s", warning)
+	}
+}
+
+func TestNativeLayoutCarriesWhatTheOverlayShips(t *testing.T) {
+	// The generated layout is the shell an app would otherwise rewrite whole to
+	// add one line to it. Measured on fonnso: the file was replaced to import a
+	// stylesheet, a module of its own and the network shim, and two of those three
+	// lines are ones the generator can write.
+	cases := []struct {
+		name    string
+		files   []string
+		imports []string
+	}{
+		{
+			"an overlay with neither",
+			nil,
+			[]string{`import "../bifrost/net";`},
+		},
+		{
+			"a global stylesheet",
+			[]string{"global.css"},
+			[]string{`import "../global.css";`, `import "../bifrost/net";`},
+		},
+		{
+			"a module of its own",
+			[]string{"bifrost/setup.ts"},
+			[]string{`import "../bifrost/setup";`, `import "../bifrost/net";`},
+		},
+		{
+			"both, before the shim that wraps what they install",
+			[]string{"global.css", "bifrost/setup.tsx"},
+			[]string{`import "../global.css";`, `import "../bifrost/setup";`, `import "../bifrost/net";`},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			projectRoot := t.TempDir()
+			overlay := filepath.Join(projectRoot, "native")
+			for _, name := range test.files {
+				path := filepath.Join(overlay, filepath.FromSlash(name))
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			layout := nativeLayout(overlay)
+			// The extension is left off: a tsconfig that has not asked for
+			// allowImportingTsExtensions rejects an import that spells it out.
+			want := strings.Join(test.imports, "\n") + "\n\n"
+			if !strings.HasPrefix(layout, want) {
+				t.Fatalf("the layout opens with\n%q\nwant\n%q", layout, want)
+			}
+			if !strings.Contains(layout, "expo-router") || !strings.Contains(layout, "SafeAreaProvider") {
+				t.Fatal("the layout is a header with no shell under it")
+			}
+		})
+	}
+}
+
+func TestNativeShipsThePiecesEveryClientNeeds(t *testing.T) {
+	// Three things every client of a web app needs, and none of them is the app's
+	// business: an origin in front of a relative request, a React.createElement
+	// that reaches the tag map, and a layout that imports both.
+	files := map[string]string{}
+	for _, file := range nativeProjectFiles {
+		files[file.Name] = file.Content
+	}
+	net, ok := files["bifrost/net.ts"]
+	if !ok {
+		t.Fatal("a page that asks its server for /api/... has nothing to put the origin there")
+	}
+	if !strings.Contains(net, `url.startsWith("/")`) || !strings.Contains(net, "original(ORIGIN + url, init)") {
+		t.Fatal("the shim does not do what the browser does to a relative url")
+	}
+	// A Request and a URL spell their address differently, and only one of them
+	// has a url at all.
+	if !strings.Contains(net, "input instanceof URL") {
+		t.Fatal("a URL object is read as if it had a url")
+	}
+	react, ok := files["bifrost/react.js"]
+	if !ok {
+		t.Fatal("a library that builds its elements by hand would paint a tag for the web")
+	}
+	if !strings.Contains(react, "React.createElement = (type, ...rest) =>") {
+		t.Fatal("the patch does not reach React.createElement")
+	}
+	// A copy of the module holds the own enumerable keys only, and a library that
+	// imports React as a namespace would get undefined for the rest.
+	if !strings.Contains(react, "module.exports = React") {
+		t.Fatal("the patch hands back a copy instead of the module itself")
+	}
+	if !strings.Contains(nativeLayout(""), `import "../bifrost/net";`) {
+		t.Fatal("nothing imports the shim, so every relative request goes nowhere")
+	}
+}
+
+func TestNativeMetroHelperReadsThePathAliasesOfTheApp(t *testing.T) {
+	// Metro has never read TypeScript paths, and the web bundler gets them from a
+	// config of its own, so an app that spells its imports "@/components/x" fails
+	// on the first one.
+	for _, want := range []string{
+		`fs.readFileSync(path.join(appRoot, "tsconfig.json"), "utf8")`,
+		"options.paths",
+		"options.baseUrl",
+		"pathAliases(workspaceRoot)",
+		"underAlias(alias, moduleName)",
+		"path.join(alias.to, under + alias.after)",
+	} {
+		if !strings.Contains(nativeMetroHelper, want) {
+			t.Fatalf("the helper never reads %s", want)
+		}
+	}
+	// A tsconfig is written by an editor, which leaves comments in it and a
+	// trailing comma, and a JSON parser refuses both. Measured: the paths of
+	// {"paths":{"@/*":["./*"],}} are read with both present.
+	if !strings.Contains(nativeMetroHelper, "function asJSON(") {
+		t.Fatal("a commented tsconfig would declare no paths at all")
+	}
+	// A target that is not a directory under the base -- "@/*": ["*"] with a
+	// baseUrl -- is a valid mapping, and so is one that puts something after the
+	// wildcard.
+	if !strings.Contains(nativeMetroHelper, "alias.suffix") {
+		t.Fatal("only a pattern that ends in a wildcard would be honoured")
+	}
+	// The generated project imports the real React, or the patch is installed
+	// inside the thing that installs it.
+	if !strings.Contains(nativeMetroHelper, `moduleName === "react" && !insideBifrost`) {
+		t.Fatal("the react patch would be installed inside the project that installs it")
 	}
 }
 
