@@ -355,18 +355,22 @@ Without it Tailwind never runs, and what is left is the theme -- the `:root` var
 
 #### What the stylesheet is scanned for
 
-Tailwind 4 finds its own candidates in every file it can reach, and the generated project is inside the directory it scans. Its own `bifrost/host.tsx` is written in prose, and prose contains class names: measured, its comment about blocks and its tag list put `.block`, `.inline` and `.table` into the stylesheet of an app that never asked for any of them, 390 bytes of utilities that a native target then drops again.
+Tailwind 4 finds its own candidates in every file it can reach, and the generated project is inside the directory it scans. Its own `bifrost/host.tsx` is written in prose, and prose contains class names: measured in a tree whose only sources are that file and one page, its comment about blocks and its tag list put `.block`, `.inline` and `.table` into the stylesheet with nothing asking for them, and a native target then drops them again.
 
-`source(none)` restricts the scan to what the app declares, so the stylesheet holds what the app wrote and nothing else:
+`source(none)` turns that off, and the stylesheet then holds what the app declares and nothing else:
 
 ```css
 @import "tailwindcss" source(none);
 
 @source "../../app";
 @source "../../components";
+@source "./app-components";
+@source "./components";
 ```
 
-Measured on the same directory contents: 1107 bytes and `.block`, `.inline`, `.table` in the stylesheet without `source(none)`, 717 bytes and neither with it. The `@source` paths are relative to the stylesheet and reach the app's own tree, which is where the classes are actually written; the two directories are the ones the web app declares as its content.
+The scan is the only thing that ever finds a class, and a class that is not scanned is not reported anywhere: it compiles to nothing and the view is quietly missing its styles. So the list has to be complete, and that is the trap. `../../app` and `../../components` reach the web app's tree; every file the overlay ships is under `./`, including the generated `app/` and whatever else the overlay puts beside it. Measured on a real overlay: with the first two lines alone, a class written only in `app-components/` is absent from the stylesheet; with all four it is there.
+
+The gain is small enough that leaving `source(none)` out is the better default. Measured on that same overlay, the whole stylesheet: 25560 bytes and eight dropped-value warnings with automatic detection, 24947 and six with `source(none)`, and the two that go are the ones the generated file produced. A couple hundred bytes is not worth a list that silently costs a class the day somebody adds a directory.
 
 ### One page, two targets
 
