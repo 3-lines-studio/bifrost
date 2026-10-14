@@ -284,13 +284,32 @@ A resolver belongs to that directory too. The two seams a native target needs, t
 
 ```js
 const { getDefaultConfig } = require("expo/metro-config");
-const { withBifrost } = require("./bifrost/metro");
+const { withBifrost, withBifrostWarnings } = require("./bifrost/metro");
 const { withNativewind } = require("nativewind/metro");
 
-module.exports = withNativewind(withBifrost(getDefaultConfig(__dirname)), { input: "./global.css" });
+const seams = withBifrost(getDefaultConfig(__dirname));
+const withCSS = withNativewind(seams, { input: "./global.css" });
+
+module.exports = withBifrostWarnings(withCSS);
 ```
 
-Order does not matter. Metro hands the last resolver only the default one, so a resolver that reached for that would drop whoever was there before; `withBifrost` keeps the one the config already had and hands it everything it does not own.
+The order of the resolver does not matter. Metro hands the last resolver only the default one, so a resolver that reached for that would drop whoever was there before; `withBifrost` keeps the one the config already had and hands it everything it does not own. The order of `withBifrostWarnings` does: it wraps the transformer, and the last wrapper wins. Installed anywhere but outermost, the wrapper that runs after it puts its own transformer back and the diagnostics simply never run -- which is indistinguishable from a stylesheet with nothing to report. `bifrost native` reads the `metro.config.js` an overlay ships with and says so when it does not find it.
+
+It is there because the two most expensive failures of a native target are the quiet ones.
+
+A class the compiler cannot express compiles to nothing and looks exactly like one that works. `h-[100dvh]` is a viewport on the web and no height at all here, `min-h-svh` is no height either, and either one closes a tree to zero without a word. The compiler collects the values it dropped and the transformer throws them away, so the wrapper reads them back and names the class that asked for each one, once, in development:
+
+```
+bifrost: global.css: .h-[100dvh]: height: 100dvh has no native counterpart
+```
+
+A property the target lacks outright -- `cursor`, `resize`, `snap` -- is not reported: it was cosmetic in every case measured, and the reset Tailwind ships is full of them. A build never pays for the second look, and neither does a stylesheet under `node_modules`.
+
+The other quiet failure is a prop whose whole meaning is the document. A renderer drops `dangerouslySetInnerHTML` without a word, so a paragraph compiled from markdown paints nothing at all and the page comes out missing it, and the runtime names it in development as well:
+
+```
+bifrost: a native target drops dangerouslySetInnerHTML on <div>
+```
 
 Its `package.json` contributes `dependencies`, `devDependencies` and `overrides`, which are merged into the generated manifest; every other key still comes from the generator, so the shell keeps owning the modules it needs. `overrides` is there because a dependency that an app adds is not necessarily the one that gets installed: a package the generator already pins with a range that a newer release also satisfies lets the manager hoist that release instead, and a pin is the only way to say which copy wins.
 

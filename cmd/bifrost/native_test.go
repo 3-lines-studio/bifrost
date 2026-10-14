@@ -342,6 +342,142 @@ func TestNativeProjectRefusesAnOverlayRouteTheServerDoesNotServe(t *testing.T) {
 	}
 }
 
+func TestNativeRuntimeSaysWhatTheTargetCannotPaint(t *testing.T) {
+	// A prop whose whole meaning is the document is dropped by the renderer
+	// without a word. The measured case is `dangerouslySetInnerHTML`: the body of
+	// every message the assistant wrote is markdown compiled to html, and on a
+	// native target it painted nothing at all. Nothing in the app says so, the
+	// page just comes out missing a paragraph, so the runtime has to.
+	dropped, err := nativeTagGroup(nativeHost, "DOM_ONLY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dropped["dangerouslySetInnerHTML"] {
+		t.Fatal("the tag map would drop a leaf of the page in silence")
+	}
+	// htmlFor is measured noise: fonnso alone writes it twenty-nine times, and
+	// dropping it hides no paragraph, so it is not one of them.
+	if dropped["htmlFor"] {
+		t.Fatal("a label association would warn on every form field")
+	}
+	if !strings.Contains(nativeHost, "export function droppedProps(name: string, props: unknown)") {
+		t.Fatal("the tag map does not report the props it cannot honour")
+	}
+	if !strings.Contains(nativeJSXRuntime, "loaded().droppedProps(name, props)") {
+		t.Fatal("the runtime never asks which props are being dropped")
+	}
+	if !strings.Contains(nativeJSXRuntime, "__DEV__") {
+		t.Fatal("the warning would run in production too")
+	}
+	// The name of the tag is what makes the warning actionable, and the runtime
+	// is the last place that still has it.
+	if !strings.Contains(nativeJSXRuntime, `warnDropped(type, rest[0])`) {
+		t.Fatal("the runtime does not pass the tag name to the warning")
+	}
+}
+
+func TestNativeWarningsGoInFrontOfTheCompilerTheAppInstalled(t *testing.T) {
+	// The compiler collects the values it cannot express and the transformer
+	// throws them away, so a class that compiles to nothing looks like one that
+	// works. The wrapper has to hand every file to whatever transformer was there
+	// and keep its path, the same way the resolver does, or installing it would
+	// disable NativeWind instead of reporting what it dropped.
+	if !strings.Contains(nativeMetroHelper, "bifrostUpstreamTransformer: config.transformerPath ?? null") {
+		t.Fatal("the wrapper does not keep the transformer that was already there")
+	}
+	if !strings.Contains(nativeCSSWarnings, "config.transformer?.bifrostUpstreamTransformer ?? unstable_transformerPath") {
+		t.Fatal("the wrapper does not fall back to the default transformer")
+	}
+	if !strings.Contains(nativeCSSWarnings, "upstream.transform(config, projectRoot, filePath, data, options)") {
+		t.Fatal("the wrapper does not hand the file on")
+	}
+	if !strings.Contains(nativeCSSWarnings, "compile(css, { ...config.reactNativeCSS, filename: filePath, projectRoot }).warnings()") {
+		t.Fatal("the wrapper does not read the warnings it exists for")
+	}
+	// The warning is only actionable if it names the class the app wrote, which
+	// means pairing each dropped value with the selector that asked for it.
+	if !strings.Contains(nativeCSSWarnings, "declaration.value.includes(String(value))") {
+		t.Fatal("a dropped value is not traced back to its class")
+	}
+	// The class reaches the stylesheet escaped -- .h-[100dvh] is written
+	// .h-\[100dvh\] -- and the app can only search for the name it wrote.
+	if !strings.Contains(nativeCSSWarnings, "at: className(selector)") {
+		t.Fatal("the report names the selector as the compiler spelled it, not as the app wrote it")
+	}
+	if !strings.Contains(nativeCSSWarnings, "String.fromCodePoint(parseInt(hex, 16))") {
+		t.Fatal("a class Tailwind escaped with a hex escape is reported escaped")
+	}
+	// An app cannot fix a stylesheet inside a dependency, and a node_modules tree
+	// has hundreds of them.
+	if !strings.Contains(nativeCSSWarnings, `!filePath.includes("node_modules")`) {
+		t.Fatal("the report would list the app's dependencies as its own")
+	}
+	// Reading the warnings costs a second pass over the stylesheet, which is the
+	// web pipeline the native one already ran. A build would pay for a
+	// development diagnostic twice.
+	if !strings.Contains(nativeCSSWarnings, `options.dev !== false`) {
+		t.Fatal("the report runs in a build too")
+	}
+	if !strings.Contains(nativeCSSWarnings, `options.type !== "asset"`) {
+		t.Fatal("a stylesheet asked for as an asset is read as one")
+	}
+	// Without the compiler there is no stylesheet to drop anything from, and
+	// installing a transformer that requires it would break the build.
+	if !strings.Contains(nativeMetroHelper, `require.resolve("react-native-css/compiler")`) {
+		t.Fatal("the wrapper is installed even when there is no compiler")
+	}
+	if !strings.Contains(nativeMetroConfig, "withBifrostWarnings(withBifrost(") {
+		t.Fatal("the generated config does not install the warnings wrapper")
+	}
+}
+
+func TestNativeOverlayThatReplacesTheMetroConfigHasToInstallTheWarnings(t *testing.T) {
+	// Everything the generated metro.config.js installs is lost the moment an app
+	// replaces that file, and this one is lost in silence: a transformer that was
+	// never wrapped reports nothing, which is what a stylesheet with nothing to
+	// report looks like too. The generator is the only thing that can see the file
+	// and it says so. Measured: withNativewind applied after withBifrostWarnings
+	// puts back its own transformer and the warning never runs.
+	projectRoot := t.TempDir()
+	overlay := filepath.Join(projectRoot, "native")
+	if err := os.MkdirAll(overlay, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := filepath.Join(overlay, "metro.config.js")
+	if err := os.WriteFile(name, []byte(`module.exports = withBifrost(getDefaultConfig(__dirname));`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	warning := nativeOverlayWarning(overlay)
+	if warning == "" {
+		t.Fatal("an overlay that loses the diagnostics is left alone")
+	}
+	if !strings.Contains(warning, "withBifrostWarnings") {
+		t.Fatal("the warning does not say what is missing")
+	}
+	// The file it names is the one the app has to open, and the advice is the call
+	// that makes the wrapper outermost.
+	if !strings.Contains(filepath.ToSlash(warning), "native/metro.config.js") {
+		t.Fatal("the warning does not name the file that has to change")
+	}
+	if !strings.Contains(warning, "withBifrostWarnings(withBifrost(yourConfig))") {
+		t.Fatal("the warning does not say how to install it")
+	}
+	if err := os.WriteFile(name, []byte(`module.exports = withBifrostWarnings(withBifrost(getDefaultConfig(__dirname)));`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if warning := nativeOverlayWarning(overlay); warning != "" {
+		t.Fatalf("an overlay that installs the wrapper is told it does not: %s", warning)
+	}
+	// Most overlays have no metro.config.js at all, and they take the generated
+	// one, which installs the wrapper by itself.
+	if err := os.Remove(name); err != nil {
+		t.Fatal(err)
+	}
+	if warning := nativeOverlayWarning(overlay); warning != "" {
+		t.Fatalf("an overlay with no metro config is told it is wrong: %s", warning)
+	}
+}
+
 func TestNativeTagMapCoversWhatAPageUses(t *testing.T) {
 	groups := map[string]map[string]bool{}
 	for _, name := range []string{"BOXES", "TEXTS", "HIDDEN"} {
