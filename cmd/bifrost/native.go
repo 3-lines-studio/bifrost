@@ -518,9 +518,197 @@ class ResizeObserver {
   }
 }
 
+// A page asks where it is. There is no browser to answer, so the answer is built
+// from the two things that are true: the address of the screen on top, which
+// that screen wrote down as it rendered, and the origin the pages are served
+// from. The page of the web app at /login is served by the same server a page
+// talks to, so the url a page builds out of window.location.origin is the one
+// the browser would have built.
+const { ORIGIN } = require("./origin");
+const { getAddress, setAddress, hasPage, onAddressChange } = require("./route");
+const { refresh } = require("./refresh");
+
+const router = () => require("expo-router").router;
+const Linking = () => require("react-native").Linking;
+
+// The address cut the way a url is cut: path, query and fragment.
+const where = () => {
+  const at = getAddress();
+  const query = at.indexOf("?");
+  const hash = at.indexOf("#");
+  const ends = [];
+  if (query >= 0) ends.push(query);
+  if (hash >= 0) ends.push(hash);
+  const stop = ends.length === 0 ? at.length : Math.min.apply(null, ends);
+  return {
+    pathname: at.slice(0, stop) || "/",
+    search: query < 0 ? "" : at.slice(query, hash < 0 ? at.length : hash),
+    hash: hash < 0 ? "" : at.slice(hash),
+  };
+};
+
+const scheme = ORIGIN.slice(0, ORIGIN.indexOf("://"));
+const authority = ORIGIN.slice(ORIGIN.indexOf("://") + 3);
+const port = authority.indexOf(":") < 0 ? "" : authority.slice(authority.indexOf(":") + 1);
+
+const absolute = (to) => {
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(to)) {
+    return to;
+  }
+  if (to.charAt(0) === "/") {
+    return ORIGIN + to;
+  }
+  // A relative url is resolved against the directory of the current one, and
+  // that is a piece of a browser this shim does not carry. Saying so is better
+  // than guessing a page and painting it.
+  throw new Error("bifrost: window.location needs a rooted or absolute url, got " + to);
+};
+
+// Set while the shim is the one asking the router to move. A change it did not
+// ask for is a move of the router -- the back button, a gesture, a link -- and
+// that is the one a page hears as popstate, the same as in a browser.
+let moving = false;
+
+const go = (to, replace) => {
+  const target = absolute(String(to));
+  const page = target.indexOf(ORIGIN) === 0 ? target.slice(ORIGIN.length) || "/" : null;
+  if (page !== null && hasPage(page)) {
+    if (page !== getAddress()) {
+      moving = true;
+      setAddress(page);
+    }
+    if (replace) {
+      router().replace(page);
+    } else {
+      router().push(page);
+    }
+    return;
+  }
+  // Not a page of this app. On the web the browser leaves the document and the
+  // server answers -- an api route that redirects to a checkout, say -- and that
+  // is what this hands over: the browser. A screen the router could not fill is
+  // not what the page asked for.
+  Linking().openURL(target).catch(() => {
+    console.warn("bifrost: nothing on this device could open " + target);
+  });
+};
+
+const location = {
+  get href() {
+    return ORIGIN + getAddress();
+  },
+  set href(to) {
+    go(to, false);
+  },
+  origin: ORIGIN,
+  protocol: scheme + ":",
+  host: authority,
+  hostname: port === "" ? authority : authority.slice(0, authority.indexOf(":")),
+  port,
+  get pathname() {
+    return where().pathname;
+  },
+  get search() {
+    return where().search;
+  },
+  get hash() {
+    return where().hash;
+  },
+  assign: (to) => go(to, false),
+  replace: (to) => go(to, true),
+  reload: () => { void refresh(); },
+  toString() {
+    return this.href;
+  },
+};
+
+// The state of the entry on screen, and the entries a page pushed over it with
+// no url to move to. A browser keeps those in its history; here they are kept
+// here, so that a page which pushes one to catch the back button -- an image
+// viewer that closes instead of leaving the page -- is answered the same way.
+let state = null;
+const pushed = [];
+
+const history = {
+  get state() {
+    return state;
+  },
+  pushState(next, _title, to) {
+    state = next === undefined ? null : next;
+    if (to === undefined || to === null || to === "") {
+      pushed.push(true);
+      return;
+    }
+    // A navigation of its own cuts whatever was pushed on top, and a page that
+    // pushed nothing loses nothing.
+    pushed.length = 0;
+    go(to, false);
+  },
+  replaceState(next, _title, to) {
+    state = next === undefined ? null : next;
+    if (to === undefined || to === null || to === "") {
+      return;
+    }
+    go(to, true);
+  },
+  back() {
+    if (pushed.length > 0) {
+      pushed.pop();
+      state = null;
+      setTimeout(() => fire("popstate"), 0);
+      return;
+    }
+    router().back();
+  },
+  forward() {
+    router().forward();
+  },
+  go(step) {
+    if (step === 0) {
+      void refresh();
+      return;
+    }
+    if (step < 0) {
+      history.back();
+      return;
+    }
+    history.forward();
+  },
+};
+
+const fire = (type) => {
+  for (const listener of [...(listeners.get(type) ?? [])]) {
+    listener({ type });
+  }
+};
+
+onAddressChange(() => {
+  if (moving) {
+    moving = false;
+    return;
+  }
+  // Deferred, because the address changes while a screen renders and a page
+  // that listens for this usually sets state of its own.
+  setTimeout(() => fire("popstate"), 0);
+});
+
 const install = () => {
   const target = globalThis;
   target.window ??= target;
+  // The target installs a location and a history of its own when the app does not
+  // ask it not to, and theirs answer the url of the bundler that served the
+  // bundle, which is where the page is not: a page that asks where it is would be
+  // told it is somewhere else. The generated app.json turns that one off -- the
+  // runtime reads extra.router.origin, and false means it installs none -- so the
+  // address a page reads is the address of the page. When one is already here anyway, saying
+  // so beats answering silently with an address that belongs to no page.
+  if (target.location && target.location !== location) {
+    console.warn(
+      "bifrost: the runtime installed a window.location of its own, so a page that reads it is told where the bundler is instead of where it is; the target wants extra.router.origin set to false",
+    );
+  }
+  target.location ??= location;
+  target.history ??= history;
   target.getComputedStyle ??= () => computed;
   target.document ??= {
     documentElement: root,
@@ -825,6 +1013,7 @@ import { Component, useEffect, useState, type ReactNode } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { loadPage, type PageData } from "./data";
 import { onRefresh } from "./refresh";
+import { setAddress } from "./route";
 
 type State =
   | { status: "loading" }
@@ -852,6 +1041,14 @@ export function Screen({ render, params }: ScreenProps) {
   const [fallback, setFallback] = useState<Fallback | null>(null);
   const [nonce, setNonce] = useState(0);
   const href = pathname + query(search, params);
+
+  // Where this screen is, written down before anything inside it renders: a page
+  // reads the address in its first effect, and the effects of a child run before
+  // the effect of its parent. Only the screen on top writes it -- a stack keeps
+  // the screens behind this one mounted, and they are not where the app is.
+  if (focused) {
+    setAddress(href);
+  }
 
   useEffect(() => onRefresh(() => { setNonce((value) => value + 1); }), []);
 
@@ -1251,6 +1448,13 @@ func nativeAppManifest(projectRoot string) map[string]any {
 		"plugins":            []string{"expo-router"},
 		"ios":                map[string]any{"bundleIdentifier": identifier},
 		"android":            map[string]any{"package": identifier},
+		// The runtime the app starts in installs a window.location of its own, and
+		// the one it installs answers the url of the bundler: it is there so that a
+		// relative request has an origin, and it cannot be replaced afterwards --
+		// measured, the property it defines refuses both an assignment and a
+		// redefinition. False is the runtime's own switch for not installing one, so
+		// the address a page reads is the address of the page.
+		"extra": map[string]any{"router": map[string]any{"origin": false}},
 	}}
 }
 
@@ -1340,6 +1544,19 @@ func writeNativeProject(native string, app appRouter, origin, overlay string) er
 		return err
 	}
 	if err := writeNativeFile(native, "bifrost/origin.ts", nativeOrigin(origin), 0o644); err != nil {
+		return err
+	}
+	pageViews := make([]string, 0, len(screens))
+	for view, route := range screens {
+		// A not-found route catches every url the app does not have, so leaving it
+		// in would make every url -- an api route included -- look like a page the
+		// router can paint.
+		if route.NotFoundPage {
+			continue
+		}
+		pageViews = append(pageViews, view)
+	}
+	if err := writeNativeFile(native, "bifrost/route.ts", nativeRoute(nativePagePaths(pageViews)), 0o644); err != nil {
 		return err
 	}
 	views := filepath.Join(app.ProjectRoot, ".bifrost", "views")
@@ -1610,6 +1827,109 @@ export const ORIGIN =
   Platform.OS === "android" ? "http://10.0.2.2:8080" : "http://localhost:8080";
 `
 }
+
+// The pages of an app in the shape a url spells them, so that a page telling
+// where it is can be told apart from anything else it might navigate to.
+func nativePagePaths(views []string) []string {
+	paths := make([]string, 0, len(views))
+	for _, view := range views {
+		path := "/" + view
+		path = strings.TrimSuffix(path, "/index")
+		if path == "" {
+			path = "/"
+		}
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+// Where the page on screen is. A browser keeps an address and a page reads it
+// whenever it likes; here the address is a value of the navigation state, and
+// the only component that can read it is the screen. So the screen on top writes
+// it down while it renders, and the browser shim hands it back as
+// window.location. The pages of the app travel with it, because a url that is
+// not one of them is not a page this router can paint.
+func nativeRoute(pages []string) string {
+	var list strings.Builder
+	for index, page := range pages {
+		if index > 0 {
+			list.WriteString(",\n  ")
+		}
+		list.WriteString(strconv.Quote(page))
+	}
+	return nativeRouteHead + "\n  " + list.String() + "\n]" + nativeRouteRest
+}
+
+const nativeRouteHead = `// Where the page on screen is. A browser keeps an address and a page reads it
+// whenever it likes; here the address is a value of the navigation state, and the
+// only component that can read it is the screen. So the screen on top writes it
+// down as it renders, before anything inside it renders -- a page reads the
+// address in its first effect, and the effect of a child runs before the effect
+// of its parent -- and the browser shim hands it back as window.location.
+
+let address = "/";
+const listeners = new Set<() => void>();
+
+export function setAddress(next: string): void {
+  if (next === address) {
+    return;
+  }
+  address = next;
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+export function getAddress(): string {
+  return address;
+}
+
+// A change the shim did not ask for is a move of the router -- the back button,
+// a gesture, a link -- and it is the one a page hears as a popstate.
+export function onAddressChange(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+// The pages of this app, in the shape the router spells them: a segment in
+// brackets is one the router fills in, and a segment that starts with three dots
+// takes the rest of the url. What is not here is not a page of the app, and the
+// web would have asked the server for it and landed on whatever it answered. A
+// not-found route is left out: it catches every url the app does not have, so it
+// would make every url look like a page.
+const PAGES = [`
+
+const nativeRouteRest = `
+
+function matched(page: string, wanted: string[]): boolean {
+  const parts = page.split("/").filter((part) => part !== "");
+  for (let index = 0; index < parts.length; index++) {
+    const part = parts[index];
+    if (part.indexOf("[...") === 0) {
+      return wanted.length >= index;
+    }
+    if (index >= wanted.length) {
+      return false;
+    }
+    if (part.charAt(0) === "[" && part.charAt(part.length - 1) === "]") {
+      continue;
+    }
+    if (part !== wanted[index]) {
+      return false;
+    }
+  }
+  return wanted.length === parts.length;
+}
+
+export function hasPage(url: string): boolean {
+  const path = url.split("?")[0].split("#")[0];
+  const wanted = path.split("/").filter((part) => part !== "");
+  return PAGES.some((page) => matched(page, wanted));
+}
+`
 
 func nativeNames(projectRoot string) (string, string) {
 	base := strings.ToLower(filepath.Base(projectRoot))

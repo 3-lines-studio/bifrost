@@ -868,6 +868,246 @@ func TestNativeShipsTheDocumentShimWithoutTurningItOn(t *testing.T) {
 	}
 }
 
+func TestNativePageTableFollowsTheRouteTable(t *testing.T) {
+	// What the app does not own is not a screen the router can paint, and on the
+	// web the server answers a url like that -- an api route that redirects to a
+	// checkout, say. Telling one from the other takes the table of pages, and the
+	// table comes from the same route table as everything else.
+	got := nativePagePaths([]string{"index", "admin/settings", "docs/[slug]", "docs/[...rest]"})
+	want := []string{"/", "/admin/settings", "/docs/[...rest]", "/docs/[slug]"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("the pages of the app are %v, want %v", got, want)
+	}
+	if source := nativeRoute([]string{"index"}); !strings.Contains(source, `"/"`) {
+		t.Fatalf("the page at the root is not a page of the app:\n%s", source)
+	}
+	if source := nativeRoute(got); !strings.Contains(source, "export function hasPage(url: string): boolean") {
+		t.Fatal("nothing can tell a page of the app from anything else")
+	}
+}
+
+func TestNativePageTableLeavesOutTheNotFoundRoute(t *testing.T) {
+	// A not-found route is a catch-all: it is what the server answers a url the
+	// app does not have. Measured on the demo app: with it in the table every url
+	// -- /api/... included -- was a page, and the shim would have pushed a screen
+	// instead of handing the url to the browser, where the server answers it.
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	for _, name := range []string{"page.tsx", "not-found.tsx", "labs/page.tsx", "labs/not-found.tsx"} {
+		path := filepath.Join(appRoot, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prepared, err := prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(projectRoot, ".bifrost", "native")
+	if err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(native, "bifrost", "route.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(source), "[...path]") {
+		t.Fatalf("a not-found route became a page of the app:\n%s", source)
+	}
+	for _, page := range []string{`"/"`, `"/labs"`} {
+		if !strings.Contains(string(source), page) {
+			t.Fatalf("%s is not a page of the app:\n%s", page, source)
+		}
+	}
+}
+
+func TestNativePagesAreMatchedTheWayAUrlSpellsThem(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	if !nodeRunsTypeScript(t, node) {
+		t.Skip("node is older than 22.6 and cannot run the generated TypeScript")
+	}
+	// The table is what decides whether a url the app asks for is a page it can
+	// paint or something the server answers. A segment in brackets is one the
+	// router fills in, a segment in brackets with three dots takes the rest of the
+	// url, and a query or a fragment is none of the table's business.
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	for _, name := range []string{"page.tsx", "not-found.tsx", "docs/page.tsx", "docs/slug_/page.tsx", "docs/rest__/page.tsx"} {
+		path := filepath.Join(appRoot, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prepared, err := prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(projectRoot, ".bifrost", "native")
+	if err := writeNativeProject(native, prepared, "http://example.test", filepath.Join(projectRoot, "native")); err != nil {
+		t.Fatal(err)
+	}
+	probe := `import { hasPage } from "./bifrost/route.ts";
+for (const url of ["/", "/docs", "/docs/one", "/docs/one/two?x=1#y", "/api/stripe/checkout", "/other"]) {
+  console.log(url + " " + hasPage(url));
+}
+`
+	if err := os.WriteFile(filepath.Join(native, "probe.mjs"), []byte(probe), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	command := exec.CommandContext(ctx, node, "probe.mjs")
+	command.Dir = native
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("the generated table failed: %v", err)
+	}
+	want := []string{
+		"/ true",
+		"/docs true",
+		"/docs/one true",
+		"/docs/one/two?x=1#y true",
+		// An api route is not a page of the app, and neither is a url the app does
+		// not have: the not-found route catches it and is not a page either.
+		"/api/stripe/checkout false",
+		"/other false",
+	}
+	if got := strings.Split(strings.TrimSpace(string(output)), "\n"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("hasPage answered\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestNativeAddressIsWhereThePageOnTopIs(t *testing.T) {
+	// window.location is read by a page whenever it likes, and in a browser the
+	// address is there to be read. Here it is a value of the navigation state, so
+	// the screen on top writes it down -- while it renders and not in an effect:
+	// a page reads the address in its own first effect, and the effect of a child
+	// runs before the effect of its parent. Measured on fonnso: onboarding.tsx
+	// reads window.location.search in an effect that runs on mount.
+	if !strings.Contains(nativeScreen, `import { setAddress } from "./route";`) {
+		t.Fatal("the screen does not write down where it is")
+	}
+	if !strings.Contains(nativeScreen, "if (focused) {\n    setAddress(href);\n  }") {
+		t.Fatal("a screen behind this one writes down an address that is not the app's")
+	}
+	// It has to be written before the screen gives up on rendering and answers
+	// with a spinner, or a page that is still loading has no address at all.
+	write := strings.Index(nativeScreen, "setAddress(href);")
+	if write < 0 || write > strings.Index(nativeScreen, `state.status === "loading"`) {
+		t.Fatal("the address is written after the screen stopped rendering the page")
+	}
+}
+
+func TestNativeShimAnswersWhereThePageIs(t *testing.T) {
+	// A page that asks where it is, is at, or was, reaches for window.location and
+	// window.history, and neither exists on a native target. The shim answers with
+	// the address the screen wrote down, in the shape of the urls of the server
+	// that serves the pages, and moves the router for a page of the app.
+	files := map[string]string{}
+	for _, file := range nativeProjectFiles {
+		files[file.Name] = file.Content
+	}
+	dom, ok := files["bifrost/dom.js"]
+	if !ok {
+		t.Fatal("an app that reads the address has nothing to turn on")
+	}
+	for _, said := range []string{
+		`const { ORIGIN } = require("./origin");`,
+		`const { getAddress, setAddress, hasPage, onAddressChange } = require("./route");`,
+		"target.location ??= location;",
+		"target.history ??= history;",
+		"return ORIGIN + getAddress();",
+		"if (page !== null && hasPage(page)) {",
+		"setTimeout(() => fire(\"popstate\"), 0);",
+	} {
+		if !strings.Contains(dom, said) {
+			t.Fatalf("the shim does not answer %s", said)
+		}
+	}
+	// A url the app does not own is answered by the server on the web: the browser
+	// leaves the document and lands wherever it redirects. That is what the shim
+	// hands over, rather than a screen the router cannot fill.
+	if !strings.Contains(dom, "Linking().openURL(target)") {
+		t.Fatal("a url that is not a page of the app goes into the router")
+	}
+	if !strings.Contains(dom, "nothing on this device could open") {
+		t.Fatal("a url that opened nothing says nothing")
+	}
+	// A relative url is resolved against the directory of the current one, which
+	// is a piece of a browser this does not carry: naming it beats guessing.
+	if !strings.Contains(dom, "needs a rooted or absolute url") {
+		t.Fatal("a relative url is guessed instead of refused")
+	}
+	// A page that pushes an entry of its own to catch the back button -- the image
+	// viewer of thread.tsx -- is answered with the pop it expects and no move.
+	if !strings.Contains(dom, "pushed.push(true);") {
+		t.Fatal("an entry a page pushed with no url to move to is dropped")
+	}
+	// The runtime the app starts in installs a location of its own that answers the
+	// url of the bundler, and it cannot be taken over afterwards -- measured, the
+	// property refuses an assignment (NotSupportedError) and it is not
+	// configurable, so a redefinition is refused too. What is left is the runtime's
+	// own switch for not installing one, which the generated app.json carries, and
+	// a warning for the day it installs one anyway.
+	if !strings.Contains(dom, "if (target.location && target.location !== location) {") {
+		t.Fatal("a location that answers where the bundler is would be answered silently")
+	}
+	if !strings.Contains(dom, "extra.router.origin set to false") {
+		t.Fatal("the warning does not name what turns the runtime's location off")
+	}
+	// Nothing else is installed at the cost of what is already there.
+	if strings.Contains(dom, "target.document =") || strings.Contains(dom, "target.window =") {
+		t.Fatal("the shim overwrites the document or the window the app installed")
+	}
+}
+
+func TestNativeAppManifestTurnsOffTheLocationOfTheRuntime(t *testing.T) {
+	// The runtime installs a window.location that answers the url of the bundler,
+	// and it defines it so that it can be neither assigned nor redefined. Its own
+	// switch for not installing one is `extra.router.origin: false`, and the
+	// generated app.json is the only place that can turn it off: an app that ships
+	// an app.json of its own replaces the whole file, and then this is the first
+	// thing to go.
+	expo, ok := nativeAppManifest("/tmp/demo")["expo"].(map[string]any)
+	if !ok {
+		t.Fatal("the app manifest has no expo section")
+	}
+	extra, ok := expo["extra"].(map[string]any)
+	if !ok {
+		t.Fatal("the app manifest carries no extra")
+	}
+	router, ok := extra["router"].(map[string]any)
+	if !ok {
+		t.Fatal("the app manifest does not speak to the router")
+	}
+	origin, present := router["origin"]
+	if !present || origin != false {
+		t.Fatalf("the runtime is left installing a location of its own: origin=%v", origin)
+	}
+
+	projectRoot := t.TempDir()
+	native := filepath.Join(projectRoot, ".bifrost", "native")
+	if err := writeNativeJSON(native, "app.json", nativeAppManifest(projectRoot)); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(filepath.Join(native, "app.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), `"origin": false`) {
+		t.Fatalf("the generated app.json does not turn it off:\n%s", written)
+	}
+}
+
 func TestNativeTagMapCoversWhatAPageUses(t *testing.T) {
 	groups := map[string]map[string]bool{}
 	for _, name := range []string{"BOXES", "TEXTS", "HIDDEN"} {
