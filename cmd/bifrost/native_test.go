@@ -524,6 +524,96 @@ func TestNativeHTMLParserIsWrittenAndShipped(t *testing.T) {
 	}
 }
 
+func TestNativeTakesTheTagOfASelectorDownToAClass(t *testing.T) {
+	// A browser answers `.md p` and a native view has no tag to name, so the
+	// compiler drops the rule in silence. What a native view has is a class, and
+	// the map paints every element with one named after its tag -- so the
+	// stylesheet keeps the app's own words and the rewrite is what pays.
+	// Measured with the real compiler over the app of the case: 12 rules of its
+	// markdown reached the collection, and 29 do with this.
+	shipped := false
+	for _, file := range nativeProjectFiles {
+		if file.Name == "bifrost/selectors.js" && file.Content == nativeSelectors {
+			shipped = true
+		}
+	}
+	if !shipped {
+		t.Fatal("the rewrite is not part of the generated project")
+	}
+	if !strings.Contains(nativeSelectors, `tag.replaceWith(parser().className({ value: classOf(tag.value) }))`) {
+		t.Fatal("a tag is not written as a class")
+	}
+	if !strings.Contains(nativeSelectors, `return "native-" + tag;`) {
+		t.Fatal("the class is not named after the tag")
+	}
+	// :where(a, b) is two selectors that mean the same rule, and a native target
+	// has nothing to hold them together.
+	if !strings.Contains(nativeSelectors, "function written(selector)") ||
+		!strings.Contains(nativeSelectors, "firstWhere(copy).replaceWith(...alternative.nodes.map((one) => one.clone()));") {
+		t.Fatal(":where() is not written out into the selectors it stands for")
+	}
+	// The two things a native view has no counterpart for, and which the
+	// compiler drops in the same silence.
+	if !strings.Contains(nativeSelectors, "pseudo.value.startsWith(\"::\") || STRUCTURAL.test(pseudo.value)") {
+		t.Fatal("a pseudo-element and a position in the tree are not reported")
+	}
+	// The steps of an animation are rules whose selector is not one.
+	if !strings.Contains(nativeSelectors, `parent.name.indexOf("keyframes") >= 0`) {
+		t.Fatal("the steps of an animation would be renamed")
+	}
+	// The map paints the class, before the element's own, which is the order a
+	// browser settles two rules in.
+	if !strings.Contains(nativeHostBody, "function tagged(out: Record<string, unknown>, tag?: string)") {
+		t.Fatal("the map does not paint the class of the tag")
+	}
+	if !strings.Contains(nativeHostBody, `out.className = typeof own === "string" && own !== "" ? tagClass(tag) + " " + own : tagClass(tag);`) {
+		t.Fatal("the class of the tag does not come before the element's own classes")
+	}
+	if !strings.Contains(nativeHostBody, "...htmlProps(element.props, element.tag)") {
+		t.Fatal("the HTML a page injects is not painted with the class of its tag")
+	}
+	// The tag is passed on only when the element is painted by a component of the
+	// table: a name it does not know is left as it was, and asking twice would
+	// say twice that there is no counterpart.
+	if !strings.Contains(nativeJSXRuntime, "typeof painted === \"string\" ? undefined : type") {
+		t.Fatal("a name the table does not know would be painted as a class")
+	}
+	if !strings.Contains(nativeReact, "component === undefined ? undefined : type") {
+		t.Fatal("the road through React.createElement does not pass the tag")
+	}
+	if !strings.Contains(nativeCSSWarnings, `withTagClasses(data, lostSelectors(config, projectRoot, filePath, options))`) {
+		t.Fatal("the transformer does not run the rewrite")
+	}
+	if !strings.Contains(nativeCSSWarnings, `css && options.platform !== "web"`) {
+		t.Fatal("the rewrite runs on the web target too")
+	}
+}
+
+func TestNativeTakesTheTagOfASelectorDownToAClassInAStylesheet(t *testing.T) {
+	// The module is a string of Go, so nothing else executes it. This runs it
+	// against the real compiler: a rule that names a tag has to come out as a
+	// class, and the compiler has to keep it.
+	node, err := exec.LookPath("bun")
+	if err != nil {
+		t.Skip("bun is not installed")
+	}
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	command := exec.CommandContext(ctx, node, "./scripts/native-selectors.mjs")
+	command.Dir = root
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("the rewrite failed: %v: %s", err, output)
+	}
+	if !strings.Contains(string(output), "todos bien") {
+		t.Fatalf("the rewrite is not what it says: %s", output)
+	}
+}
+
 func TestNativeWarningsGoInFrontOfTheCompilerTheAppInstalled(t *testing.T) {
 	// The compiler collects the values it cannot express and the transformer
 	// throws them away, so a class that compiles to nothing looks like one that
@@ -536,8 +626,13 @@ func TestNativeWarningsGoInFrontOfTheCompilerTheAppInstalled(t *testing.T) {
 	if !strings.Contains(nativeCSSWarnings, "config.bifrostUpstreamTransformer ?? config.transformer?.bifrostUpstreamTransformer ?? unstable_transformerPath") {
 		t.Fatal("the wrapper does not read the transformer the app installed")
 	}
-	if !strings.Contains(nativeCSSWarnings, "upstream.transform(config, projectRoot, filePath, data, options)") {
+	if !strings.Contains(nativeCSSWarnings, "upstream.transform(config, projectRoot, filePath, source, options)") {
 		t.Fatal("the wrapper does not hand the file on")
+	}
+	// What is handed on is the stylesheet with the element selectors written as
+	// the classes the map paints, which is the whole of what this adds.
+	if !strings.Contains(nativeCSSWarnings, "const source =") {
+		t.Fatal("the file is handed on without the rewrite")
 	}
 	if !strings.Contains(nativeCSSWarnings, "compile(css, { ...config.reactNativeCSS, filename: filePath, projectRoot }).warnings()") {
 		t.Fatal("the wrapper does not read the warnings it exists for")
@@ -1314,8 +1409,10 @@ func TestNativeTagMapSubmitsAFormTheWayABrowserDoes(t *testing.T) {
 	for _, wanted := range []string{
 		// The button asks the form it is inside, and only when it is a submit.
 		"usePress(type, onPress as (() => void) | undefined)",
-		// The browser's name for the press is answered, not dropped.
-		"export function nativeProps(props: unknown): unknown",
+		// The browser's name for the press is answered, not dropped. The tag a
+		// page wrote the element as comes with it, because it is the class the
+		// stylesheet of the app reaches the element through.
+		"export function nativeProps(props: unknown, tag?: string): unknown",
 		// The form keeps its fields and answers the submit with them, in a module
 		// of its own, so that a button the app paints itself still submits.
 		"const [fields] = useState(() => new Map<string, string>());",
@@ -1588,16 +1685,16 @@ func TestNativeAnswersTheInteractionAPageWritesForTheBrowser(t *testing.T) {
 	// answered here, on both roads an element is built on: jsx, and createElement
 	// for what a component of the app builds by hand.
 	host := nativeHost("")
-	if !strings.Contains(host, "export function nativeProps(props: unknown): unknown") {
+	if !strings.Contains(host, "export function nativeProps(props: unknown, tag?: string): unknown") {
 		t.Fatal("the tag map does not answer the interaction of the browser")
 	}
 	if !strings.Contains(host, "given.onPress = pressed === undefined ? click : () => { pressed(); click(); }") {
 		t.Fatal("a page that answers both names loses one of them")
 	}
-	if !strings.Contains(nativeJSXRuntime, "loaded().nativeProps(rest[0])") {
+	if !strings.Contains(nativeJSXRuntime, "loaded().nativeProps(rest[0], typeof painted === \"string\" ? undefined : type)") {
 		t.Fatal("jsx does not go through it")
 	}
-	if !strings.Contains(nativeReact, "host.nativeProps(props)") {
+	if !strings.Contains(nativeReact, "host.nativeProps(props, component === undefined ? undefined : type)") {
 		t.Fatal("createElement does not go through it")
 	}
 	if !strings.Contains(nativeReact, "return createElement(type, ...rest);") {
