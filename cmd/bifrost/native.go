@@ -379,6 +379,204 @@ globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
 };
 `
 
+// A native target has no document: react-native draws views, and a page written
+// for the browser reaches for the DOM from places the tag map cannot cover. What
+// it asks for is a measurement, a media query, or somewhere to keep a
+// preference, and none of them has a native counterpart.
+//
+// It is written and never imported. A page that never touches a document pays
+// nothing for it, because a module nothing imports is never bundled, and a page
+// that does turns it on with one line in the overlay's `bifrost/setup.ts`:
+//
+//	import "./dom";
+//
+// Which is also why it is here rather than in the overlay: it is the same shim
+// in every app, and the app that needs it should not have to write it again.
+const nativeDOM = `// The smallest object that answers what a page asks of a document, without
+// lying about what is on screen. Everything it cannot answer, it answers as
+// absent: a query returns null, an attribute is not there, a measurement is
+// zero. That is what a page already handles.
+
+// expo-clipboard is the native counterpart of navigator.clipboard, so the shim
+// borrows it when the app has it rather than pretending the copy happened.
+const clipboard = () => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require("expo-clipboard");
+  } catch {
+    return null;
+  }
+};
+
+const size = () => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Dimensions } = require("react-native");
+    const window = Dimensions.get("window");
+    return { width: window.width, height: window.height };
+  } catch {
+    return { width: 0, height: 0 };
+  }
+};
+
+const listeners = new Map();
+
+const element = () => ({
+  style: { setProperty() {}, removeProperty() {} },
+  classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+  setAttribute() {},
+  removeAttribute() {},
+  getAttribute: () => null,
+  appendChild: (child) => child,
+  removeChild() {},
+  addEventListener() {},
+  removeEventListener() {},
+  querySelector: () => null,
+  querySelectorAll: () => [],
+  getBoundingClientRect: () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 }),
+  focus() {},
+  blur() {},
+  scrollIntoView() {},
+  closest: () => null,
+});
+
+const root = element();
+
+const on = (type, listener) => {
+  if (!listeners.has(type)) {
+    listeners.set(type, new Set());
+  }
+  listeners.get(type).add(listener);
+};
+
+const off = (type, listener) => {
+  listeners.get(type)?.delete(listener);
+};
+
+const query = {
+  matches: false,
+  media: "",
+  onchange: null,
+  addEventListener() {},
+  removeEventListener() {},
+  addListener() {},
+  removeListener() {},
+};
+
+// base-ui reaches a node's window through element.ownerDocument.defaultView,
+// so the shim needs a window there; what it asks of it is a computed style, and
+// the answer is the empty one.
+const computed = {
+  getPropertyValue: () => "",
+  getPropertyPriority: () => "",
+  length: 0,
+  item: () => "",
+};
+
+const store = new Map();
+const { width, height } = size();
+
+// A page measures with ResizeObserver where the browser would tell it when a box
+// changes size. Native has no such event, so this answers once, when the
+// observation starts, with whatever the node says about itself right then, and
+// then stays quiet. It is a partial answer and it is written down as one: a box
+// that grows later will not report it.
+class ResizeObserver {
+  constructor(callback) {
+    this.callback = callback;
+    this.observed = new Set();
+  }
+  observe(node) {
+    this.observed.add(node);
+    const rect = node?.getBoundingClientRect?.() ?? { top: 0, left: 0, width: 0, height: 0 };
+    this.callback(
+      [
+        {
+          target: node,
+          contentRect: rect,
+          borderBoxSize: [],
+          contentBoxSize: [],
+          devicePixelContentBoxSize: [],
+        },
+      ],
+      this,
+    );
+  }
+  unobserve(node) {
+    this.observed.delete(node);
+  }
+  disconnect() {
+    this.observed.clear();
+  }
+}
+
+const install = () => {
+  const target = globalThis;
+  target.window ??= target;
+  target.getComputedStyle ??= () => computed;
+  target.document ??= {
+    documentElement: root,
+    body: root,
+    head: root,
+    defaultView: target,
+    title: "",
+    // There is no document to hold a cookie here, so a read answers that there
+    // is none. A session that has to survive belongs in a store of the app's
+    // own; the client already sends its cookie jar with every request.
+    // A read answers that there is none, and a getter is not a value being
+    // handed out.
+    get cookie() {
+      return String();
+    },
+    visibilityState: "visible",
+    createElement: () => element(),
+    createElementNS: () => element(),
+    createTextNode: () => ({}),
+    getElementById: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    addEventListener: on,
+    removeEventListener: off,
+    dispatchEvent: () => true,
+  };
+  target.matchMedia ??= () => query;
+  target.ResizeObserver ??= ResizeObserver;
+  target.Node ??= Object.assign(class Node {}, {
+    ELEMENT_NODE: 1,
+    DOCUMENT_POSITION_DISCONNECTED: 1,
+    DOCUMENT_POSITION_PRECEDING: 2,
+    DOCUMENT_POSITION_FOLLOWING: 4,
+    DOCUMENT_POSITION_CONTAINS: 8,
+    DOCUMENT_POSITION_CONTAINED_BY: 16,
+    DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC: 32,
+  });
+  target.addEventListener ??= on;
+  target.removeEventListener ??= off;
+  target.dispatchEvent ??= () => true;
+  target.innerWidth ??= width;
+  target.innerHeight ??= height;
+  target.localStorage ??= {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, String(value)); },
+    removeItem: (key) => { store.delete(key); },
+    clear: () => { store.clear(); },
+    key: (index) => [...store.keys()][index] ?? null,
+    get length() { return store.size; },
+  };
+  if (target.navigator && !target.navigator.clipboard) {
+    const api = clipboard();
+    target.navigator.clipboard = {
+      writeText: async (text) => { await api?.setStringAsync(String(text)); },
+      readText: async () => (await api?.getStringAsync()) ?? "",
+    };
+  }
+};
+
+install();
+
+export default install;
+`
+
 // The shell an app does not have to write, and the seam it needs to add a line
 // to it. Two files an overlay may ship are imported here instead of making the
 // app replace the whole file to add one line: the global stylesheet, because the
@@ -999,6 +1197,7 @@ var nativeProjectFiles = []nativeFile{
 	{"metro.config.js", nativeMetroConfig},
 	{"bifrost/css-warnings.js", nativeCSSWarnings},
 	{"bifrost/data.ts", nativeData},
+	{"bifrost/dom.js", nativeDOM},
 	{"bifrost/jsx-runtime.ts", nativeJSXRuntime},
 	{"bifrost/metro.js", nativeMetroHelper},
 	{"bifrost/net.ts", nativeNet},
