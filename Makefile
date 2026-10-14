@@ -1,6 +1,6 @@
-.PHONY: check test race vet gate demo native-html native-row bench fuzz throughput integration dev-integration reproducible
+.PHONY: check test race vet gate demo native-html native-row native-selectors bench fuzz throughput integration dev-integration reproducible
 
-check: test race vet gate native-html native-row demo
+check: test race vet gate native-html native-row native-selectors demo
 
 test:
 	@test -z "$$(gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'))" || (gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'); exit 1)
@@ -29,6 +29,12 @@ native-html:
 native-row:
 	bun ./scripts/native-row.mjs
 
+# The pass that takes the tag of a selector down to a class is a string of Go
+# too, and it is the one that decides what a stylesheet written for a browser
+# means on a native view.
+native-selectors:
+	bun ./scripts/native-selectors.mjs
+
 bench:
 	go test -run '^$$' -bench . -benchmem ./...
 
@@ -51,6 +57,7 @@ integration:
 	bash ./scripts/structured-integration.sh
 	bun ./scripts/native-html.mjs
 	bun ./scripts/native-row.mjs
+	bun ./scripts/native-selectors.mjs
 
 dev-integration:
 	bash ./scripts/dev-integration.sh

@@ -305,6 +305,141 @@ if (collection && typeof collection.inject === "function") {
 module.exports = upstream;
 `
 
+// A browser answers a selector that names a tag -- `.md p` is every paragraph of
+// the markdown -- and a native view has no tag to name, so the compiler drops
+// the rule in silence. Measured on fonnso: of the 24 rules of its markdown
+// block, 17 compiled to nothing, and every paragraph and every list came out
+// bare, on a screen that was otherwise right.
+//
+// What a native view has is a class, so the map paints every element it builds
+// with a class named after the tag -- native-p, native-li -- and this rewrites
+// the element selectors of a stylesheet into those classes. The stylesheet of
+// the app needs no change, and the web target never sees any of it.
+//
+// Two things are said out loud instead, because neither has a counterpart here
+// and the compiler drops them the same silent way: a pseudo-element (::marker,
+// ::before) and a structural pseudo-class (:first-child, :nth-child). :where()
+// is expanded instead, because its alternatives are selectors in their own
+// right.
+//
+// It runs over the stylesheet the app wrote, before the pipeline that turns
+// Tailwind's directives into rules: measured, a rule of the app's own survives
+// that pipeline whole -- only the utilities Tailwind generates afterwards are
+// out of reach, and none of them names a tag.
+const nativeSelectors = `// The class an element carries because of the tag it was written as.
+function classOf(tag) {
+  return "native-" + tag;
+}
+
+// The pseudo-classes that name a position in the tree, and the pseudo-elements
+// that name a box inside the element. A native view has neither.
+const STRUCTURAL = /^:(first|last|only|nth)-child$|^:empty$|^:(first|last|only|nth)-of-type$/;
+
+function parser() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("postcss-selector-parser");
+}
+
+function postcssOf() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("postcss");
+}
+
+// The first :where() of a selector, which is the one that has to come out first.
+function firstWhere(selector) {
+  let found = null;
+  selector.walkPseudos((pseudo) => {
+    if (found === null && pseudo.value === ":where" && pseudo.nodes !== undefined && pseudo.nodes.length > 0) {
+      found = pseudo;
+    }
+  });
+  return found;
+}
+
+// One selector into the selectors it stands for, with every :where() written
+// out: :where(p, ul) is two selectors that mean the same rule, and a native
+// target has no :where() to hold them together.
+function written(selector) {
+  const where = firstWhere(selector);
+  if (where === null) {
+    return [selector];
+  }
+  const out = [];
+  for (const alternative of where.nodes) {
+    const copy = selector.clone();
+    firstWhere(copy).replaceWith(...alternative.nodes.map((one) => one.clone()));
+    out.push(...written(copy));
+  }
+  return out;
+}
+
+// The tags of a selector become the classes the map paints them with, and what
+// is left that a native view cannot express is answered to the caller.
+function renamed(selector, onLost) {
+  selector.walkTags((tag) => {
+    tag.replaceWith(parser().className({ value: classOf(tag.value) }));
+  });
+  selector.walkPseudos((pseudo) => {
+    if (pseudo.value.startsWith("::") || STRUCTURAL.test(pseudo.value)) {
+      onLost(pseudo.toString());
+    } else if ((pseudo.value === ":where" || pseudo.value === ":is") && pseudo.nodes !== undefined) {
+      onLost(pseudo.value + "(...)");
+    }
+  });
+}
+
+// Every element selector of a stylesheet, written as the class the element
+// carries. A selector with no tag in it comes out as it went in.
+function withTagClasses(css, onLost) {
+  const text = typeof css === "string" ? css : css.toString("utf8");
+  let postcss;
+  let selectors;
+  try {
+    postcss = postcssOf();
+    selectors = parser();
+  } catch (error) {
+    onLost("", "no parser to read a selector with: " + error.message);
+    return text;
+  }
+  let root;
+  try {
+    root = postcss.parse(text);
+  } catch (error) {
+    onLost("", "a stylesheet that could not be read: " + error.message);
+    return text;
+  }
+  root.walkRules((rule) => {
+    // The steps of an animation are rules with a selector that is not one, and
+    // renaming them would take the animation apart.
+    const parent = rule.parent;
+    if (parent !== undefined && parent.type === "atrule" && parent.name.indexOf("keyframes") >= 0) {
+      return;
+    }
+    const before = rule.selectors;
+    const after = [];
+    for (const selector of before) {
+      let tree;
+      try {
+        tree = selectors().astSync(selector);
+      } catch {
+        after.push(selector);
+        continue;
+      }
+      for (const one of written(tree)) {
+        renamed(one, (what) => onLost(selector, what));
+        after.push(one.toString());
+      }
+    }
+    if (after.join(",") !== before.join(",")) {
+      rule.selector = after.join(",");
+    }
+  });
+  return root.toString();
+}
+
+module.exports = { withTagClasses, classOf };
+`
+
 // Runs in the transformer, in place of whatever react-native-css installed, and
 // hands every file to it unchanged. What it adds is a second look at a
 // stylesheet, because the compiler collects the values it cannot express and the
@@ -312,6 +447,7 @@ module.exports = upstream;
 const nativeCSSWarnings = `const path = require("node:path");
 const { unstable_transformerPath } = require("@expo/metro-config");
 const { compile } = require("react-native-css/compiler");
+const { withTagClasses } = require("./selectors");
 
 const worker = require(unstable_transformerPath);
 
@@ -391,6 +527,32 @@ async function report(config, projectRoot, filePath, data, options) {
   }
 }
 
+// A selector a native target cannot express is dropped by the compiler in
+// silence, which is what a selector that works looks like too. This names the
+// one the stylesheet has and the reason, and it is a development diagnostic: an
+// app cannot fix a stylesheet inside a dependency, and a node_modules tree has
+// hundreds of them.
+function lostSelectors(config, projectRoot, filePath, options) {
+  if (options.dev === false || filePath.includes("node_modules")) {
+    return () => {};
+  }
+  const where = path.relative(projectRoot, filePath) || filePath;
+  return (selector, what) => {
+    const said =
+      "bifrost: " +
+      where +
+      (selector === "" ? "" : ": " + selector) +
+      ": " +
+      what +
+      " has no native counterpart";
+    if (reported.has(said)) {
+      return;
+    }
+    reported.add(said);
+    console.warn(said);
+  };
+}
+
 // Whatever transformer the app installed, handed every file unchanged. What this
 // adds is a second look at a stylesheet, which is the only thing the compiler
 // does not already do.
@@ -405,14 +567,26 @@ async function report(config, projectRoot, filePath, data, options) {
 module.exports.transform = async (config, projectRoot, filePath, data, options) => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const upstream = require(config.bifrostUpstreamTransformer ?? config.transformer?.bifrostUpstreamTransformer ?? unstable_transformerPath);
-  const result = await upstream.transform(config, projectRoot, filePath, data, options);
+  // A selector that names a tag is a rule a native view cannot answer, and the
+  // compiler drops it in silence. What a native view has is a class, and the map
+  // paints every element with one named after its tag, so the element selectors
+  // are rewritten before the pipeline that builds the utilities: measured, a rule
+  // of the app's own survives that pipeline whole, and only what Tailwind
+  // generates afterwards is out of reach -- and none of that names a tag. It is
+  // not a diagnostic, so it goes in on every native platform and in a build as
+  // well.
+  const css = options.type !== "asset" && isStylesheet(filePath);
+  const source =
+    css && options.platform !== "web"
+      ? withTagClasses(data, lostSelectors(config, projectRoot, filePath, options))
+      : data;
+  const result = await upstream.transform(config, projectRoot, filePath, source, options);
   // The report costs a second pass over the stylesheet -- the web pipeline the
   // native one already ran -- and it is a development diagnostic, so a build
   // does not pay for it. A stylesheet the app did not write is one it cannot
   // fix, and a node_modules tree has hundreds of them.
-  const css = options.type !== "asset" && isStylesheet(filePath);
   if (options.dev !== false && options.platform !== "web" && css && !filePath.includes("node_modules")) {
-    await report(config, projectRoot, filePath, data, options);
+    await report(config, projectRoot, filePath, source, options);
   }
   return result;
 };
@@ -440,7 +614,11 @@ function mapped(type, props) {
   }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const host = require("./host");
-  return { type: host.hostComponent(type) ?? type, props: host.nativeProps(props) };
+  const component = host.hostComponent(type);
+  return {
+    type: component ?? type,
+    props: host.nativeProps(props, component === undefined ? undefined : type),
+  };
 }
 
 React.createElement = (type, ...rest) => {
@@ -1695,7 +1873,7 @@ for (const name of HIDDEN) {
 // painted, and its children are read the same way. Measured on fonnso: the body
 // of every message of the assistant is markdown compiled to HTML, and the bubble
 // came out empty.
-export function nativeProps(props: unknown): unknown {
+export function nativeProps(props: unknown, tag?: string): unknown {
   if (props === null || typeof props !== "object") {
     return props;
   }
@@ -1713,6 +1891,12 @@ export function nativeProps(props: unknown): unknown {
     const pressed = given.onPress as (() => void) | undefined;
     given.onPress = pressed === undefined ? click : () => { pressed(); click(); };
   }
+  // The tag the page wrote an element of its own as. It arrives only when the
+  // element is painted by a component of this table -- a name this table does not
+  // know is left as it was, and asking here again would say so twice.
+  if (typeof tag === "string") {
+    tagged(given, tag);
+  }
   return given;
 }
 
@@ -1729,7 +1913,7 @@ function nodeOf(node: unknown, key: string): unknown {
   if (component === undefined) {
     return createElement(Fragment, { key }, ...(children as []));
   }
-  return createElement(component as never, { key, ...htmlProps(element.props) }, ...(children as []));
+  return createElement(component as never, { key, ...htmlProps(element.props, element.tag) }, ...(children as []));
 }
 
 function paintedNodes(nodes: unknown[], prefix: string): unknown[] {
@@ -1740,7 +1924,11 @@ function paintedNodes(nodes: unknown[], prefix: string): unknown[] {
 // spells what nativewind reads as className, and the stylesheet the app
 // already wrote -- .md, .code, .tok-keyword -- is the one that has to
 // reach it. Anything else keeps its name and its value.
-function htmlProps(props: Record<string, string>): Record<string, unknown> {
+//
+// The class of the tag comes before the element's own classes, so a rule of the
+// app that names a class still wins over one that names the tag, which is the
+// order a browser settles them in.
+function htmlProps(props: Record<string, string>, tag?: string): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(props)) {
     if (name === "class") {
@@ -1752,6 +1940,25 @@ function htmlProps(props: Record<string, string>): Record<string, unknown> {
     }
     out[name] = value;
   }
+  return tagged(out, tag);
+}
+
+// An element also carries a class named after the tag a page wrote it as, and
+// that class is what the stylesheet rewrite of ./selectors hangs a rule written
+// for a browser on: a rule written .md p becomes .md .native-p, because a native
+// view has no tag of its own to name. The class is inert on its own: it matches
+// nothing until a rule names it, so an app that never writes an element selector
+// never sees it.
+export function tagClass(tag: string): string {
+  return "native-" + tag;
+}
+
+function tagged(out: Record<string, unknown>, tag?: string): Record<string, unknown> {
+  if (tag === undefined) {
+    return out;
+  }
+  const own = out.className;
+  out.className = typeof own === "string" && own !== "" ? tagClass(tag) + " " + own : tagClass(tag);
   return out;
 }
 
@@ -1790,7 +1997,7 @@ const nativeJSXRuntime = `import * as runtime from "react/jsx-runtime";
 type Host = {
   hostComponent(name: string): unknown;
   droppedProps(name: string, props: unknown): string[];
-  nativeProps(props: unknown): unknown;
+  nativeProps(props: unknown, tag?: string): unknown;
 };
 
 let host: Host | null = null;
@@ -1826,9 +2033,10 @@ const wrap = (create: unknown) =>
       if (__DEV__) {
         warnDropped(type, rest[0]);
       }
+      const painted = component(type);
       return (create as (type: unknown, ...rest: unknown[]) => unknown)(
-        component(type),
-        loaded().nativeProps(rest[0]),
+        painted,
+        loaded().nativeProps(rest[0], typeof painted === "string" ? undefined : type),
         ...rest.slice(1),
       );
     }
@@ -1847,6 +2055,7 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/css-warnings.js", nativeCSSWarnings},
 	{"bifrost/native-internal.js", nativeNativeInternal},
 	{"bifrost/row-direction.js", nativeRowDirection},
+	{"bifrost/selectors.js", nativeSelectors},
 	{"bifrost/data.ts", nativeData},
 	{"bifrost/dom.js", nativeDOM},
 	{"bifrost/form.tsx", nativeForm},
