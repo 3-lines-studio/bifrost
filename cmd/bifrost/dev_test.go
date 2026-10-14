@@ -229,3 +229,18 @@ func viewsMention(t *testing.T, views, target string) bool {
 	}
 	return false
 }
+
+func TestDevelopmentBinaryGenerationDoesNotOverwriteTheRunningOne(t *testing.T) {
+	// The binary that is running is the one the next build must not touch: it is
+	// written over while a process executes it, and the point of building before
+	// killing is that a build that fails leaves the old app serving.
+	directory := t.TempDir()
+	first := childBinaryPath(directory, 1)
+	second := childBinaryPath(directory, 2)
+	if first == second {
+		t.Fatalf("two generations share the path %s", first)
+	}
+	if first == filepath.Join(directory, "app") {
+		t.Fatal("a generation writes over the binary that is running")
+	}
+}

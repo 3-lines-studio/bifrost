@@ -111,6 +111,8 @@ func runDev(args []string) error {
 	defer stop()
 
 	var child *exec.Cmd
+	var childBinary string
+	var generation int
 	var bridge *exec.Cmd
 	var bridgeDone chan struct{}
 	var sourceRoot string
@@ -236,15 +238,26 @@ func runDev(args []string) error {
 		if err := ensureBridge(); err != nil {
 			return err
 		}
-		stopProcess(child)
-		childBinary := filepath.Join(socketDir, "app")
-		build := exec.Command("go", "build", "-o", childBinary, packagePath)
+		// The new binary is built next to the old one, and the old one is only
+		// stopped once the new one is there. Measured, the other order leaves the
+		// port with nothing behind it: a Go file saved mid-edit builds to an error,
+		// the app was already killed, and the development server answers nothing
+		// until the next successful rebuild. A binary that is being executed cannot
+		// be written over either, so each generation gets a path of its own.
+		generation++
+		nextBinary := childBinaryPath(socketDir, generation)
+		build := exec.Command("go", "build", "-o", nextBinary, packagePath)
 		build.Dir = buildDir
 		build.Stdout = os.Stdout
 		build.Stderr = os.Stderr
 		if err := build.Run(); err != nil {
 			return fmt.Errorf("bifrost: build dev app: %w", err)
 		}
+		stopProcess(child)
+		if childBinary != "" {
+			_ = os.Remove(childBinary)
+		}
+		childBinary = nextBinary
 		child = exec.Command(childBinary)
 		child.Dir = buildDir
 		child.Stdout = os.Stdout
@@ -301,6 +314,13 @@ func runDev(args []string) error {
 			}
 		}
 	}
+}
+
+// childBinaryPath names one generation of the development binary. The previous
+// one is still executing while the next one is built, and a file a process is
+// running from cannot be written over.
+func childBinaryPath(socketDir string, generation int) string {
+	return filepath.Join(socketDir, fmt.Sprintf("app-%d", generation))
 }
 
 // developmentStamp is everything that makes the generated app different: the Go
