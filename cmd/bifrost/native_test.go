@@ -38,7 +38,7 @@ func TestExpoRouterPathFollowsTheServeMuxPattern(t *testing.T) {
 func TestNativeProjectFilesAreWellFormed(t *testing.T) {
 	// The layout is not in the table because its imports depend on the overlay,
 	// and it is still a file the generator writes whole.
-	files := append([]nativeFile{{"app/_layout.tsx", nativeLayout("")}}, nativeProjectFiles...)
+	files := append([]nativeFile{{"app/_layout.tsx", nativeLayout("")}, {"bifrost/host.tsx", nativeHost("")}}, nativeProjectFiles...)
 	for _, file := range files {
 		if filepath.Ext(file.Name) == ".json" {
 			var value map[string]any
@@ -351,7 +351,7 @@ func TestNativeRuntimeSaysWhatTheTargetCannotPaint(t *testing.T) {
 	// every message the assistant wrote is markdown compiled to html, and on a
 	// native target it painted nothing at all. Nothing in the app says so, the
 	// page just comes out missing a paragraph, so the runtime has to.
-	dropped, err := nativeTagGroup(nativeHost, "DOM_ONLY")
+	dropped, err := nativeTagGroup(nativeHost(""), "DOM_ONLY")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +363,7 @@ func TestNativeRuntimeSaysWhatTheTargetCannotPaint(t *testing.T) {
 	if dropped["htmlFor"] {
 		t.Fatal("a label association would warn on every form field")
 	}
-	if !strings.Contains(nativeHost, "export function droppedProps(name: string, props: unknown)") {
+	if !strings.Contains(nativeHost(""), "export function droppedProps(name: string, props: unknown)") {
 		t.Fatal("the tag map does not report the props it cannot honour")
 	}
 	if !strings.Contains(nativeJSXRuntime, "loaded().droppedProps(name, props)") {
@@ -611,10 +611,59 @@ func TestNativeMetroHelperReadsThePathAliasesOfTheApp(t *testing.T) {
 	}
 }
 
+func TestNativeTagMapTakesWhatTheAppShipsOnTopOfIt(t *testing.T) {
+	// The tag map is where a tag becomes the component that paints it, and every
+	// app has a tag the generator does not know, so every app that needs one used
+	// to replace the whole file. Measured, that is not a cost you pay once: an app
+	// replaced it, the file later grew a function the runtime calls, the replaced
+	// copy did not have it, and every element of the app threw in development.
+	projectRoot := t.TempDir()
+	overlay := filepath.Join(projectRoot, "native")
+	if err := os.MkdirAll(filepath.Join(overlay, "bifrost"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, extension := range []string{".ts", ".tsx", ".js", ".jsx"} {
+		if content := nativeHost(overlay); strings.Contains(content, "extraTags") {
+			t.Fatalf("the map reads an app module that is not there (%s)", extension)
+		}
+		if err := os.WriteFile(filepath.Join(overlay, "bifrost", "host-extra"+extension), []byte("export const extraTags = {};\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		content := nativeHost(overlay)
+		// The import leaves the extension off, like the layout's: a tsconfig that
+		// has not asked for allowImportingTsExtensions rejects one that spells it.
+		if !strings.Contains(content, `import { extraTags } from "./host-extra";`) {
+			t.Fatalf("the map does not read the app's tags (%s)", extension)
+		}
+		if !strings.Contains(content, "NAMED[name] = component;") {
+			t.Fatalf("the app's tags are never merged into the table (%s)", extension)
+		}
+		// Merged after the table is built, or a tag the app adds would be the one
+		// the table overwrites.
+		if strings.Index(content, "NAMED[name] = component;") < strings.Index(content, "for (const name of HIDDEN)") {
+			t.Fatalf("the app's tags are merged before the table is built (%s)", extension)
+		}
+		// Everything the generator puts in the file has to survive the seam: that
+		// is the whole reason it exists.
+		for _, kept := range []string{
+			"export function hostComponent(name: string): unknown",
+			"export function droppedProps(name: string, props: unknown)",
+			"no native counterpart for",
+		} {
+			if !strings.Contains(content, kept) {
+				t.Fatalf("the seam lost %q (%s)", kept, extension)
+			}
+		}
+		if err := os.Remove(filepath.Join(overlay, "bifrost", "host-extra"+extension)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestNativeTagMapCoversWhatAPageUses(t *testing.T) {
 	groups := map[string]map[string]bool{}
 	for _, name := range []string{"BOXES", "TEXTS", "HIDDEN"} {
-		tags, err := nativeTagGroup(nativeHost, name)
+		tags, err := nativeTagGroup(nativeHost(""), name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -662,7 +711,7 @@ func TestNativeTagMapDoesNotPretendToPaintAControl(t *testing.T) {
 	// in development, which is how the app learns it needs a native counterpart
 	// of its own. fonnso has one, in the primitives a screen is built from.
 	for _, name := range []string{"BOXES", "TEXTS", "HIDDEN"} {
-		tags, err := nativeTagGroup(nativeHost, name)
+		tags, err := nativeTagGroup(nativeHost(""), name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -680,7 +729,7 @@ func TestNativeRuntimeLeavesNamesItDoesNotKnowAlone(t *testing.T) {
 	if !strings.Contains(nativeJSXRuntime, "mapped === undefined ? name : mapped") {
 		t.Fatal("the runtime does not fall back to the name it was given")
 	}
-	if !strings.Contains(nativeHost, "return undefined;") {
+	if !strings.Contains(nativeHost(""), "return undefined;") {
 		t.Fatal("the tag map does not report a name it does not know")
 	}
 	if !strings.Contains(nativeMetroHelper, "originModulePath.startsWith") {
@@ -737,7 +786,7 @@ func nativeTagGroup(source, name string) (map[string]bool, error) {
 // nativeTagIsNamed reports whether the map answers a tag with a component of its
 // own instead of a group.
 func nativeTagIsNamed(tag string) bool {
-	return strings.Contains(nativeHost, "\n  "+tag+": ")
+	return strings.Contains(nativeHost(""), "\n  "+tag+": ")
 }
 
 func TestNativeNamesFromProjectDirectory(t *testing.T) {

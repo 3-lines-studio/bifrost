@@ -378,6 +378,20 @@ A page is written once, for the browser, and the tags in it are what the native 
 
 The vocabulary is the set of tags a native target supports. A lowercase tag outside it is one the map is missing: it warns in development with its own name, and the element is left exactly as it was, so the failure is loud instead of a paragraph that quietly disappears. Anything that is not a lowercase tag is untouched too, because React Native builds its own views out of strings and replacing one would tear them apart.
 
+An app always has a tag the generator does not know, or one it wants painted its own way, so it ships `bifrost/host-extra.tsx` in its overlay and the map takes it:
+
+```tsx
+export const extraTags: Record<string, unknown> = {
+  svg: Svg,
+  path: Path,
+  div: Box,
+};
+```
+
+It is merged over the generated table, so a name that is already there is replaced and one that is not is added, and it is merged last so the app wins. Everything else stays generated, including the props the target drops and the warning for a tag nobody knows.
+
+The seam is there because replacing the file is what an app had to do, and it is not a cost you pay once. Measured: an app replaced this file, the generator later added a function the runtime calls, the replaced copy did not have it, and **every element of the app threw in development** -- `loaded.droppedProps is not a function` -- with nothing saying why. Through the seam the same app runs.
+
 A tag that is behaviour and not presentation is left out on purpose. `select` needs a picker, so claiming it would be a lie: it stays unsupported, and the app gives it a native counterpart next to the screen. A form's `method` and `action` are the same kind of thing, and a `button type="submit"` does nothing on its own.
 
 ## Browser performance

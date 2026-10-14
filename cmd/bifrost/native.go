@@ -770,11 +770,39 @@ const styles = StyleSheet.create({
 
 // A page is written once, for the browser, and the tags in it are what the
 // screen paints. This table is the vocabulary a native target supports, so the
-// runtime and the tests read the same list.
-const nativeHost = `import { Children, isValidElement, type ReactNode } from "react";
+// runtime and the tests read the same list, and it is also the file an app is
+// meant to extend: an app always has a tag the generator does not know. Replacing
+// the whole file is what an app had to do, and it costs whatever the generator
+// adds next. Measured: an app replaced it once, the file later grew a function
+// the runtime calls, the replaced copy did not have it, and every element of the
+// app threw in development. So the table takes what the app ships on top of it
+// and the rest of the file stays whole.
+func nativeHost(overlay string) string {
+	if nativeOverlayModule(overlay, "bifrost/host-extra") == "" {
+		return nativeHostHead + nativeHostBody
+	}
+	return nativeHostHead + nativeHostExtraImport + nativeHostBody + nativeHostExtraMerge
+}
+
+// What the app ships on top of the table: a tag the generator does not know, or
+// one it paints its own way. It is merged last, so it wins.
+const nativeHostExtraImport = `import { extraTags } from "./host-extra";
+`
+
+const nativeHostExtraMerge = `
+// The app's own tags, on top: a name the table already has is replaced, and one
+// it does not is added.
+for (const [name, component] of Object.entries(extraTags)) {
+  NAMED[name] = component;
+}
+`
+
+const nativeHostHead = `import { Children, isValidElement, type ReactNode } from "react";
 import { Image, Linking, Pressable, Text, TextInput, View } from "react-native";
 import { navigate } from "virtual:bifrost/navigation";
+`
 
+const nativeHostBody = `
 // Blocks. They hold other blocks, which a View can.
 const BOXES = ["address", "article", "aside", "caption", "dd", "details", "dialog", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form", "header", "legend", "li", "main", "nav", "ol", "output", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul"];
 
@@ -971,7 +999,6 @@ var nativeProjectFiles = []nativeFile{
 	{"metro.config.js", nativeMetroConfig},
 	{"bifrost/css-warnings.js", nativeCSSWarnings},
 	{"bifrost/data.ts", nativeData},
-	{"bifrost/host.tsx", nativeHost},
 	{"bifrost/jsx-runtime.ts", nativeJSXRuntime},
 	{"bifrost/metro.js", nativeMetroHelper},
 	{"bifrost/net.ts", nativeNet},
@@ -1085,10 +1112,15 @@ func writeNativeProject(native string, app appRouter, origin, overlay string) er
 			return err
 		}
 	}
-	// The layout is written with the overlay in hand, because the lines it adds
-	// depend on what the app ships next to it.
-	if err := writeNativeFile(native, "app/_layout.tsx", nativeLayout(overlay), 0o644); err != nil {
-		return err
+	// The layout and the tag map are written with the overlay in hand, because
+	// what they contain depends on what the app ships next to them.
+	for name, content := range map[string]string{
+		"app/_layout.tsx":  nativeLayout(overlay),
+		"bifrost/host.tsx": nativeHost(overlay),
+	} {
+		if err := writeNativeFile(native, name, content, 0o644); err != nil {
+			return err
+		}
 	}
 	manifest := nativePackageManifest()
 	if err := mergeNativeOverlayManifest(overlay, manifest); err != nil {
