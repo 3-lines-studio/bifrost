@@ -1171,6 +1171,60 @@ func TestNativeTagMapDoesNotPretendToPaintAControl(t *testing.T) {
 	}
 }
 
+func TestNativeTagMapSubmitsAFormTheWayABrowserDoes(t *testing.T) {
+	// Measured on fonnso: the login page is a <form onSubmit> with a button of
+	// type="submit", and pressing that button on the device made no request at
+	// all. A Pressable carrying type="submit" is a Pressable that carries a prop
+	// nothing reads, and the fields of the form go nowhere.
+	host := nativeHost("")
+	if !nativeTagIsNamed("form") {
+		t.Fatal("<form> has no counterpart of its own")
+	}
+	boxes, err := nativeTagGroup(host, "BOXES")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if boxes["form"] {
+		t.Fatal("<form> is a box, so nothing of it survives")
+	}
+	for _, wanted := range []string{
+		// The button asks the form it is inside, and only when it is a submit.
+		"usePress(type, onPress as (() => void) | undefined)",
+		// The browser's name for the press is answered, not dropped.
+		"export function nativeProps(props: unknown): unknown",
+		// The form keeps its fields and answers the submit with them, in a module
+		// of its own, so that a button the app paints itself still submits.
+		"const [fields] = useState(() => new Map<string, string>());",
+		"body.append(name, value)",
+		// What the page reads out of the event is the FormData the form built.
+		"source instanceof NativeFormData",
+	} {
+		if !strings.Contains(host, wanted) && !strings.Contains(nativeForm, wanted) && !strings.Contains(nativeJSXRuntime, wanted) {
+			t.Fatalf("neither the tag map nor the form carries %q", wanted)
+		}
+	}
+}
+
+func TestNativeTagMapKeepsTheValueOfEveryFieldOfAForm(t *testing.T) {
+	// A page that reads its fields out of the event -- `new FormData(event
+	// .currentTarget).get("email")` -- asks the document for them. There is no
+	// document, so the answer has to come from the field itself: what the page
+	// set, and what somebody typed into a field the page let keep its own value.
+	host := nativeHost("")
+	if !strings.Contains(host, "function Field({ name, value, defaultValue, ...rest }") {
+		t.Fatal("a field does not know its own name")
+	}
+	if !strings.Contains(host, `form.fields.set(name, held === undefined || held === null ? "" : String(held))`) {
+		t.Fatal("a field the page holds does not reach the form")
+	}
+	if !strings.Contains(host, "form.fields.set(name, text)") {
+		t.Fatal("what somebody typed into a field does not reach the form")
+	}
+	if !nativeTagIsNamed("input") || !nativeTagIsNamed("textarea") {
+		t.Fatal("a field of a form is not in the table")
+	}
+}
+
 func TestNativeRuntimeLeavesNamesItDoesNotKnowAlone(t *testing.T) {
 	// react-native builds its own views out of strings (`codegenNativeComponent`
 	// returns "RCTView"), so replacing an unknown name would tear them apart.
@@ -1400,5 +1454,29 @@ func TestNativeScreenDoesNotReuseTheLoadingViewAsTheDocumentWrapper(t *testing.T
 	}
 	if !strings.Contains(nativeScreen, `<View key="failed" style={styles.center}>`) {
 		t.Fatal("the failed view has no key to keep it apart from the wrapper")
+	}
+}
+
+func TestNativeAnswersTheInteractionAPageWritesForTheBrowser(t *testing.T) {
+	// Measured on the login page of fonnso: the button that opens the link of a
+	// mail answered onClick, and on the device nothing happened at all. React
+	// Native answers onPress, so a page written for the browser has to be
+	// answered here, on both roads an element is built on: jsx, and createElement
+	// for what a component of the app builds by hand.
+	host := nativeHost("")
+	if !strings.Contains(host, "export function nativeProps(props: unknown): unknown") {
+		t.Fatal("the tag map does not answer the interaction of the browser")
+	}
+	if !strings.Contains(host, "onPress: pressed === undefined ? click : () => { pressed(); click(); }") {
+		t.Fatal("a page that answers both names loses one of them")
+	}
+	if !strings.Contains(nativeJSXRuntime, "loaded().nativeProps(rest[0])") {
+		t.Fatal("jsx does not go through it")
+	}
+	if !strings.Contains(nativeReact, "host.nativeProps(props)") {
+		t.Fatal("createElement does not go through it")
+	}
+	if !strings.Contains(nativeReact, "return createElement(type, ...rest);") {
+		t.Fatal("react-native's own views would be rewritten")
 	}
 }

@@ -346,16 +346,26 @@ const createElement = React.createElement;
 // Lazy, like the jsx runtime wrapper: this module is evaluated while
 // react-native is still booting, and pulling it in here would land it ahead of
 // the polyfills expo installs.
-function map(type) {
+//
+// A component of the app builds its elements with createElement as often as with
+// jsx -- base-ui does it for every primitive it renders -- and the browser's
+// name for the interaction of an element has to be answered on that road too.
+function mapped(type, props) {
   if (typeof type !== "string") {
-    return type;
+    return null;
   }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { hostComponent } = require("./host");
-  return hostComponent(type) ?? type;
+  const host = require("./host");
+  return { type: host.hostComponent(type) ?? type, props: host.nativeProps(props) };
 }
 
-React.createElement = (type, ...rest) => createElement(map(type), ...rest);
+React.createElement = (type, ...rest) => {
+  const host = mapped(type, rest[0]);
+  if (host === null) {
+    return createElement(type, ...rest);
+  }
+  return createElement(host.type, host.props, ...rest.slice(1));
+};
 
 module.exports = React;
 `
@@ -385,6 +395,86 @@ globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
   }
   return original(input, init);
 };
+`
+
+// A form of the web app submits itself: the browser sends its fields when a
+// button of type="submit" inside it is pressed. A native target has no browser,
+// and a Pressable carrying type="submit" is a Pressable carrying a prop nothing
+// reads -- measured on the login form of fonnso, where pressing the button made
+// no request at all. So the form keeps its fields and its button asks it to
+// submit.
+//
+// It is a module of its own and not part of the tag map because the map is not
+// the only place a button comes from: an app that paints <button> its own way
+// replaces the one of the map, and the form it is inside is still the form.
+const nativeForm = `import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+
+export type Form = {
+  fields: Map<string, string>;
+  submit: () => void;
+};
+
+const FormContext = createContext<Form | null>(null);
+
+// A FormData built out of an element asks the document for the fields of a form.
+// There is no document -- the form answered already -- so the constructor hands
+// back what it was given. A page that builds its own, to put a file in, gets an
+// empty one to append to.
+const NativeFormData = globalThis.FormData;
+globalThis.FormData = function FormData(source?: unknown) {
+  if (source instanceof NativeFormData) {
+    return source;
+  }
+  return new NativeFormData();
+} as unknown as typeof FormData;
+
+export function FormProvider({ onSubmit, children }: { onSubmit?: unknown; children?: ReactNode }) {
+  const [fields] = useState(() => new Map<string, string>());
+  const form = useMemo<Form>(
+    () => ({
+      fields,
+      submit: () => {
+        if (typeof onSubmit !== "function") {
+          return;
+        }
+        const body = new NativeFormData();
+        for (const [name, value] of fields) {
+          body.append(name, value);
+        }
+        (onSubmit as (event: unknown) => void)({ preventDefault() {}, currentTarget: body, target: body });
+      },
+    }),
+    [fields, onSubmit],
+  );
+  return <FormContext.Provider value={form}>{children}</FormContext.Provider>;
+}
+
+// The form an element is inside, or nothing when it is not inside one.
+export function useForm(): Form | null {
+  return useContext(FormContext);
+}
+
+// What pressing a button does: whatever the page asked for, and then the form it
+// is inside when the button sends it. A browser clicks the button and then sends
+// the form, in that order, and a button that does neither is not a button.
+//
+// It is here and not in the tag map because the map is not the only place a
+// button comes from: an app that paints <button> its own way replaces the one of
+// the map, and the form it is inside is still the form.
+export function usePress(type: unknown, onPress?: () => void): (() => void) | undefined {
+  const form = useForm();
+  const submit = type === "submit" ? form?.submit : undefined;
+  if (onPress === undefined) {
+    return submit;
+  }
+  if (submit === undefined) {
+    return onPress;
+  }
+  return () => {
+    onPress();
+    submit();
+  };
+}
 `
 
 // A native target has no document: react-native draws views, and a page written
@@ -1203,11 +1293,12 @@ for (const [name, component] of Object.entries(extraTags)) {
 const nativeHostHead = `import { Children, isValidElement, type ReactNode } from "react";
 import { Image, Linking, Pressable, Text, TextInput, View } from "react-native";
 import { navigate } from "virtual:bifrost/navigation";
+import { FormProvider, useForm, usePress } from "./form";
 `
 
 const nativeHostBody = `
 // Blocks. They hold other blocks, which a View can.
-const BOXES = ["address", "article", "aside", "caption", "dd", "details", "dialog", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form", "header", "legend", "li", "main", "nav", "ol", "output", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul"];
+const BOXES = ["address", "article", "aside", "caption", "dd", "details", "dialog", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "header", "legend", "li", "main", "nav", "ol", "output", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul"];
 
 // Everything whose content is text.
 const TEXTS = ["abbr", "b", "br", "cite", "code", "em", "h1", "h2", "h3", "h4", "h5", "h6", "i", "label", "mark", "p", "pre", "q", "s", "small", "span", "strong", "time", "u"];
@@ -1265,11 +1356,14 @@ function Box({ children, ...rest }: { children?: ReactNode } & Record<string, un
   return <View {...rest}>{runs}</View>;
 }
 
-function Anchor({ href, children, ...rest }: { href?: string; children?: unknown } & Record<string, unknown>) {
+function Anchor({ href, children, onPress, ...rest }: { href?: string; children?: unknown; onPress?: unknown } & Record<string, unknown>) {
   return (
     <Pressable
       accessibilityRole="link"
       onPress={() => {
+        if (typeof onPress === "function") {
+          (onPress as () => void)();
+        }
         if (typeof href !== "string") {
           return;
         }
@@ -1286,12 +1380,38 @@ function Anchor({ href, children, ...rest }: { href?: string; children?: unknown
   );
 }
 
-function Button({ children, ...rest }: { children?: unknown } & Record<string, unknown>) {
-  return <Pressable accessibilityRole="button" {...rest}><Text>{children}</Text></Pressable>;
+function Button({ children, type, onPress, ...rest }: { children?: unknown; type?: unknown; onPress?: unknown } & Record<string, unknown>) {
+  return <Pressable accessibilityRole="button" onPress={usePress(type, onPress as (() => void) | undefined)} {...rest}><Text>{children}</Text></Pressable>;
 }
 
-function Input({ value, defaultValue, ...rest }: Record<string, unknown>) {
-  return <TextInput defaultValue={defaultValue === undefined ? (value as string) : (defaultValue as string)} {...rest} />;
+// A form of the web app keeps its fields and submits them, because there is no
+// browser to do it: the button of type="submit" inside asks it, and the fields
+// answer with what they hold. The whole of it is in ./form, so that a button the
+// app paints its own way still submits the form it is inside.
+function FormTag({ onSubmit, children, ...rest }: { onSubmit?: unknown; children?: ReactNode } & Record<string, unknown>) {
+  return <FormProvider onSubmit={onSubmit}><Box {...rest}>{children}</Box></FormProvider>;
+}
+
+// One field of a form: what the page set, and what somebody typed when the page
+// let the field keep it. A page that reads the fields out of the event asks the
+// form for them, and the answer is what a browser would have given it.
+function Field({ name, value, defaultValue, ...rest }: Record<string, unknown>) {
+  const form = useForm();
+  const held = value === undefined ? defaultValue : value;
+  if (form && typeof name === "string") {
+    form.fields.set(name, held === undefined || held === null ? "" : String(held));
+  }
+  return (
+    <TextInput
+      defaultValue={value === undefined ? (defaultValue as string) : (value as string)}
+      {...rest}
+      onChangeText={(text) => {
+        if (form && typeof name === "string") {
+          form.fields.set(name, text);
+        }
+      }}
+    />
+  );
 }
 
 function ImageTag({ src, alt, ...rest }: { src?: string; alt?: string } & Record<string, unknown>) {
@@ -1309,10 +1429,11 @@ function Nothing() {
 const NAMED: Record<string, unknown> = {
   a: Anchor,
   button: Button,
+  form: FormTag,
   hr: Rule,
   img: ImageTag,
-  input: Input,
-  textarea: TextInput,
+  input: Field,
+  textarea: Field,
 };
 for (const name of BOXES) {
   NAMED[name] = Box;
@@ -1322,6 +1443,29 @@ for (const name of TEXTS) {
 }
 for (const name of HIDDEN) {
   NAMED[name] = Nothing;
+}
+
+// The interaction of a page is written the way a browser writes it: onClick. A
+// native view is pressed, and React Native answers onPress -- the browser's name
+// is dropped in silence. Measured on the login page of fonnso: the button that
+// opens the link of the mail answered onClick and did nothing on the device, and
+// so did each of the seventy-eight onClick of the app.
+//
+// It is kept a press and nothing else: the button that sends a form asks the
+// form with ./form, which needs the element it is inside and so cannot happen
+// here.
+export function nativeProps(props: unknown): unknown {
+  if (props === null || typeof props !== "object") {
+    return props;
+  }
+  const given = props as Record<string, unknown>;
+  if (typeof given.onClick !== "function") {
+    return props;
+  }
+  const { onClick, ...rest } = given;
+  const click = onClick as () => void;
+  const pressed = rest.onPress as (() => void) | undefined;
+  return { ...rest, onPress: pressed === undefined ? click : () => { pressed(); click(); } };
 }
 
 // React Native builds its own views out of strings too, so a name this table
@@ -1351,6 +1495,7 @@ const nativeJSXRuntime = `import * as runtime from "react/jsx-runtime";
 type Host = {
   hostComponent(name: string): unknown;
   droppedProps(name: string, props: unknown): string[];
+  nativeProps(props: unknown): unknown;
 };
 
 let host: Host | null = null;
@@ -1382,13 +1527,17 @@ function warnDropped(name: string, props: unknown) {
 // its own views out of strings too.
 const wrap = (create: unknown) =>
   (type: unknown, ...rest: unknown[]) => {
-    if (__DEV__ && typeof type === "string") {
-      warnDropped(type, rest[0]);
+    if (typeof type === "string") {
+      if (__DEV__) {
+        warnDropped(type, rest[0]);
+      }
+      return (create as (type: unknown, ...rest: unknown[]) => unknown)(
+        component(type),
+        loaded().nativeProps(rest[0]),
+        ...rest.slice(1),
+      );
     }
-    return (create as (type: unknown, ...rest: unknown[]) => unknown)(
-      typeof type === "string" ? component(type) : type,
-      ...rest,
-    );
+    return (create as (type: unknown, ...rest: unknown[]) => unknown)(type, ...rest);
   };
 
 export const jsx = wrap(runtime.jsx);
@@ -1403,6 +1552,7 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/css-warnings.js", nativeCSSWarnings},
 	{"bifrost/data.ts", nativeData},
 	{"bifrost/dom.js", nativeDOM},
+	{"bifrost/form.tsx", nativeForm},
 	{"bifrost/jsx-runtime.ts", nativeJSXRuntime},
 	{"bifrost/metro.js", nativeMetroHelper},
 	{"bifrost/net.ts", nativeNet},
