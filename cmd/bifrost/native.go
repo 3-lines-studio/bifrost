@@ -31,13 +31,13 @@ const nativeTSConfig = `{
 `
 
 const nativeMetroConfig = `const { getDefaultConfig } = require("expo/metro-config");
-const { withBifrost } = require("./bifrost/metro");
+const { withBifrost, withBifrostWarnings } = require("./bifrost/metro");
 
-module.exports = withBifrost(getDefaultConfig(__dirname));
+module.exports = withBifrostWarnings(withBifrost(getDefaultConfig(__dirname)));
 `
 
-// The two seams of a native target live here and not in metro.config.js, because
-// an app that needs a resolver of its own replaces that file whole. It imports
+// The seams of a native target live here and not in metro.config.js, because an
+// app that needs a resolver of its own replaces that file whole. It imports
 // this and wraps it instead, and the seams survive.
 const nativeMetroHelper = `const path = require("node:path");
 
@@ -81,7 +81,135 @@ function withBifrost(config) {
   return config;
 }
 
-module.exports = { withBifrost };
+// The compiler throws away what it could not express, and a Tailwind class that
+// compiles to nothing looks exactly like one that works: the measured case was
+// h-[100dvh], which is no height at all on a native target and a viewport on
+// the web. This puts a transformer in front of whatever the app has and reports
+// what was dropped, so the next one is a line in the log instead of an
+// afternoon. It goes last, outermost, because it has to see the config the
+// other wrappers produced.
+function withBifrostWarnings(config) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require.resolve("react-native-css/compiler");
+  } catch {
+    // No stylesheet compiler in the app, so there is nothing it could drop.
+    return config;
+  }
+  config.transformer = {
+    ...config.transformer,
+    bifrostUpstreamTransformer: config.transformerPath ?? null,
+  };
+  config.transformerPath = path.join(__dirname, "css-warnings.js");
+  return config;
+}
+
+module.exports = { withBifrost, withBifrostWarnings };
+`
+
+// Runs in the transformer, in place of whatever react-native-css installed, and
+// hands every file to it unchanged. What it adds is a second look at a
+// stylesheet, because the compiler collects the values it cannot express and the
+// transformer never asks for them.
+const nativeCSSWarnings = `const path = require("node:path");
+const { unstable_transformerPath } = require("@expo/metro-config");
+const { compile } = require("react-native-css/compiler");
+
+const worker = require(unstable_transformerPath);
+
+const reported = new Set();
+
+const isStylesheet = (filePath) => /\.(s?css|sass)$/.test(filePath);
+
+// A class whose declaration a native target cannot express compiles to nothing:
+// h-svh is a height on the web and no height at all here, and nothing anywhere
+// says so -- the measured case was a whole tree that closed to zero height, and
+// it took an afternoon. The compiler collects the values it dropped and the
+// transformer never asks for them, so this reads them back and names the class
+// that asked for each one. A property the target lacks outright -- cursor,
+// resize, snap -- is not reported: in every case measured it was cosmetic, and
+// the reset Tailwind ships is full of them.
+function dropped(css, warnings) {
+  const values = warnings.values ?? {};
+  const found = [];
+  let parse;
+  try {
+    parse = require("postcss").parse;
+  } catch {
+    // No CSS parser in the app, so the values are said without the class that
+    // asked for them. Less useful and still true.
+    for (const [property, list] of Object.entries(values)) {
+      for (const value of list) {
+        found.push({ at: "", property, value: String(value) });
+      }
+    }
+    return found;
+  }
+  parse(css).walkRules((rule) => {
+    for (const selector of rule.selectors) {
+      if (selector.charAt(0) !== "." || selector.includes(" ") || selector.includes("::")) {
+        continue;
+      }
+      rule.walkDecls((declaration) => {
+        for (const value of values[declaration.prop] ?? []) {
+          if (declaration.value.includes(String(value))) {
+            found.push({ at: className(selector), property: declaration.prop, value: declaration.value.trim() });
+          }
+        }
+      });
+    }
+  });
+  return found;
+}
+
+// A class reaches the stylesheet escaped: the one the app wrote as h-[100dvh]
+// is a selector named .h-\[100dvh\], and a warning that says so cannot be
+// searched for. Tailwind escapes what a class name cannot hold with a backslash,
+// and what it cannot spell in one character as a hex escape.
+function className(selector) {
+  return selector.replace(/\\([0-9a-fA-F]{1,6}) ?|\\(.)/g, (_, hex, one) =>
+    hex === undefined ? one : String.fromCodePoint(parseInt(hex, 16)),
+  );
+}
+
+async function report(config, projectRoot, filePath, data, options) {
+  let css;
+  try {
+    const web = await worker.transform(config, projectRoot, filePath, data, { ...options, platform: "web" });
+    css = web.output[0].data.css.code.toString();
+  } catch {
+    // A stylesheet that does not survive the web pipeline has nothing to say.
+    return;
+  }
+  const where = path.relative(projectRoot, filePath) || filePath;
+  const warnings = compile(css, { ...config.reactNativeCSS, filename: filePath, projectRoot }).warnings();
+  for (const one of dropped(css, warnings)) {
+    const said = "bifrost: " + where + (one.at === "" ? "" : ": " + one.at) + ": " + one.property + ": " + one.value + " has no native counterpart";
+    if (reported.has(said)) {
+      continue;
+    }
+    reported.add(said);
+    console.warn(said);
+  }
+}
+
+// Whatever transformer the app installed, handed every file unchanged. What this
+// adds is a second look at a stylesheet, which is the only thing the compiler
+// does not already do.
+module.exports.transform = async (config, projectRoot, filePath, data, options) => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const upstream = require(config.transformer?.bifrostUpstreamTransformer ?? unstable_transformerPath);
+  const result = await upstream.transform(config, projectRoot, filePath, data, options);
+  // The report costs a second pass over the stylesheet -- the web pipeline the
+  // native one already ran -- and it is a development diagnostic, so a build
+  // does not pay for it. A stylesheet the app did not write is one it cannot
+  // fix, and a node_modules tree has hundreds of them.
+  const css = options.type !== "asset" && isStylesheet(filePath);
+  if (options.dev !== false && options.platform !== "web" && css && !filePath.includes("node_modules")) {
+    await report(config, projectRoot, filePath, data, options);
+  }
+  return result;
+};
 `
 
 const nativeLayout = `import { Stack } from "expo-router";
@@ -453,6 +581,32 @@ const TEXTS = ["abbr", "b", "br", "cite", "code", "em", "h1", "h2", "h3", "h4", 
 // Sheet links, metadata and scripts have nothing to paint.
 const HIDDEN = ["base", "head", "link", "meta", "noscript", "script", "style", "title"];
 
+// Props whose whole meaning is the document: a page writes them for the browser,
+// a native view has nothing to do with them, and the renderer drops them without
+// a word. Two cases earn a warning. One is content that disappears -- a
+// dangerouslySetInnerHTML paragraph paints nothing at all. The other is a
+// surface the target does not have -- contentEditable is dead text here, and
+// nothing says the editing went away. Both are invisible until somebody
+// compares the two targets, so the runtime names them in development. A prop the
+// web gets for free and native does not -- srcset, loading -- is not worth a
+// line, because leaving it out changes nothing. Measured: htmlFor is not either.
+// It is an association a reader still reads through, and fonnso alone writes it
+// twenty-nine times, which would be twenty-nine warnings for a paragraph still
+// on the screen.
+const DOM_ONLY = ["dangerouslySetInnerHTML", "contentEditable"];
+
+// The props of an element that a native target cannot honour. Called by the
+// runtime, which is the only place that still knows the tag the page wrote.
+// A name that is not all lowercase is not a tag: react-native makes its own
+// views out of strings like "RCTView", and the prop the page leaked travels
+// down to them, so answering for those would say the same thing twice.
+export function droppedProps(name: string, props: unknown): string[] {
+  if (name !== name.toLowerCase() || props === null || typeof props !== "object") {
+    return [];
+  }
+  return DOM_ONLY.filter((prop) => (props as Record<string, unknown>)[prop] !== undefined);
+}
+
 // Only a Text may hold a string, so a block that holds text has to become one.
 // A run of text and inline elements is wrapped together; everything else keeps
 // its own component, which is what a block child already is.
@@ -538,7 +692,8 @@ for (const name of HIDDEN) {
 
 // React Native builds its own views out of strings too, so a name this table
 // does not know has to stay exactly as it is: replacing it would tear the
-// native views apart.
+// native views apart. A name that is missing says so, because the alternative
+// is a paragraph that quietly is not there.
 export function hostComponent(name: string): unknown {
   const component = NAMED[name];
   if (component !== undefined) {
@@ -559,28 +714,48 @@ const nativeJSXRuntime = `import * as runtime from "react/jsx-runtime";
 // compiler needs it to build the first element. It must therefore pull nothing
 // in by itself: importing react-native here would land it ahead of the URL and
 // TextEncoder patches expo installs, and the app would die before it renders.
-type Host = { hostComponent(name: string): unknown };
+type Host = {
+  hostComponent(name: string): unknown;
+  droppedProps(name: string, props: unknown): string[];
+};
 
 let host: Host | null = null;
 
-function component(name: string): unknown {
+function loaded(): Host {
   if (host === null) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     host = require("./host") as Host;
   }
-  const mapped = host.hostComponent(name);
+  return host;
+}
+
+function component(name: string): unknown {
+  const mapped = loaded().hostComponent(name);
   return mapped === undefined ? name : mapped;
+}
+
+// A prop the target cannot honour would otherwise be dropped in silence, and a
+// page would look right while missing a paragraph. This is the last place that
+// knows both the tag the page wrote and the props it was given.
+function warnDropped(name: string, props: unknown) {
+  for (const prop of loaded().droppedProps(name, props)) {
+    console.warn("bifrost: a native target drops " + prop + " on <" + name + ">");
+  }
 }
 
 // A tag a page wrote for the web becomes the component that paints it natively;
 // a name this table does not know is left alone, because react-native builds
 // its own views out of strings too.
 const wrap = (create: unknown) =>
-  (type: unknown, ...rest: unknown[]) =>
-    (create as (type: unknown, ...rest: unknown[]) => unknown)(
+  (type: unknown, ...rest: unknown[]) => {
+    if (__DEV__ && typeof type === "string") {
+      warnDropped(type, rest[0]);
+    }
+    return (create as (type: unknown, ...rest: unknown[]) => unknown)(
       typeof type === "string" ? component(type) : type,
       ...rest,
     );
+  };
 
 export const jsx = wrap(runtime.jsx);
 export const jsxs = wrap(runtime.jsxs);
@@ -592,6 +767,7 @@ var nativeProjectFiles = []nativeFile{
 	{"tsconfig.json", nativeTSConfig},
 	{"metro.config.js", nativeMetroConfig},
 	{"app/_layout.tsx", nativeLayout},
+	{"bifrost/css-warnings.js", nativeCSSWarnings},
 	{"bifrost/data.ts", nativeData},
 	{"bifrost/host.tsx", nativeHost},
 	{"bifrost/jsx-runtime.ts", nativeJSXRuntime},
@@ -675,6 +851,9 @@ func runNative(args []string) error {
 	_, _ = fmt.Fprintf(os.Stdout, "Bifrost native project: %s\n", filepath.ToSlash(native))
 	if overlayExists(overlay) {
 		_, _ = fmt.Fprintf(os.Stdout, "  app files from: %s\n", filepath.ToSlash(overlay))
+		if warning := nativeOverlayWarning(overlay); warning != "" {
+			_, _ = fmt.Fprintln(os.Stderr, warning)
+		}
 	}
 	_, _ = fmt.Fprintf(os.Stdout, "  cd %s && bun install && bunx expo start\n", filepath.ToSlash(native))
 	return nil
@@ -799,6 +978,31 @@ func nativeOverlayFiles(overlay string) ([]string, error) {
 func overlayExists(overlay string) bool {
 	info, err := os.Stat(overlay)
 	return err == nil && info.IsDir()
+}
+
+// An app that ships a metro.config.js of its own keeps that file whole and
+// loses everything the generated one installed. Every seam but one fails loud:
+// a missing resolver leaves a module unresolved. The CSS diagnostics fail
+// quietly, because not being installed and having nothing to report look
+// exactly the same -- the transformer is simply never wrapped, and every class
+// the target cannot express goes back to being invisible. The generated config
+// is the only place that installs it, so the generator reads the file it is
+// about to leave alone and says what has to be there.
+func nativeOverlayWarning(overlay string) string {
+	name := filepath.Join(overlay, "metro.config.js")
+	content, err := os.ReadFile(name)
+	if err != nil {
+		return ""
+	}
+	if strings.Contains(string(content), "withBifrostWarnings") {
+		return ""
+	}
+	return fmt.Sprintf(
+		"bifrost: %s replaces the generated metro.config.js, so it has to call withBifrostWarnings outermost:\n"+
+			"  module.exports = withBifrostWarnings(withBifrost(yourConfig));\n"+
+			"  without it, a class the native target cannot express is dropped without a word.",
+		filepath.ToSlash(name),
+	)
 }
 
 // An app adds the modules its own screens need to the manifest the generator
