@@ -614,6 +614,61 @@ func TestNativeTakesTheTagOfASelectorDownToAClassInAStylesheet(t *testing.T) {
 	}
 }
 
+func TestNativeWatchesAStreamOfItsOwnServer(t *testing.T) {
+	// A page watches its server through `new EventSource(url)`, and there is no
+	// such thing on a native target: measured, the live path of the app of the
+	// case died with `ReferenceError: Property 'EventSource' doesn't exist`, and
+	// the answer did not appear while it was being written.
+	shipped := false
+	for _, file := range nativeProjectFiles {
+		if file.Name == "bifrost/events.ts" && file.Content == nativeEventSource {
+			shipped = true
+		}
+	}
+	if !shipped {
+		t.Fatal("the stream is not part of the generated project")
+	}
+	// It is built on XMLHttpRequest and not on fetch, and that is a measurement:
+	// a streaming read through the fetch of this target never hands back a body,
+	// and the same stream through XMLHttpRequest arrives in parts.
+	if !strings.Contains(nativeEventSource, "new globalThis.XMLHttpRequest()") {
+		t.Fatal("the stream is not read through XMLHttpRequest")
+	}
+	if !strings.Contains(nativeDOM, `require("./events").EventSource`) {
+		t.Fatal("the shim does not install the stream")
+	}
+	if !strings.Contains(nativeDOM, "if (target.EventSource === undefined) {") {
+		t.Fatal("the shim would replace a stream the target already has")
+	}
+	// A connection says its whole text every time it changes, so what is new is
+	// what was not read yet.
+	if !strings.Contains(nativeEventSource, "request.responseText.slice(this.read)") {
+		t.Fatal("the whole text of the connection would be read again on every change")
+	}
+	// Measured: a server with nothing to say yet sends no text, so the headers
+	// are what says the connection is open.
+	if !strings.Contains(nativeEventSource, "if (request.readyState >= 2 && this.readyState === CONNECTING) {") {
+		t.Fatal("the stream is only open once it has text")
+	}
+	if !strings.Contains(nativeEventSource, "if (request.readyState === 3 && request.responseText.length > this.read) {") {
+		t.Fatal("a connection that says the same text again would be read as new")
+	}
+	// A browser asks again when a stream drops, and it says where it left off, or
+	// the whole log arrives once more.
+	if !strings.Contains(nativeEventSource, "this.again()") ||
+		!strings.Contains(nativeEventSource, `request.setRequestHeader("Last-Event-ID", this.lastEventId)`) {
+		t.Fatal("a connection that drops is not continued where it left off")
+	}
+	// A server that refuses -- the thread is not there, the request is not
+	// allowed -- refuses again: asking forever is asking the same thing forever.
+	if !strings.Contains(nativeEventSource, "request.status >= 400") {
+		t.Fatal("a refused stream would be asked again forever")
+	}
+	// The reader of the protocol is in the module, where the harness can run it.
+	if !strings.Contains(nativeEventSource, "export class Messages {") {
+		t.Fatal("the reader of the protocol is not where it can be measured")
+	}
+}
 func TestNativeWarningsGoInFrontOfTheCompilerTheAppInstalled(t *testing.T) {
 	// The compiler collects the values it cannot express and the transformer
 	// throws them away, so a class that compiles to nothing looks like one that

@@ -901,6 +901,264 @@ export function parseHTML(html: string): Node[] {
 //
 // Which is also why it is here rather than in the overlay: it is the same shim
 // in every app, and the app that needs it should not have to write it again.
+//
+// A page watches its own server through a stream, and the browser API for it --
+// EventSource -- does not exist on a native target either. The whole of what it
+// is lives below, in a module of its own, and ./dom installs it along with the
+// rest of what a page expects to find.
+const nativeEventSource = `// A stream a page watches is written in the language of a browser: "new
+// EventSource(url)". Measured on the app of the case: the whole live path is
+// dead here -- "ReferenceError: Property 'EventSource' doesn't exist" -- and the
+// chat falls back to asking for the log again, so the answer does not appear
+// while it is being written and nothing else arrives as it happens.
+//
+// The browser API is built on XMLHttpRequest and not on fetch, and not because
+// it is shorter: measured on the device, a streaming read through the fetch of
+// the app never hands back a body, and the same stream through
+// XMLHttpRequest reaches readyState 3 with the first 964 bytes, keeps the
+// connection open, and grows by exactly the size of a row each time one is
+// written -- 964, 1001, 1038, 1075. That is what a stream is, and it is the only
+// road this target has.
+//
+// A url without a host is the origin of the app, the same way ./net does it for
+// fetch: a native client has no origin to resolve against.
+import { ORIGIN } from "./origin";
+
+export const CONNECTING = 0;
+export const OPEN = 1;
+export const CLOSED = 2;
+
+// How long to wait before asking again, doubling to a ceiling. A browser has a
+// number of its own and the server can send "retry:"; ours is the one measured
+// to reconnect fast enough that a dropped connection does not read as a broken
+// one. It resets the moment a stream starts delivering.
+const FIRST = 1000;
+const MOST = 8000;
+
+// One chunk of the protocol. An event ends at a blank line, a line that starts
+// with a colon carries nothing, and the three fields that matter are "data",
+// "id" and "event". The text arrives in pieces that cut anywhere, including the
+// middle of a line, so what is not a whole line waits for the next piece.
+export class Messages {
+  constructor() {
+    this.rest = "";
+    this.data = [];
+    this.id = null;
+    this.event = "";
+  }
+
+  push(text) {
+    this.rest += text;
+    const out = [];
+    let cut = this.rest.indexOf("\n");
+    while (cut >= 0) {
+      let line = this.rest.slice(0, cut);
+      this.rest = this.rest.slice(cut + 1);
+      if (line.endsWith("\r")) {
+        line = line.slice(0, -1);
+      }
+      cut = this.rest.indexOf("\n");
+      if (line === "") {
+        if (this.data.length > 0) {
+          out.push({ data: this.data.join("\n"), id: this.id, event: this.event });
+        }
+        this.data = [];
+        this.event = "";
+        continue;
+      }
+      if (line.charAt(0) === ":") {
+        continue;
+      }
+      const at = line.indexOf(":");
+      const field = at < 0 ? line : line.slice(0, at);
+      let value = at < 0 ? "" : line.slice(at + 1);
+      if (value.charAt(0) === " ") {
+        value = value.slice(1);
+      }
+      if (field === "data") {
+        this.data.push(value);
+      } else if (field === "id") {
+        this.id = value;
+      } else if (field === "event") {
+        this.event = value;
+      }
+    }
+    return out;
+  }
+}
+
+function absolute(url) {
+  if (typeof url !== "string") {
+    return String(url);
+  }
+  if (url.charAt(0) === "/") {
+    return ORIGIN + url;
+  }
+  return url;
+}
+
+export class EventSource {
+  constructor(url, options) {
+    this.url = absolute(url);
+    this.withCredentials = Boolean(options && options.withCredentials);
+    this.readyState = CONNECTING;
+    this.onopen = null;
+    this.onmessage = null;
+    this.onerror = null;
+    // The id of the last event the server named, which is what it is asked to
+    // continue from when the connection has to be made again.
+    this.lastEventId = "";
+    this.asked = 0;
+    this.done = false;
+    this.waiting = null;
+    this.request = null;
+    this.read = 0;
+    this.messages = new Messages();
+    this.handlers = new Map();
+    this.connect();
+  }
+
+  addEventListener(name, handler) {
+    const list = this.handlers.get(name);
+    if (list === undefined) {
+      this.handlers.set(name, [handler]);
+      return;
+    }
+    list.push(handler);
+  }
+
+  removeEventListener(name, handler) {
+    const list = this.handlers.get(name);
+    if (list === undefined) {
+      return;
+    }
+    this.handlers.set(name, list.filter((one) => one !== handler));
+  }
+
+  dispatch(name, event) {
+    const list = this.handlers.get(name);
+    if (list !== undefined) {
+      for (const handler of list.slice()) {
+        handler.call(this, event);
+      }
+    }
+    const own = this["on" + name];
+    if (typeof own === "function") {
+      own.call(this, event);
+    }
+  }
+
+  // Asking again is what a browser does when a stream ends, and the id travels
+  // with the request, so the server continues where it left off instead of
+  // sending everything once more.
+  again() {
+    if (this.done || this.waiting !== null) {
+      return;
+    }
+    const delay = Math.min(FIRST * Math.pow(2, this.asked), MOST);
+    this.asked += 1;
+    this.waiting = setTimeout(() => {
+      this.waiting = null;
+      this.connect();
+    }, delay);
+  }
+
+  connect() {
+    if (this.done) {
+      return;
+    }
+    const request = new globalThis.XMLHttpRequest();
+    this.request = request;
+    this.read = 0;
+    this.messages = new Messages();
+    request.open("GET", this.url, true);
+    request.setRequestHeader("Accept", "text/event-stream");
+    if (this.lastEventId !== "") {
+      request.setRequestHeader("Last-Event-ID", this.lastEventId);
+    }
+    request.onreadystatechange = () => {
+      this.receive(request);
+    };
+    request.onerror = () => {
+      this.failed();
+    };
+    request.send();
+  }
+
+  receive(request) {
+    if (this.done || request !== this.request) {
+      return;
+    }
+    // A server that refuses -- the thread is not there, the request is not
+    // allowed -- refuses the same way however many times it is asked, and asking
+    // forever is asking a question whose answer is already known.
+    if (request.status >= 400) {
+      this.done = true;
+      this.readyState = CLOSED;
+      this.dispatch("error", { type: "error" });
+      return;
+    }
+    // The headers are in as soon as the connection reaches them, and a server
+    // with nothing to say yet sends no text at all: measured, a stream with
+    // nothing new stays at the headers and is open all the same. Waiting for
+    // text to call it open would leave a page that listens for the opening
+    // waiting for something that already happened.
+    if (request.readyState >= 2 && this.readyState === CONNECTING) {
+      if (request.status === 0) {
+        this.failed();
+        return;
+      }
+      this.readyState = OPEN;
+      this.asked = 0;
+      this.dispatch("open", { type: "open" });
+    }
+    // Everything the connection has said so far is what has not been read yet:
+    // it says the whole of it again and again, each time a little longer.
+    if (request.readyState === 3 && request.responseText.length > this.read) {
+      const text = request.responseText.slice(this.read);
+      this.read = request.responseText.length;
+      for (const one of this.messages.push(text)) {
+        if (one.id !== null) {
+          this.lastEventId = one.id;
+        }
+        const name = one.event === "" ? "message" : one.event;
+        this.dispatch(name, { type: name, data: one.data, lastEventId: this.lastEventId });
+      }
+      return;
+    }
+    // The server closed it, or the connection dropped: a stream is not a request
+    // that ends, so there is another one to make.
+    if (request.readyState === 4) {
+      this.failed();
+    }
+  }
+
+  failed() {
+    if (this.done) {
+      return;
+    }
+    this.readyState = CONNECTING;
+    this.dispatch("error", { type: "error" });
+    this.again();
+  }
+
+  close() {
+    this.done = true;
+    this.readyState = CLOSED;
+    if (this.waiting !== null) {
+      clearTimeout(this.waiting);
+      this.waiting = null;
+    }
+    if (this.request !== null) {
+      this.request.onreadystatechange = null;
+      this.request.onerror = null;
+      this.request.abort();
+      this.request = null;
+    }
+  }
+}
+`
+
 const nativeDOM = `// The smallest object that answers what a page asks of a document, without
 // lying about what is on screen. Everything it cannot answer, it answers as
 // absent: a query returns null, an attribute is not there, a measurement is
@@ -1260,6 +1518,17 @@ const install = () => {
     key: (index) => [...store.keys()][index] ?? null,
     get length() { return store.size; },
   };
+  // A page that watches a stream of its own server writes new EventSource(url),
+  // and there is no such thing here. Measured: the live path of the chat of the
+  // case was dead, and with it the answer did not appear while it was being
+  // written. It is built on XMLHttpRequest and not on fetch, because a streaming
+  // read through the fetch of this target never hands back a body and the same
+  // stream through XMLHttpRequest arrives in parts -- measured, one connection
+  // that grew 964, 1001, 1038, 1075 as rows were written.
+  if (target.EventSource === undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    target.EventSource = require("./events").EventSource;
+  }
   if (target.navigator && !target.navigator.clipboard) {
     const api = clipboard();
     target.navigator.clipboard = {
@@ -2058,6 +2327,7 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/selectors.js", nativeSelectors},
 	{"bifrost/data.ts", nativeData},
 	{"bifrost/dom.js", nativeDOM},
+	{"bifrost/events.ts", nativeEventSource},
 	{"bifrost/form.tsx", nativeForm},
 	{"bifrost/html.ts", nativeHTML},
 	{"bifrost/jsx-runtime.ts", nativeJSXRuntime},
