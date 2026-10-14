@@ -421,21 +421,30 @@ func TestNativeProjectRefusesAnOverlayRouteTheServerDoesNotServe(t *testing.T) {
 
 func TestNativeRuntimeSaysWhatTheTargetCannotPaint(t *testing.T) {
 	// A prop whose whole meaning is the document is dropped by the renderer
-	// without a word. The measured case is `dangerouslySetInnerHTML`: the body of
-	// every message the assistant wrote is markdown compiled to html, and on a
-	// native target it painted nothing at all. Nothing in the app says so, the
-	// page just comes out missing a paragraph, so the runtime has to.
+	// without a word, and nothing in the app says so: the page just comes out
+	// missing a surface. The one that is left is contentEditable, which is dead
+	// text here, and the runtime names it in development.
 	dropped, err := nativeTagGroup(nativeHost(""), "DOM_ONLY")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !dropped["dangerouslySetInnerHTML"] {
-		t.Fatal("the tag map would drop a leaf of the page in silence")
+	if !dropped["contentEditable"] {
+		t.Fatal("a surface the target does not have is given up in silence")
 	}
 	// htmlFor is measured noise: fonnso alone writes it twenty-nine times, and
 	// dropping it hides no paragraph, so it is not one of them.
 	if dropped["htmlFor"] {
 		t.Fatal("a label association would warn on every form field")
+	}
+	// dangerouslySetInnerHTML was on this list, and it is not any more: it is the
+	// body of what a page says. Measured on fonnso, the bubble of every message of
+	// the assistant came out empty, twenty-four warnings on one screen. It is
+	// painted now, so a warning about it would be a lie.
+	if dropped["dangerouslySetInnerHTML"] {
+		t.Fatal("the body of a page is reported as dropped while it is painted")
+	}
+	if !strings.Contains(nativeHost(""), "given.children = painted(inner.__html)") {
+		t.Fatal("the tag map does not read the HTML a page injects")
 	}
 	if !strings.Contains(nativeHost(""), "export function droppedProps(name: string, props: unknown)") {
 		t.Fatal("the tag map does not report the props it cannot honour")
@@ -450,6 +459,68 @@ func TestNativeRuntimeSaysWhatTheTargetCannotPaint(t *testing.T) {
 	// is the last place that still has it.
 	if !strings.Contains(nativeJSXRuntime, `warnDropped(type, rest[0])`) {
 		t.Fatal("the runtime does not pass the tag name to the warning")
+	}
+}
+
+func TestNativeHTMLIsReadIntoTheTagsTheMapPaints(t *testing.T) {
+	// A page that hands HTML to a target with no document: the prop is a string of
+	// tags and the only reader of it is a browser. Measured on fonnso, the body of
+	// every message the assistant writes is markdown compiled to HTML, and the tags
+	// it emits -- p, ul, li, table, pre, code, strong, em, del, a, span and the rest
+	// -- are every one of them in the map, so the only thing missing was the reading.
+	host := nativeHost("")
+	for _, wanted := range []string{
+		// The tree is read into the components of the table, and a tag with no
+		// component keeps its text instead of taking the render down with it.
+		"const component = hostComponent(element.tag)",
+		"return createElement(Fragment, { key }, ...(children as []))",
+		// The classes of the HTML are the classes of the app: a browser writes
+		// `class` and nativewind reads `className`.
+		`if (name === "class") {
+      out.className = value;`,
+		// The parser is asked for only by a page that injects HTML.
+		`const { parseHTML } = require("./html")`,
+	} {
+		if !strings.Contains(host, wanted) {
+			t.Fatalf("the tag map does not carry %q", wanted)
+		}
+	}
+	for _, tag := range []string{"p", "ul", "li", "table", "pre", "code", "strong", "em", "del", "a", "span", "blockquote", "h2"} {
+		if !nativeTagIsNamed(tag) && !strings.Contains(nativeHost(""), `"`+tag+`"`) {
+			t.Fatalf("<%s> is in the HTML the app injects and the map does not paint it", tag)
+		}
+	}
+}
+
+func TestNativeHTMLParserIsWrittenAndShipped(t *testing.T) {
+	// The parser is the risky half of painting injected HTML, and it is generated
+	// rather than written by the app, so it has to be readable here: the tree, the
+	// entities, the elements that close themselves, and the quotes a `>` can hide in.
+	for _, wanted := range []string{
+		"export function parseHTML(html: string): Node[]",
+		"const VOID = [",
+		"function decoded(text: string): string",
+		"function tagEnd(html: string, from: number): number",
+		"function attributes(source: string): Record<string, string>",
+	} {
+		if !strings.Contains(nativeHTML, wanted) {
+			t.Fatalf("the parser does not carry %q", wanted)
+		}
+	}
+	shipped := false
+	for _, file := range nativeProjectFiles {
+		if file.Name == "bifrost/html.ts" && file.Content == nativeHTML {
+			shipped = true
+		}
+	}
+	if !shipped {
+		t.Fatal("the parser is not part of the generated project")
+	}
+	// A backslash that survives the Go raw string twice is a regex that matches a
+	// backslash: the parser would read a name where the HTML has none, and nothing
+	// would say so.
+	if strings.Contains(nativeHTML, `\\s`) {
+		t.Fatal("a regex of the parser carries an escaped backslash")
 	}
 }
 
@@ -1171,6 +1242,60 @@ func TestNativeTagMapDoesNotPretendToPaintAControl(t *testing.T) {
 	}
 }
 
+func TestNativeTagMapSubmitsAFormTheWayABrowserDoes(t *testing.T) {
+	// Measured on fonnso: the login page is a <form onSubmit> with a button of
+	// type="submit", and pressing that button on the device made no request at
+	// all. A Pressable carrying type="submit" is a Pressable that carries a prop
+	// nothing reads, and the fields of the form go nowhere.
+	host := nativeHost("")
+	if !nativeTagIsNamed("form") {
+		t.Fatal("<form> has no counterpart of its own")
+	}
+	boxes, err := nativeTagGroup(host, "BOXES")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if boxes["form"] {
+		t.Fatal("<form> is a box, so nothing of it survives")
+	}
+	for _, wanted := range []string{
+		// The button asks the form it is inside, and only when it is a submit.
+		"usePress(type, onPress as (() => void) | undefined)",
+		// The browser's name for the press is answered, not dropped.
+		"export function nativeProps(props: unknown): unknown",
+		// The form keeps its fields and answers the submit with them, in a module
+		// of its own, so that a button the app paints itself still submits.
+		"const [fields] = useState(() => new Map<string, string>());",
+		"body.append(name, value)",
+		// What the page reads out of the event is the FormData the form built.
+		"source instanceof NativeFormData",
+	} {
+		if !strings.Contains(host, wanted) && !strings.Contains(nativeForm, wanted) && !strings.Contains(nativeJSXRuntime, wanted) {
+			t.Fatalf("neither the tag map nor the form carries %q", wanted)
+		}
+	}
+}
+
+func TestNativeTagMapKeepsTheValueOfEveryFieldOfAForm(t *testing.T) {
+	// A page that reads its fields out of the event -- `new FormData(event
+	// .currentTarget).get("email")` -- asks the document for them. There is no
+	// document, so the answer has to come from the field itself: what the page
+	// set, and what somebody typed into a field the page let keep its own value.
+	host := nativeHost("")
+	if !strings.Contains(host, "function Field({ name, value, defaultValue, ...rest }") {
+		t.Fatal("a field does not know its own name")
+	}
+	if !strings.Contains(host, `form.fields.set(name, held === undefined || held === null ? "" : String(held))`) {
+		t.Fatal("a field the page holds does not reach the form")
+	}
+	if !strings.Contains(host, "form.fields.set(name, text)") {
+		t.Fatal("what somebody typed into a field does not reach the form")
+	}
+	if !nativeTagIsNamed("input") || !nativeTagIsNamed("textarea") {
+		t.Fatal("a field of a form is not in the table")
+	}
+}
+
 func TestNativeRuntimeLeavesNamesItDoesNotKnowAlone(t *testing.T) {
 	// react-native builds its own views out of strings (`codegenNativeComponent`
 	// returns "RCTView"), so replacing an unknown name would tear them apart.
@@ -1400,5 +1525,29 @@ func TestNativeScreenDoesNotReuseTheLoadingViewAsTheDocumentWrapper(t *testing.T
 	}
 	if !strings.Contains(nativeScreen, `<View key="failed" style={styles.center}>`) {
 		t.Fatal("the failed view has no key to keep it apart from the wrapper")
+	}
+}
+
+func TestNativeAnswersTheInteractionAPageWritesForTheBrowser(t *testing.T) {
+	// Measured on the login page of fonnso: the button that opens the link of a
+	// mail answered onClick, and on the device nothing happened at all. React
+	// Native answers onPress, so a page written for the browser has to be
+	// answered here, on both roads an element is built on: jsx, and createElement
+	// for what a component of the app builds by hand.
+	host := nativeHost("")
+	if !strings.Contains(host, "export function nativeProps(props: unknown): unknown") {
+		t.Fatal("the tag map does not answer the interaction of the browser")
+	}
+	if !strings.Contains(host, "given.onPress = pressed === undefined ? click : () => { pressed(); click(); }") {
+		t.Fatal("a page that answers both names loses one of them")
+	}
+	if !strings.Contains(nativeJSXRuntime, "loaded().nativeProps(rest[0])") {
+		t.Fatal("jsx does not go through it")
+	}
+	if !strings.Contains(nativeReact, "host.nativeProps(props)") {
+		t.Fatal("createElement does not go through it")
+	}
+	if !strings.Contains(nativeReact, "return createElement(type, ...rest);") {
+		t.Fatal("react-native's own views would be rewritten")
 	}
 }

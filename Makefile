@@ -1,6 +1,6 @@
-.PHONY: check test race vet gate demo bench fuzz throughput integration dev-integration reproducible
+.PHONY: check test race vet gate demo native-html bench fuzz throughput integration dev-integration reproducible
 
-check: test race vet gate demo
+check: test race vet gate native-html demo
 
 test:
 	@test -z "$$(gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'))" || (gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'); exit 1)
@@ -18,6 +18,11 @@ demo:
 gate:
 	bun install --frozen-lockfile
 	BIFROST_RELEASE_GATE=1 go test ./cmd/bifrost -run TestAppRouterReleaseGate -count=1
+
+# The parser of injected HTML is generated as a string of Go, so nothing else
+# executes it.
+native-html:
+	bun ./scripts/native-html.mjs
 
 bench:
 	go test -run '^$$' -bench . -benchmem ./...
@@ -39,6 +44,7 @@ integration:
 	bash ./scripts/integration.sh
 	bash ./scripts/navigation-integration.sh
 	bash ./scripts/structured-integration.sh
+	bun ./scripts/native-html.mjs
 
 dev-integration:
 	bash ./scripts/dev-integration.sh
