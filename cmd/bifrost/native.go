@@ -477,6 +477,155 @@ export function usePress(type: unknown, onPress?: () => void): (() => void) | un
 }
 `
 
+// A page hands HTML to a target that has no document: `dangerouslySetInnerHTML`
+// is the one prop whose whole meaning is a parser, and the renderer drops it
+// without a word. Measured on fonnso: the body of every message the assistant
+// writes is markdown compiled to HTML, and on the device the bubble came out
+// empty -- twenty-four warnings in one screen, and not a paragraph of what the
+// assistant said.
+//
+// So the HTML is read into the tree the tag map already paints: the twenty-two
+// tags `markdown()` emits are every one of them in that table, so the only thing
+// missing was the reading. A tag the table does not paint keeps its text instead
+// of taking the render down with it, and the table says so in development.
+//
+// It is a module of its own, and asked for only when a page injects HTML, so a
+// page that never does pays nothing for it.
+const nativeHTML = `export type Node = string | { tag: string; props: Record<string, string>; children: Node[] };
+
+// The elements that close themselves: a parser that waited for their closing tag
+// would swallow the rest of the page.
+const VOID = ["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"];
+
+// The named entities HTML is written with. One that is not here is left as it
+// came: a stray & is not worth losing.
+const ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: "\"",
+  apos: "'",
+  nbsp: " ",
+  hellip: "\u2026",
+  mdash: "\u2014",
+  ndash: "\u2013",
+};
+
+function decoded(text: string): string {
+  return text.replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (whole, name: string) => {
+    if (name.charAt(0) !== "#") {
+      return ENTITIES[name.toLowerCase()] ?? whole;
+    }
+    const hexadecimal = name.charAt(1) === "x" || name.charAt(1) === "X";
+    const code = parseInt(hexadecimal ? name.slice(2) : name.slice(1), hexadecimal ? 16 : 10);
+    if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) {
+      return whole;
+    }
+    return String.fromCodePoint(code);
+  });
+}
+
+// The > that closes a tag, and not one inside a quoted value. An attribute
+// whose value holds a > is rare and a parser that stopped there would end the
+// page at it.
+function tagEnd(html: string, from: number): number {
+  let quote = "";
+  for (let index = from + 1; index < html.length; index += 1) {
+    const char = html.charAt(index);
+    if (quote !== "") {
+      if (char === quote) {
+        quote = "";
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === ">") {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function attributes(source: string): Record<string, string> {
+  const props: Record<string, string> = {};
+  const pattern = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*)))?/g;
+  let found: RegExpExecArray | null;
+  while ((found = pattern.exec(source)) !== null) {
+    props[found[1].toLowerCase()] = decoded(found[2] ?? found[3] ?? found[4] ?? "");
+  }
+  return props;
+}
+
+// What the page meant, as tags. A closing tag that does not match the one that
+// is open is left where it is: HTML that came out of a template or a model is
+// not always balanced, and the text under it is worth more than the strictness.
+export function parseHTML(html: string): Node[] {
+  const root: { tag: string; props: Record<string, string>; children: Node[] } = { tag: "", props: {}, children: [] };
+  const open = [root];
+  const top = () => open[open.length - 1];
+  const text = (value: string) => {
+    if (value === "") {
+      return;
+    }
+    // Whitespace between two blocks is nothing on the web, and here it would be
+    // an empty run of text between them. Inside a <pre> it is the page.
+    if (value.trim() === "" && top().tag !== "pre") {
+      return;
+    }
+    top().children.push(decoded(value));
+  };
+  let index = 0;
+  while (index < html.length) {
+    const lt = html.indexOf("<", index);
+    if (lt < 0) {
+      text(html.slice(index));
+      break;
+    }
+    text(html.slice(index, lt));
+    if (html.startsWith("<!--", lt)) {
+      const closed = html.indexOf("-->", lt + 4);
+      index = closed < 0 ? html.length : closed + 3;
+      continue;
+    }
+    const gt = tagEnd(html, lt);
+    if (gt < 0) {
+      text(html.slice(lt));
+      break;
+    }
+    const inside = html.slice(lt + 1, gt).trim();
+    index = gt + 1;
+    if (inside === "" || inside.charAt(0) === "!" || inside.charAt(0) === "?") {
+      continue;
+    }
+    if (inside.charAt(0) === "/") {
+      const name = inside.slice(1).trim().toLowerCase();
+      for (let at = open.length - 1; at > 0; at -= 1) {
+        if (open[at].tag === name) {
+          open.length = at;
+          break;
+        }
+      }
+      continue;
+    }
+    const name = /^([a-zA-Z][^\s/>]*)/.exec(inside);
+    if (name === null) {
+      continue;
+    }
+    const tag = name[1].toLowerCase();
+    const node = { tag, props: attributes(inside.slice(name[1].length)), children: [] as Node[] };
+    top().children.push(node);
+    const closed = inside.charAt(inside.length - 1) === "/";
+    if (!closed && !VOID.includes(tag)) {
+      open.push(node);
+    }
+  }
+  return root.children;
+}
+`
+
 // A native target has no document: react-native draws views, and a page written
 // for the browser reaches for the DOM from places the tag map cannot cover. What
 // it asks for is a measurement, a media query, or somewhere to keep a
@@ -1290,7 +1439,7 @@ for (const [name, component] of Object.entries(extraTags)) {
 }
 `
 
-const nativeHostHead = `import { Children, isValidElement, type ReactNode } from "react";
+const nativeHostHead = `import { Children, Fragment, createElement, isValidElement, type ReactNode } from "react";
 import { Image, Linking, Pressable, Text, TextInput, View } from "react-native";
 import { navigate } from "virtual:bifrost/navigation";
 import { FormProvider, useForm, usePress } from "./form";
@@ -1298,27 +1447,29 @@ import { FormProvider, useForm, usePress } from "./form";
 
 const nativeHostBody = `
 // Blocks. They hold other blocks, which a View can.
-const BOXES = ["address", "article", "aside", "caption", "dd", "details", "dialog", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "header", "legend", "li", "main", "nav", "ol", "output", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul"];
+const BOXES = ["address", "article", "aside", "blockquote", "caption", "dd", "details", "dialog", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "header", "legend", "li", "main", "nav", "ol", "output", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul"];
 
 // Everything whose content is text.
-const TEXTS = ["abbr", "b", "br", "cite", "code", "em", "h1", "h2", "h3", "h4", "h5", "h6", "i", "label", "mark", "p", "pre", "q", "s", "small", "span", "strong", "time", "u"];
+const TEXTS = ["abbr", "b", "br", "cite", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6", "i", "label", "mark", "p", "pre", "q", "s", "small", "span", "strong", "time", "u"];
 
 // Sheet links, metadata and scripts have nothing to paint.
 const HIDDEN = ["base", "head", "link", "meta", "noscript", "script", "style", "title"];
 
 // Props whose whole meaning is the document: a page writes them for the browser,
 // a native view has nothing to do with them, and the renderer drops them without
-// a word. Two cases earn a warning. One is content that disappears -- a
-// dangerouslySetInnerHTML paragraph paints nothing at all. The other is a
-// surface the target does not have -- contentEditable is dead text here, and
-// nothing says the editing went away. Both are invisible until somebody
-// compares the two targets, so the runtime names them in development. A prop the
-// web gets for free and native does not -- srcset, loading -- is not worth a
-// line, because leaving it out changes nothing. Measured: htmlFor is not either.
-// It is an association a reader still reads through, and fonnso alone writes it
-// twenty-nine times, which would be twenty-nine warnings for a paragraph still
-// on the screen.
-const DOM_ONLY = ["dangerouslySetInnerHTML", "contentEditable"];
+// a word. One case earns a warning: a surface the target does not have --
+// contentEditable is dead text here, and nothing says the editing went away. It
+// is invisible until somebody compares the two targets, so the runtime names it
+// in development. A prop the web gets for free and native does not -- srcset,
+// loading -- is not worth a line, because leaving it out changes nothing.
+// Measured: htmlFor is not either. It is an association a reader still reads
+// through, and fonnso alone writes it twenty-nine times, which would be
+// twenty-nine warnings for a paragraph still on the screen.
+//
+// dangerouslySetInnerHTML was on this list too, and it is not any more: it is
+// the body of what a page says, and dropping it left the bubble of every message
+// of the assistant empty. It is painted now, and nativeProps is where.
+const DOM_ONLY = ["contentEditable"];
 
 // The props of an element that a native target cannot honour. Called by the
 // runtime, which is the only place that still knows the tag the page wrote.
@@ -1454,18 +1605,78 @@ for (const name of HIDDEN) {
 // It is kept a press and nothing else: the button that sends a form asks the
 // form with ./form, which needs the element it is inside and so cannot happen
 // here.
+//
+// The other thing answered here is the HTML a page injects. It is a string of
+// tags, and the only reader of it is a browser; a tag this table paints is
+// painted, and its children are read the same way. Measured on fonnso: the body
+// of every message of the assistant is markdown compiled to HTML, and the bubble
+// came out empty.
 export function nativeProps(props: unknown): unknown {
   if (props === null || typeof props !== "object") {
     return props;
   }
-  const given = props as Record<string, unknown>;
-  if (typeof given.onClick !== "function") {
-    return props;
+  const given = { ...(props as Record<string, unknown>) };
+  const inner = given.dangerouslySetInnerHTML as { __html?: unknown } | undefined;
+  if (inner !== undefined) {
+    delete given.dangerouslySetInnerHTML;
+    if (typeof inner?.__html === "string") {
+      given.children = painted(inner.__html);
+    }
   }
-  const { onClick, ...rest } = given;
-  const click = onClick as () => void;
-  const pressed = rest.onPress as (() => void) | undefined;
-  return { ...rest, onPress: pressed === undefined ? click : () => { pressed(); click(); } };
+  if (typeof given.onClick === "function") {
+    const click = given.onClick as () => void;
+    delete given.onClick;
+    const pressed = given.onPress as (() => void) | undefined;
+    given.onPress = pressed === undefined ? click : () => { pressed(); click(); };
+  }
+  return given;
+}
+
+// A node of the HTML, as the component that paints its tag. A tag this table
+// does not paint keeps its children: the text of a paragraph is worth more than
+// nothing, and a name react-native does not know would take the render down.
+function nodeOf(node: unknown, key: string): unknown {
+  if (typeof node === "string") {
+    return node;
+  }
+  const element = node as { tag: string; props: Record<string, string>; children: unknown[] };
+  const children = paintedNodes(element.children, key + ".");
+  const component = hostComponent(element.tag);
+  if (component === undefined) {
+    return createElement(Fragment, { key }, ...(children as []));
+  }
+  return createElement(component as never, { key, ...htmlProps(element.props) }, ...(children as []));
+}
+
+function paintedNodes(nodes: unknown[], prefix: string): unknown[] {
+  return nodes.map((node, index) => nodeOf(node, prefix + index));
+}
+
+// The classes of the HTML are the classes of the app: class is how a browser
+// spells what nativewind reads as className, and the stylesheet the app
+// already wrote -- .md, .code, .tok-keyword -- is the one that has to
+// reach it. Anything else keeps its name and its value.
+function htmlProps(props: Record<string, string>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(props)) {
+    if (name === "class") {
+      out.className = value;
+      continue;
+    }
+    if (name === "dangerouslySetInnerHTML") {
+      continue;
+    }
+    out[name] = value;
+  }
+  return out;
+}
+
+// The parser is asked for the first time a page injects HTML, and never by a
+// page that does not.
+function painted(html: string): unknown[] {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { parseHTML } = require("./html") as { parseHTML(html: string): unknown[] };
+  return paintedNodes(parseHTML(html), "html");
 }
 
 // React Native builds its own views out of strings too, so a name this table
@@ -1553,6 +1764,7 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/data.ts", nativeData},
 	{"bifrost/dom.js", nativeDOM},
 	{"bifrost/form.tsx", nativeForm},
+	{"bifrost/html.ts", nativeHTML},
 	{"bifrost/jsx-runtime.ts", nativeJSXRuntime},
 	{"bifrost/metro.js", nativeMetroHelper},
 	{"bifrost/net.ts", nativeNet},
