@@ -53,6 +53,80 @@ func TestNativeProjectFilesAreWellFormed(t *testing.T) {
 	}
 }
 
+func TestNativeProjectDropsOverlayFilesTheOverlayStoppedShipping(t *testing.T) {
+	// An app deletes a screen, renames a module, drops a directory, and the file
+	// that was copied stays in the project for good: the generator clears `app/`
+	// and `bifrost/` and never looks at what the overlay put beside them.
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	overlay := filepath.Join(projectRoot, "native")
+	files := map[string]string{
+		"bifrost/session.ts": "export const session = null;\n",
+		"components/old.tsx": "export const gone = true;\n",
+		"app/index.tsx":      "export default function Page() { return null; }\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(overlay, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prepared, err := prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(projectRoot, ".bifrost", "native")
+	write := func() {
+		t.Helper()
+		if err := writeNativeProject(native, prepared, "", overlay); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write()
+	if _, err := os.Stat(filepath.Join(native, "components", "old.tsx")); err != nil {
+		t.Fatalf("the overlay file was not copied: %v", err)
+	}
+
+	// The overlay drops one file and keeps the other.
+	if err := os.Remove(filepath.Join(overlay, "components", "old.tsx")); err != nil {
+		t.Fatal(err)
+	}
+	write()
+	if _, err := os.Stat(filepath.Join(native, "components", "old.tsx")); !os.IsNotExist(err) {
+		t.Fatalf("a file the overlay no longer ships stayed in the project: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(native, "bifrost", "session.ts")); err != nil {
+		t.Fatalf("a file the overlay still ships was removed: %v", err)
+	}
+
+	// A route is the generator's: an overlay that stops restyling one screen
+	// leaves the generated screen in its place, not a hole.
+	if err := os.Remove(filepath.Join(overlay, "app", "index.tsx")); err != nil {
+		t.Fatal(err)
+	}
+	write()
+	if _, err := os.Stat(filepath.Join(native, "app", "index.tsx")); err != nil {
+		t.Fatalf("the generated screen was removed with the overlay's: %v", err)
+	}
+	// The manifest sits beside the project, not in it: everything inside is a
+	// build artifact, and a file there would ship with the app.
+	if _, err := os.Stat(overlayManifest(native)); err != nil {
+		t.Fatalf("the manifest was not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(native, overlayManifestName)); !os.IsNotExist(err) {
+		t.Fatalf("the manifest was written into the project: %v", err)
+	}
+}
+
 func TestNativeProjectMirrorsTheRouteTable(t *testing.T) {
 	projectRoot := t.TempDir()
 	appRoot := filepath.Join(projectRoot, "app")

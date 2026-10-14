@@ -1124,6 +1124,10 @@ func copyNativeOverlay(native, overlay string, screens map[string]appRoute) erro
 	if err != nil {
 		return err
 	}
+	previous, err := readOverlayManifest(native)
+	if err != nil {
+		return err
+	}
 	for _, name := range names {
 		if err := checkNativeOverlayRoute(name, screens); err != nil {
 			return err
@@ -1139,7 +1143,78 @@ func copyNativeOverlay(native, overlay string, screens map[string]appRoute) erro
 			return err
 		}
 	}
+	if err := removeStaleOverlayFiles(native, previous, names); err != nil {
+		return err
+	}
+	return os.WriteFile(overlayManifest(native), []byte(manifestOf(names)), 0o644)
+}
+
+// An app deletes a screen, renames a module, drops a directory, and what was
+// copied the last time stays in the project for good: the generator only clears
+// `app/` and `bifrost/`, so anything the overlay put beside them is never looked
+// at again. Measured: a file removed from the overlay was still there two
+// regenerations later. Nothing in the generated project is worth keeping -- it
+// is a build artifact and every run rewrites it -- so what was copied is written
+// down and the next run removes what the overlay no longer ships.
+func removeStaleOverlayFiles(native string, previous, current []string) error {
+	kept := make(map[string]bool, len(current))
+	for _, name := range current {
+		kept[name] = true
+	}
+	for _, name := range previous {
+		if kept[name] || generatedByBifrost(name) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(native, filepath.FromSlash(name))); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
 	return nil
+}
+
+// The two directories every run rewrites, and the manifest the generator owns.
+// A file there is not the overlay's to remove, and an overlay that stops
+// restyling a screen leaves the generated one in its place.
+func generatedByBifrost(name string) bool {
+	for _, prefix := range []string{"app/", "bifrost/"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return name == "package.json"
+}
+
+// The manifest sits next to the project and not inside it, because everything
+// inside it is a build artifact and a build artifact is what this is about.
+const overlayManifestName = "native-overlay.json"
+
+func overlayManifest(native string) string {
+	return filepath.Join(filepath.Dir(native), overlayManifestName)
+}
+
+func manifestOf(names []string) string {
+	content, err := json.Marshal(names)
+	if err != nil {
+		return "[]\n"
+	}
+	return string(content) + "\n"
+}
+
+func readOverlayManifest(native string) ([]string, error) {
+	content, err := os.ReadFile(overlayManifest(native))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	if err := json.Unmarshal(content, &names); err != nil {
+		// A manifest this cannot read is one from another version, and the worst
+		// it can do is leave a file behind, which is where it started.
+		return nil, nil
+	}
+	return names, nil
 }
 
 // The web tree and the native tree come from one route table, so an app may
