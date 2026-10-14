@@ -117,6 +117,19 @@ func runDev(args []string) error {
 	var buildOutput string
 	devDir := filepath.Join(socketDir, "dev")
 
+	// reload reads the route tree again and regenerates the views from it. What
+	// the views hold is a path to each page, and a page that moved is a view that
+	// points at nothing.
+	reload := func(ctx context.Context) error {
+		next, err := prepareAppRouter(ctx, projectRoot, routeRoot, 0, 0)
+		if err != nil {
+			return err
+		}
+		router = &next
+		packagePath = next.Package
+		return nil
+	}
+
 	stopProcess := func(process *exec.Cmd) {
 		if process == nil || process.Process == nil {
 			return
@@ -271,6 +284,18 @@ func runDev(args []string) error {
 				continue
 			}
 			last = current
+			// The views are generated from the route tree, and a route that was added
+			// or removed is a different tree: the views already on disk point at files
+			// that are not there any more, and the build that reads them fails for good
+			// because nothing regenerates them. Measured: a deleted route left the
+			// server serving a view of it, and every later rebuild failed with
+			// "Could not resolve .../app/probe/page.tsx" until the process was killed.
+			if isAppRouter {
+				if err := reload(ctx); err != nil {
+					fmt.Fprintln(os.Stderr, "bifrost: reload routes:", err)
+					continue
+				}
+			}
 			if err := buildAndStart(); err != nil && !errors.Is(err, context.Canceled) {
 				fmt.Fprintln(os.Stderr, "bifrost: rebuild:", err)
 			}

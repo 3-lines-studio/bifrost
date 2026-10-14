@@ -177,3 +177,55 @@ func TestDevelopmentStampKeepsWatchingTheGoTree(t *testing.T) {
 		t.Fatal("a Go source that arrived does not change the stamp")
 	}
 }
+
+func TestDevelopmentReloadRegeneratesTheViewsOfTheRouteTree(t *testing.T) {
+	// The failure this exists for: a route was removed, the views generated at
+	// startup kept pointing at the page that was gone, and every later rebuild
+	// failed on it -- "Could not resolve .../app/probe/page.tsx" -- with nothing
+	// regenerating them, so the development server stayed dead until it was
+	// killed.
+	projectRoot := t.TempDir()
+	routeRoot := filepath.Join(projectRoot, "app")
+	writeRoute(t, routeRoot, "page.tsx")
+	writeRoute(t, routeRoot, "probe/page.tsx")
+
+	if _, err := prepareAppRouter(t.Context(), projectRoot, routeRoot, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	views := filepath.Join(projectRoot, ".bifrost", "views")
+	if !viewsMention(t, views, "app/probe/page.tsx") {
+		t.Fatal("the view of the route that exists was not written")
+	}
+
+	if err := os.RemoveAll(filepath.Join(routeRoot, "probe")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepareAppRouter(t.Context(), projectRoot, routeRoot, 0, 0); err != nil {
+		t.Fatalf("reading the route tree again failed: %v", err)
+	}
+	if viewsMention(t, views, "app/probe/page.tsx") {
+		t.Fatal("a view still points at the page that was removed")
+	}
+}
+
+// viewsMention reports whether any generated view still imports target.
+func viewsMention(t *testing.T, views, target string) bool {
+	t.Helper()
+	entries, err := os.ReadDir(views)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(views, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(content), target) {
+			return true
+		}
+	}
+	return false
+}
