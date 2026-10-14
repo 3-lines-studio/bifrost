@@ -1,6 +1,6 @@
 APP := .
 
-.PHONY: build dev serve check clean
+.PHONY: build dev serve check native clean
 
 build:
 	go run ../../cmd/bifrost build $(APP)
@@ -13,6 +13,9 @@ serve: build
 
 check: build
 	bash scripts/check.sh
+
+native:
+	bash scripts/native.sh
 
 clean:
 	rm -rf .bifrost

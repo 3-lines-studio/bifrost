@@ -7,6 +7,7 @@ make build     # go run ../../cmd/bifrost build .
 make dev       # development server with HMR
 make serve     # build and serve on 127.0.0.1:18700
 make check     # build, then run scripts/check.sh (74 assertions)
+make native    # generate the native project and bundle it for Android
 ```
 
 ## The tree

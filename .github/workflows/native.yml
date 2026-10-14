@@ -1,0 +1,39 @@
+name: Native
+
+# The unit tests compare the text the generator writes; nothing in the
+# repository ever builds what it generates. Every bug that reached a device in
+# the first two days of the native target was invisible to a string comparison,
+# and the ones that were build failures -- a resolver that could not find what
+# it was asked for, a screen that did not compile -- had nothing watching them
+# either. This is that watcher.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: oven-sh/setup-bun@v2
+
+      # The generated project has its own manifest, so its install is its own.
+      # It is keyed by the version the generator pins, which is what decides
+      # what gets installed.
+      - name: Cache the native project's modules
+        uses: actions/cache@v4
+        with:
+          path: example/app-router-demo/.bifrost/native/node_modules
+          key: native-${{ runner.os }}-${{ hashFiles('cmd/bifrost/native.go') }}
+
+      - name: Generate the native project and bundle it
+        run: make -C example/app-router-demo native

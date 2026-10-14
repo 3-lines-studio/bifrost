@@ -276,6 +276,8 @@ Run `bash scripts/navigation-integration.sh` for production and development brow
 
 `bifrost native [dir]` writes an Expo Router project to `.bifrost/native`: one screen per route, each a stub that calls the same `renderPage` the web entry hydrates and reads its props from the data endpoint. Both routers come from one route table, so `/docs/{slug}` becomes `app/docs/[slug].tsx` and nothing is written twice. `--origin` sets the base URL the client talks to; by default it is the host alias of each platform, `10.0.2.2` on Android and `localhost` elsewhere.
 
+The App Router demo is also the example that gets built: `make native` generates its project and bundles it for Android, and the `Native` workflow runs that on every push and every pull request. It needs no overlay at all, because it uses nothing the target lacks -- no `window`, no `document`, no `EventSource` -- which is what an app that asks the target for nothing extra looks like. What the bundle watches is the other half of the generator: every screen it writes is compiled, so a screen that does not compile fails there, and so does a resolver that cannot find what the generated code imports.
+
 The generated project is a build artifact. Every run rewrites `app/` and `bifrost/`, so a screen the route table no longer has disappears, and nothing written there is worth keeping.
 
 An app keeps its own files in a directory next to `app/`: `native/` by default, `--from` to move it. They are copied over the generated project after everything else, so they win, and `bifrost native` never writes them. A session store, a login screen, the client the app talks to the server with: all of it goes there and survives every regeneration. When the directory exists, the command prints where it read them from.
@@ -386,6 +388,7 @@ Linux amd64 and arm64 production, containers, and macOS development. Windows is 
 
 ```sh
 make check # test race vet, the App Router release gate, and the App Router demo
+make native # generate the demo's native project and bundle it
 make gate # only the App Router release gate
 make integration
 make dev-integration

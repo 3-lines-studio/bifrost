@@ -1,4 +1,4 @@
-.PHONY: check test race vet gate demo bench fuzz throughput integration dev-integration reproducible
+.PHONY: check test race vet gate demo native bench fuzz throughput integration dev-integration reproducible
 
 check: test race vet gate demo
 
@@ -14,6 +14,9 @@ vet:
 
 demo:
 	$(MAKE) -C example/app-router-demo check
+
+native:
+	$(MAKE) -C example/app-router-demo native
 
 gate:
 	bun install --frozen-lockfile
