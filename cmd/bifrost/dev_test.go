@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -45,5 +47,271 @@ func TestPruneStaleDevelopmentFilesRemovesUnlockedRuns(t *testing.T) {
 		if _, err := os.Stat(kept); err != nil {
 			t.Fatalf("%s was removed: %v", kept, err)
 		}
+	}
+}
+
+// writeRoute lays down a page the router will find.
+func writeRoute(t *testing.T, routeRoot, name string) {
+	t.Helper()
+	path := filepath.Join(routeRoot, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDevelopmentStampNoticesARouteArrivingAndLeaving(t *testing.T) {
+	// Measured: with only the Go sources watched, a page saved under the route
+	// root was never a route -- no rebuild, and a 404 -- until the server was
+	// restarted, and deleting the page left the views pointing at a file that was
+	// no longer there.
+	root := t.TempDir()
+	writeRoute(t, root, "page.tsx")
+	before, err := routeTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(before, "page.tsx") {
+		t.Fatalf("the page of the root is not part of the tree:\n%s", before)
+	}
+
+	writeRoute(t, root, "otra/page.tsx")
+	added, err := routeTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added == before {
+		t.Fatal("a page that arrived does not change the route tree")
+	}
+
+	writeRoute(t, root, "docs/slug_/page.tsx")
+	layout := filepath.Join(root, "layout.tsx")
+	if err := os.WriteFile(layout, []byte("export default function Layout() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	full, err := routeTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(full, "docs/slug_/page.tsx") {
+		t.Fatalf("a nested route is missing:\n%s", full)
+	}
+
+	if err := os.RemoveAll(filepath.Join(root, "otra")); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := routeTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed == full {
+		t.Fatal("a page that left does not change the route tree")
+	}
+	if strings.Contains(removed, "otra") {
+		t.Fatalf("the page that left is still in the tree:\n%s", removed)
+	}
+}
+
+func TestDevelopmentStampLeavesWhatIsInsideAPageAlone(t *testing.T) {
+	// A page is a module of the frontend: Vite hands the new one to the browser
+	// and the Go side is not rebuilt for it. What the stamp has to notice is which
+	// files are there, not what they say.
+	root := t.TempDir()
+	writeRoute(t, root, "page.tsx")
+	before, err := routeTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := filepath.Join(root, "page.tsx")
+	if err := os.WriteFile(page, []byte("export default function Page() { return 1; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	after, err := routeTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("editing a page changed the route tree:\n%s\nwant\n%s", after, before)
+	}
+
+	// A private directory is not a route, the way the router reads it, so a
+	// component beside a page is not a route appearing.
+	private := filepath.Join(root, "_components")
+	if err := os.MkdirAll(private, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(private, "boton.tsx"), []byte("export const Boton = null;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withPrivate, err := routeTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withPrivate != before {
+		t.Fatalf("a private directory is read as a route:\n%s", withPrivate)
+	}
+}
+
+func TestDevelopmentStampKeepsWatchingTheGoTree(t *testing.T) {
+	// The route tree is what was added; the Go sources are what was watched
+	// before, and a server that stops rebuilding them is a server that stopped
+	// compiling.
+	root := t.TempDir()
+	routeRoot := filepath.Join(root, "app")
+	writeRoute(t, routeRoot, "page.tsx")
+	source := filepath.Join(root, "app.go")
+
+	before, err := developmentStamp(root, routeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withSource, err := developmentStamp(root, routeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withSource == before {
+		t.Fatal("a Go source that arrived does not change the stamp")
+	}
+}
+
+func TestDevelopmentReloadRegeneratesTheViewsOfTheRouteTree(t *testing.T) {
+	// The failure this exists for: a route was removed, the views generated at
+	// startup kept pointing at the page that was gone, and every later rebuild
+	// failed on it -- "Could not resolve .../app/probe/page.tsx" -- with nothing
+	// regenerating them, so the development server stayed dead until it was
+	// killed.
+	projectRoot := t.TempDir()
+	routeRoot := filepath.Join(projectRoot, "app")
+	writeRoute(t, routeRoot, "page.tsx")
+	writeRoute(t, routeRoot, "probe/page.tsx")
+
+	if _, err := prepareAppRouter(t.Context(), projectRoot, routeRoot, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	views := filepath.Join(projectRoot, ".bifrost", "views")
+	if !viewsMention(t, views, "app/probe/page.tsx") {
+		t.Fatal("the view of the route that exists was not written")
+	}
+
+	if err := os.RemoveAll(filepath.Join(routeRoot, "probe")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepareAppRouter(t.Context(), projectRoot, routeRoot, 0, 0); err != nil {
+		t.Fatalf("reading the route tree again failed: %v", err)
+	}
+	if viewsMention(t, views, "app/probe/page.tsx") {
+		t.Fatal("a view still points at the page that was removed")
+	}
+}
+
+// viewsMention reports whether any generated view still imports target.
+func viewsMention(t *testing.T, views, target string) bool {
+	t.Helper()
+	entries, err := os.ReadDir(views)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(views, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(content), target) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDevelopmentBinaryGenerationDoesNotOverwriteTheRunningOne(t *testing.T) {
+	// The binary that is running is the one the next build must not touch: it is
+	// written over while a process executes it, and the point of building before
+	// killing is that a build that fails leaves the old app serving.
+	directory := t.TempDir()
+	first := childBinaryPath(directory, 1)
+	second := childBinaryPath(directory, 2)
+	if first == second {
+		t.Fatalf("two generations share the path %s", first)
+	}
+	if first == filepath.Join(directory, "app") {
+		t.Fatal("a generation writes over the binary that is running")
+	}
+}
+
+func TestDevelopmentLockNamesTheProcessThatHoldsIt(t *testing.T) {
+	// Measured: the message out of a taken lock was "already running for this
+	// directory", which is the one thing the reader already knew, and the lock
+	// file was empty, so there was nothing to find the process by.
+	base := t.TempDir()
+	name := "bifrost-dev-1111111111111111"
+	directory := filepath.Join(base, "web")
+
+	held, err := claimDevelopmentServer(base, name, directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = held.Close() }()
+	if holder := heldBy(filepath.Join(base, name+".lock")); holder == "" {
+		t.Fatal("the lock names no process")
+	}
+
+	// A second run of the same directory is refused, and told which one holds it.
+	_, err = claimDevelopmentServer(base, name, directory)
+	if err == nil {
+		t.Fatal("a second run took the lock of the first")
+	}
+	said := err.Error()
+	if !strings.Contains(said, directory) {
+		t.Fatalf("the message does not name the directory:\n%s", said)
+	}
+	if !strings.Contains(said, "pid "+strconv.Itoa(os.Getpid())) {
+		t.Fatalf("the message does not name the process that holds it:\n%s", said)
+	}
+}
+
+func TestDevelopmentStampIgnoresTheFileBifrostWritesForTheApp(t *testing.T) {
+	// Measured: the file bifrost generates to embed the build is rewritten at the
+	// start and at the end of every build, so a save that did not compile left the
+	// server rebuilding itself two and a half times a second, each one a go run of
+	// the whole app, until the file compiled again.
+	root := t.TempDir()
+	source := filepath.Join(root, "main.go")
+	if err := os.WriteFile(source, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := goTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	generated := filepath.Join(root, generatedEmbedSource)
+	if err := os.WriteFile(generated, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	after, err := goTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("the file bifrost writes is read as a change:\n%s\nwant\n%s", after, before)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "otro.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withSource, err := goTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withSource == before {
+		t.Fatal("a source somebody wrote is not read as a change")
 	}
 }

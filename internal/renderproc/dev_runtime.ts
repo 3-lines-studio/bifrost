@@ -91,8 +91,15 @@ if (devEntries) {
 }
 
 if (routesFile) {
+  // The routes are written to a temporary file and renamed over this one, and
+  // the watch of the directory reports that as a change of the name that
+  // disappears: the name it lands under is never the one in the event, so both
+  // are taken. Measured: watching only the name it lands under left Vite holding
+  // the views of the routes that were there before, and a page whose view moved
+  // answered 500 for as long as the development server lived.
+  const name = path.basename(routesFile);
   watch(path.dirname(routesFile), (_event, filename) => {
-    if (!filename || !routesFile.endsWith(filename)) return;
+    if (!filename || (filename !== name && filename !== name + ".tmp")) return;
     vite.moduleGraph.invalidateAll();
     vite.hot.send({ type: "full-reload" });
   });
