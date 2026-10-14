@@ -310,9 +310,17 @@ async function report(config, projectRoot, filePath, data, options) {
 // Whatever transformer the app installed, handed every file unchanged. What this
 // adds is a second look at a stylesheet, which is the only thing the compiler
 // does not already do.
+//
+// Metro does not hand a transformer the config the app wrote: it hands it
+// config.transformer on its own, flattened, minus the three keys it keeps for
+// itself. So the path this wrapper kept is at the top of the object and never at
+// config.transformer, and reading it there found nothing and fell back to the
+// default transformer -- which, for a stylesheet on a native target, is an empty
+// module. The whole stylesheet went out and nothing said so: the app painted
+// unstyled, which reads exactly like a stylesheet that did not run.
 module.exports.transform = async (config, projectRoot, filePath, data, options) => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const upstream = require(config.transformer?.bifrostUpstreamTransformer ?? unstable_transformerPath);
+  const upstream = require(config.bifrostUpstreamTransformer ?? config.transformer?.bifrostUpstreamTransformer ?? unstable_transformerPath);
   const result = await upstream.transform(config, projectRoot, filePath, data, options);
   // The report costs a second pass over the stylesheet -- the web pipeline the
   // native one already ran -- and it is a development diagnostic, so a build

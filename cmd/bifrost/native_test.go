@@ -462,8 +462,8 @@ func TestNativeWarningsGoInFrontOfTheCompilerTheAppInstalled(t *testing.T) {
 	if !strings.Contains(nativeMetroHelper, "bifrostUpstreamTransformer: config.transformerPath ?? null") {
 		t.Fatal("the wrapper does not keep the transformer that was already there")
 	}
-	if !strings.Contains(nativeCSSWarnings, "config.transformer?.bifrostUpstreamTransformer ?? unstable_transformerPath") {
-		t.Fatal("the wrapper does not fall back to the default transformer")
+	if !strings.Contains(nativeCSSWarnings, "config.bifrostUpstreamTransformer ?? config.transformer?.bifrostUpstreamTransformer ?? unstable_transformerPath") {
+		t.Fatal("the wrapper does not read the transformer the app installed")
 	}
 	if !strings.Contains(nativeCSSWarnings, "upstream.transform(config, projectRoot, filePath, data, options)") {
 		t.Fatal("the wrapper does not hand the file on")
@@ -505,6 +505,98 @@ func TestNativeWarningsGoInFrontOfTheCompilerTheAppInstalled(t *testing.T) {
 	}
 	if !strings.Contains(nativeMetroConfig, "withBifrostWarnings(withBifrost(") {
 		t.Fatal("the generated config does not install the warnings wrapper")
+	}
+}
+
+func TestNativeWarningsHandTheFileToTheTransformerTheAppInstalled(t *testing.T) {
+	// Metro does not call a transformer with the config the app wrote: it hands it
+	// `config.transformer` on its own, flattened, minus the three keys it keeps for
+	// itself. Reading the kept path anywhere but the top of that object finds
+	// nothing, and the wrapper then falls back to the default transformer, which
+	// for a stylesheet on a native target is an empty module. Measured against a
+	// real app: the whole stylesheet went out, the app painted unstyled, and
+	// nothing in the log said so.
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(projectRoot, ".bifrost", "native")
+	if err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
+		t.Fatal(err)
+	}
+
+	// The compiler the helper looks for when it decides whether to install the
+	// wrapper, and the two modules the wrapper requires at the top of itself. The
+	// stub the wrapper would fall back to answers with a name of its own, so a
+	// fallback is a readable failure and not a missing module.
+	stub := func(module, source string) {
+		dir := filepath.Join(native, "node_modules", module)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "index.js"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"`+module+`","main":"index.js"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stub("react-native-css", "module.exports = { compile: () => ({ warnings: () => ({}) }) };\n")
+	if err := os.WriteFile(filepath.Join(native, "node_modules", "react-native-css", "compiler.js"), []byte("module.exports = require(\"./index.js\");\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stub("@expo/metro-config", "module.exports = { unstable_transformerPath: require.resolve(\"./index.js\") };\n")
+
+	probe := `import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const path = require("node:path");
+const fs = require("node:fs");
+const { withBifrostWarnings } = require("./bifrost/metro.js");
+// What the app wrote, and what its transformer answers with.
+const upstream = path.join(process.cwd(), "upstream.js");
+fs.writeFileSync(upstream, "module.exports.transform = async () => ({ output: [{ data: { code: \"UPSTREAM\" } }] });\n");
+const warned = withBifrostWarnings({ transformerPath: upstream, transformer: { reactNativeCSS: {} } });
+// What Metro does with that config before it calls the transformer: the three
+// keys it keeps for itself come out, and the rest is the config.
+const { getTransformOptions, transformVariants, unstable_workerThreads, ...transformerConfig } = warned.transformer;
+const wrapper = require(warned.transformerPath);
+wrapper
+  .transform(transformerConfig, process.cwd(), path.join(process.cwd(), "global.css"), Buffer.from(""), {
+    platform: "android", dev: false, type: "module", minify: false, customTransformOptions: {},
+  })
+  .then((result) => console.log(JSON.stringify({ code: result.output[0].data.code })));
+`
+	if err := os.WriteFile(filepath.Join(native, "probe.mjs"), []byte(probe), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	command := exec.CommandContext(ctx, node, "probe.mjs")
+	command.Dir = native
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("the warnings wrapper failed: %v: %s", err, output)
+	}
+	var got struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(output))), &got); err != nil {
+		t.Fatalf("%v: %s", err, output)
+	}
+	if got.Code != "UPSTREAM" {
+		t.Fatalf("the file did not reach the transformer the app installed: it answered %q", got.Code)
 	}
 }
 
