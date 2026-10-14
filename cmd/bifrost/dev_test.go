@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -45,5 +46,134 @@ func TestPruneStaleDevelopmentFilesRemovesUnlockedRuns(t *testing.T) {
 		if _, err := os.Stat(kept); err != nil {
 			t.Fatalf("%s was removed: %v", kept, err)
 		}
+	}
+}
+
+// writeRoute lays down a page the router will find.
+func writeRoute(t *testing.T, routeRoot, name string) {
+	t.Helper()
+	path := filepath.Join(routeRoot, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDevelopmentStampNoticesARouteArrivingAndLeaving(t *testing.T) {
+	// Measured: with only the Go sources watched, a page saved under the route
+	// root was never a route -- no rebuild, and a 404 -- until the server was
+	// restarted, and deleting the page left the views pointing at a file that was
+	// no longer there.
+	root := t.TempDir()
+	writeRoute(t, root, "page.tsx")
+	before, err := routeTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(before, "page.tsx") {
+		t.Fatalf("the page of the root is not part of the tree:\n%s", before)
+	}
+
+	writeRoute(t, root, "otra/page.tsx")
+	added, err := routeTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added == before {
+		t.Fatal("a page that arrived does not change the route tree")
+	}
+
+	writeRoute(t, root, "docs/slug_/page.tsx")
+	layout := filepath.Join(root, "layout.tsx")
+	if err := os.WriteFile(layout, []byte("export default function Layout() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	full, err := routeTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(full, "docs/slug_/page.tsx") {
+		t.Fatalf("a nested route is missing:\n%s", full)
+	}
+
+	if err := os.RemoveAll(filepath.Join(root, "otra")); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := routeTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed == full {
+		t.Fatal("a page that left does not change the route tree")
+	}
+	if strings.Contains(removed, "otra") {
+		t.Fatalf("the page that left is still in the tree:\n%s", removed)
+	}
+}
+
+func TestDevelopmentStampLeavesWhatIsInsideAPageAlone(t *testing.T) {
+	// A page is a module of the frontend: Vite hands the new one to the browser
+	// and the Go side is not rebuilt for it. What the stamp has to notice is which
+	// files are there, not what they say.
+	root := t.TempDir()
+	writeRoute(t, root, "page.tsx")
+	before, err := routeTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := filepath.Join(root, "page.tsx")
+	if err := os.WriteFile(page, []byte("export default function Page() { return 1; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	after, err := routeTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("editing a page changed the route tree:\n%s\nwant\n%s", after, before)
+	}
+
+	// A private directory is not a route, the way the router reads it, so a
+	// component beside a page is not a route appearing.
+	private := filepath.Join(root, "_components")
+	if err := os.MkdirAll(private, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(private, "boton.tsx"), []byte("export const Boton = null;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withPrivate, err := routeTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withPrivate != before {
+		t.Fatalf("a private directory is read as a route:\n%s", withPrivate)
+	}
+}
+
+func TestDevelopmentStampKeepsWatchingTheGoTree(t *testing.T) {
+	// The route tree is what was added; the Go sources are what was watched
+	// before, and a server that stops rebuilding them is a server that stopped
+	// compiling.
+	root := t.TempDir()
+	routeRoot := filepath.Join(root, "app")
+	writeRoute(t, routeRoot, "page.tsx")
+	source := filepath.Join(root, "app.go")
+
+	before, err := developmentStamp(root, routeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withSource, err := developmentStamp(root, routeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withSource == before {
+		t.Fatal("a Go source that arrived does not change the stamp")
 	}
 }

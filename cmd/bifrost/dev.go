@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -243,7 +244,7 @@ func runDev(args []string) error {
 	if err := buildAndStart(); err != nil {
 		return err
 	}
-	last, err := goTreeStamp(*dir)
+	last, err := developmentStamp(*dir, routeRoot)
 	if err != nil {
 		return err
 	}
@@ -261,7 +262,7 @@ func runDev(args []string) error {
 					continue
 				}
 			}
-			current, err := goTreeStamp(*dir)
+			current, err := developmentStamp(*dir, routeRoot)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "bifrost: watch:", err)
 				continue
@@ -275,6 +276,64 @@ func runDev(args []string) error {
 			}
 		}
 	}
+}
+
+// developmentStamp is everything that makes the generated app different: the Go
+// sources it is built from, and *which* files the route tree has. What is inside
+// a page is not here on purpose -- a page is a module of the frontend and Vite
+// hands the new one to the browser without a rebuild -- but a page that appears
+// or disappears is a route, and a route is compiled in.
+func developmentStamp(dir, routeRoot string) (string, error) {
+	sources, err := goTreeStamp(dir)
+	if err != nil {
+		return "", err
+	}
+	routes, err := routeTreeStamp(routeRoot)
+	if err != nil {
+		return "", err
+	}
+	return sources + "\n" + routes, nil
+}
+
+// routeTreeStamp names the files of the route tree, sorted so that the order a
+// directory happens to be read in is not a change. Measured: with only the Go
+// sources watched, `app/tempmedicion/page.tsx` was created and the route never
+// existed -- no rebuild, and a 404 -- until the server was restarted. A private
+// directory is left out the way the router leaves it out.
+func routeTreeStamp(routeRoot string) (string, error) {
+	absolute, err := filepath.Abs(routeRoot)
+	if err != nil {
+		return "", err
+	}
+	var names []string
+	err = filepath.WalkDir(absolute, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if path == absolute {
+				return nil
+			}
+			switch {
+			case entry.Name() == ".bifrost", entry.Name() == "node_modules":
+				return filepath.SkipDir
+			case strings.HasPrefix(entry.Name(), "_"):
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		relative, err := filepath.Rel(absolute, path)
+		if err != nil {
+			return err
+		}
+		names = append(names, filepath.ToSlash(relative))
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(names)
+	return strings.Join(names, "\n"), nil
 }
 
 // requireViteInstalled fails early with an actionable message when Vite is
