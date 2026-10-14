@@ -579,6 +579,59 @@ func TestNativeWarningsGoInFrontOfTheCompilerTheAppInstalled(t *testing.T) {
 	}
 }
 
+func TestNativeFlexContainersGetTheRowABrowserGivesThem(t *testing.T) {
+	// A browser lays a flex container out along the row and a native view lays
+	// its children down the page, so Tailwind's `flex` -- a `display` and nothing
+	// else -- is a column here. Measured on device: two boxes of `h-4 w-8` under
+	// `flex` stacked one above the other, and the same two under `flex-row` went
+	// side by side. The direction goes into the rule that asked for the flex, or
+	// the later `.flex-col` Tailwind emits would stop winning with it.
+	shipped := map[string]bool{}
+	for _, file := range nativeProjectFiles {
+		if file.Name == "bifrost/row-direction.js" {
+			shipped["row"] = file.Content == nativeRowDirection
+		}
+		if file.Name == "bifrost/native-internal.js" {
+			shipped["internal"] = file.Content == nativeNativeInternal
+		}
+	}
+	if !shipped["row"] {
+		t.Fatal("the row direction is not part of the generated project")
+	}
+	if !shipped["internal"] {
+		t.Fatal("the module that wraps the collection is not part of the generated project")
+	}
+	if !strings.Contains(nativeRowDirection, `group.flexDirection = "row";`) {
+		t.Fatal("the direction is not written into the rule that asked for the flex")
+	}
+	if !strings.Contains(nativeRowDirection, `names(declarations, "flexDirection")`) {
+		t.Fatal("a rule that already names a direction would be given another")
+	}
+	// A declaration whose value is a variable is an array in the collection, and
+	// reading one of those as an object would take a variable for a display.
+	if !strings.Contains(nativeRowDirection, "Array.isArray(group)") {
+		t.Fatal("a declaration that arrives through a variable is read as one that does not")
+	}
+	// The collection is one object for the whole runtime, so the module is
+	// patched where it is read and the same module is handed on: a copy would
+	// leave every other reader with the copy's opposite.
+	if !strings.Contains(nativeNativeInternal, "const inject = collection.inject.bind(collection);") {
+		t.Fatal("the collection is not read as it is handed in")
+	}
+	if !strings.Contains(nativeNativeInternal, "module.exports = upstream;") {
+		t.Fatal("the wrapper does not hand the module over")
+	}
+	if !strings.Contains(nativeMetroHelper, `moduleName === "react-native-css/native-internal"`) {
+		t.Fatal("the generated project does not resolve the collection through the wrapper")
+	}
+	if !strings.Contains(nativeMetroHelper, "if (moduleName === \"react-native-css/native-internal\" && !insideBifrost) {") {
+		t.Fatal("the wrapper would wrap itself")
+	}
+	if !strings.Contains(nativeMetroHelper, `path.join(bifrost, "native-internal.js")`) {
+		t.Fatal("the resolver does not point at the wrapper")
+	}
+}
+
 func TestNativeWarningsHandTheFileToTheTransformerTheAppInstalled(t *testing.T) {
 	// Metro does not call a transformer with the config the app wrote: it hands it
 	// `config.transformer` on its own, flattened, minus the three keys it keeps for
