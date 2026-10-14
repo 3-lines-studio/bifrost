@@ -288,7 +288,7 @@ const { withBifrost, withBifrostWarnings } = require("./bifrost/metro");
 const { withNativewind } = require("nativewind/metro");
 
 const seams = withBifrost(getDefaultConfig(__dirname));
-const withCSS = withNativewind(seams, { input: "./global.css" });
+const withCSS = withNativewind(seams, { inlineRem: 16 });
 
 module.exports = withBifrostWarnings(withCSS);
 ```
@@ -338,6 +338,35 @@ func Load(r *http.Request) (any, error) {
 	return bifrost.PageData{Props: map[string]any{}, Document: bifrost.Document{Class: "dark"}}, nil
 }
 ```
+
+### Styling
+
+The stylesheet is a file of the overlay and the generated layout imports it, which is what makes it part of the bundle. Nothing else does: `withNativewind` takes an `input` option and NativeWind 5 ignores it. Measured through the whole transformer, the same stylesheet compiles to the same 592 bytes with `input: "./global.css"`, with `input: "./otro.css"` pointing at a file that does not exist, and with no options at all.
+
+The option worth setting is `inlineRem`, the size a root `rem` is worth. It defaults to 14 and the browser default is 16, so an app that wants the two targets to agree sets it; measured, `gap-2` compiles to 7 without it and to 8 with it.
+
+`postcss.config.mjs` is not optional, and nothing says so when it is missing:
+
+```js
+export default { plugins: { "@tailwindcss/postcss": {} } };
+```
+
+Without it Tailwind never runs, and what is left is the theme -- the `:root` variables, the `@theme` mappings -- and not one utility. Measured on the same stylesheet and probe: 958 bytes with the file, 393 without, and the utilities are the 565 that go missing. What comes out without it still paints the right colours, so it looks exactly like a project where NativeWind was never installed, which is why it is worth saying twice.
+
+#### What the stylesheet is scanned for
+
+Tailwind 4 finds its own candidates in every file it can reach, and the generated project is inside the directory it scans. Its own `bifrost/host.tsx` is written in prose, and prose contains class names: measured, its comment about blocks and its tag list put `.block`, `.inline` and `.table` into the stylesheet of an app that never asked for any of them, 390 bytes of utilities that a native target then drops again.
+
+`source(none)` restricts the scan to what the app declares, so the stylesheet holds what the app wrote and nothing else:
+
+```css
+@import "tailwindcss" source(none);
+
+@source "../../app";
+@source "../../components";
+```
+
+Measured on the same directory contents: 1107 bytes and `.block`, `.inline`, `.table` in the stylesheet without `source(none)`, 717 bytes and neither with it. The `@source` paths are relative to the stylesheet and reach the app's own tree, which is where the classes are actually written; the two directories are the ones the web app declares as its content.
 
 ### One page, two targets
 
