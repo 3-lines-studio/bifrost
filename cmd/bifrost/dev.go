@@ -531,6 +531,10 @@ func bridgeHealthy(socket string) bool {
 	return response.StatusCode == http.StatusOK
 }
 
+// generatedEmbedSource is the Go file bifrost writes next to an app whose
+// package is the app itself, to embed its build.
+const generatedEmbedSource = "zz_bifrost_gen.go"
+
 func goTreeStamp(root string) (string, error) {
 	absolute, err := filepath.Abs(root)
 	if err != nil {
@@ -552,6 +556,14 @@ func goTreeStamp(root string) (string, error) {
 			return nil
 		}
 		name := entry.Name()
+		if name == generatedEmbedSource {
+			// What bifrost writes to embed the build of the app. It is rewritten at the
+			// start and at the end of every build, so watching it makes the build that
+			// just happened look like a change somebody made. Measured: a Go file saved
+			// mid-edit left the server rebuilding itself two and a half times a second,
+			// each one a go run of the whole app, until the file compiled again.
+			return nil
+		}
 		if filepath.Ext(name) != ".go" && name != "go.mod" && name != "go.sum" && name != "package.json" && name != "bun.lock" {
 			return nil
 		}

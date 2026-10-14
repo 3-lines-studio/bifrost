@@ -276,3 +276,42 @@ func TestDevelopmentLockNamesTheProcessThatHoldsIt(t *testing.T) {
 		t.Fatalf("the message does not name the process that holds it:\n%s", said)
 	}
 }
+
+func TestDevelopmentStampIgnoresTheFileBifrostWritesForTheApp(t *testing.T) {
+	// Measured: the file bifrost generates to embed the build is rewritten at the
+	// start and at the end of every build, so a save that did not compile left the
+	// server rebuilding itself two and a half times a second, each one a go run of
+	// the whole app, until the file compiled again.
+	root := t.TempDir()
+	source := filepath.Join(root, "main.go")
+	if err := os.WriteFile(source, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := goTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	generated := filepath.Join(root, generatedEmbedSource)
+	if err := os.WriteFile(generated, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	after, err := goTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("the file bifrost writes is read as a change:\n%s\nwant\n%s", after, before)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "otro.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withSource, err := goTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withSource == before {
+		t.Fatal("a source somebody wrote is not read as a change")
+	}
+}
