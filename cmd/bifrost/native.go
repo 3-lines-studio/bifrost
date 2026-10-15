@@ -1295,6 +1295,7 @@ class ResizeObserver {
 const { ORIGIN } = require("./origin");
 const { getAddress, setAddress, hasPage, onAddressChange } = require("./route");
 const { refresh } = require("./refresh");
+const { follow } = require("./intent");
 
 const router = () => require("expo-router").router;
 const Linking = () => require("react-native").Linking;
@@ -1353,11 +1354,28 @@ const go = (to, replace) => {
     return;
   }
   // Not a page of this app. On the web the browser leaves the document and the
-  // server answers -- an api route that redirects to a checkout, say -- and that
-  // is what this hands over: the browser. A screen the router could not fill is
-  // not what the page asked for.
-  Linking().openURL(target).catch(() => {
-    console.warn("bifrost: nothing on this device could open " + target);
+  // server answers -- a link that sets the session cookie, an api route that
+  // redirects to a checkout -- and the client that has to make that request is
+  // this one, so that the cookie of the answer belongs to the client that will
+  // use it and the address the server answers with is one the router can paint.
+  // What the server does not answer with a redirect stays where it was: the
+  // browser, which is what a page asking for it means.
+  follow(target).then((next) => {
+    if (next !== null) {
+      if (next !== getAddress()) {
+        moving = true;
+        setAddress(next);
+      }
+      if (replace) {
+        router().replace(next);
+      } else {
+        router().push(next);
+      }
+      return;
+    }
+    Linking().openURL(target).catch(() => {
+      console.warn("bifrost: nothing on this device could open " + target);
+    });
   });
 };
 
@@ -1614,6 +1632,116 @@ export default function Layout() {
 const styles = StyleSheet.create({
   shell: { flex: 1 },
 });
+`
+
+const nativeIntent = `import { ORIGIN } from "./origin";
+
+// The path and the query of a url, cut the way the router and the server talk
+// about them. A deep link arrives whole -- a scheme, a host, and from a
+// development bundler a '/--/' in front of it -- while a redirect answers with
+// a path, or with a url of its own.
+export function pathOf(url: string): string {
+  const bundler = url.indexOf("/--/");
+  if (bundler >= 0) {
+    return url.slice(bundler + 3) || "/";
+  }
+  const scheme = url.indexOf("://");
+  // Without a scheme there is no host to cut off, and what is left is a path of
+  // this app whether or not it was written with the slash in front.
+  if (scheme < 0) {
+    return url.charAt(0) === "/" ? url : "/" + url;
+  }
+  const slash = url.indexOf("/", scheme + 3);
+  return slash < 0 ? "/" : url.slice(slash) || "/";
+}
+
+// An address as a path of this app's own server, or null when it is somewhere
+// else. A url that starts with two slashes is one of the ways an
+// address that looks relative leaves this origin, so it is not one of ours.
+export function ownPath(address: string): string | null {
+  if (address.charAt(0) === "/") {
+    return address.charAt(1) === "/" ? null : address;
+  }
+  if (address.indexOf(ORIGIN) !== 0) {
+    return null;
+  }
+  return address.slice(ORIGIN.length) || "/";
+}
+
+// What a server answers that is not a page: the urls of the api are asked for
+// for their effect -- a checkout session gets created, an oauth dance starts --
+// and a page that hands one over is asking for the browser, not for a request
+// made from here on the way.
+const API = "/api/";
+
+// A url of this app's own server that the router has no screen for. In a browser
+// the document goes away and the server answers -- a 303, a session cookie, and
+// the address to go on from -- and this is the same request made by the app, so
+// that the cookie lands where the pages will send it and the answer is one the
+// router can paint.
+//
+// The redirect is read instead of followed, because the address it names is the
+// whole answer: a redirect inside this origin means the app stays (the link of a
+// mail that sets the session), and one that leaves it means the browser goes (the
+// endpoint that starts a checkout). Measured on the app of the case: the fetch of
+// the runtime answers a 303 as a 303 when it is told manual, with the
+// location saying where it points, while a request that answers 200 is a
+// document of the server -- a preview, say -- that no screen of this app has.
+export async function follow(address: string): Promise<string | null> {
+  const path = ownPath(address);
+  if (path === null || path.indexOf(API) === 0) {
+    return null;
+  }
+  let response: Response;
+  try {
+    response = await fetch(ORIGIN + path, { redirect: "manual" });
+  } catch {
+    return null;
+  }
+  if (response.status < 300 || response.status > 399) {
+    return null;
+  }
+  const at = response.headers.get("location");
+  if (at === null || at === "") {
+    return null;
+  }
+  return ownPath(at);
+}
+`
+
+// The intent of the system, which is what turns the url a link opened the app
+// with into a move of the router. A path that is a page is the router's, exactly
+// as it was before this file existed. A path that is not is a url of the server,
+// and the server is who the link is talking to: the app asks for it the way a
+// browser would and moves to the address the answer names, and what the server
+// does not answer with a redirect is left alone, which is where it landed before.
+const nativeIntentFile = `import { Linking } from "react-native";
+import { follow, ownPath, pathOf } from "../bifrost/intent";
+import { ORIGIN } from "../bifrost/origin";
+import { hasPage } from "../bifrost/route";
+
+export async function redirectSystemPath({ path }: { path: string; initial: boolean }) {
+  const address = pathOf(path);
+  if (hasPage(address)) {
+    return path;
+  }
+  const next = await follow(address);
+  if (next !== null) {
+    return next;
+  }
+  // The server answered with no address for this app, so what it has is a
+  // document -- a preview, the text of a link that expired -- and a document is
+  // the browser's, which is where this url goes in the web app. The app stays
+  // where it is instead of opening a screen the router has nothing for.
+  const ours = ownPath(address);
+  if (ours !== null) {
+    await Linking.openURL(ORIGIN + ours).catch(() => {
+      console.warn("bifrost: nothing on this device could open " + ORIGIN + ours);
+    });
+    return null;
+  }
+  return path;
+}
 `
 
 const nativeData = `import { ORIGIN } from "./origin";
@@ -2547,6 +2675,7 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/events.ts", nativeEventSource},
 	{"bifrost/form.tsx", nativeForm},
 	{"bifrost/html.ts", nativeHTML},
+	{"bifrost/intent.ts", nativeIntent},
 	{"bifrost/jsx-runtime.ts", nativeJSXRuntime},
 	{"bifrost/metro.js", nativeMetroHelper},
 	{"bifrost/net.ts", nativeNet},
@@ -2701,6 +2830,13 @@ func writeNativeProject(native string, app appRouter, origin, overlay string) er
 		pageViews = append(pageViews, view)
 	}
 	if err := writeNativeFile(native, "bifrost/route.ts", nativeRoute(nativePagePaths(pageViews)), 0o644); err != nil {
+		return err
+	}
+	// The intent of the system is written here and not by an app: it is the seam
+	// between a url that arrived and a screen, and what it decides is the same for
+	// every app -- see bifrost/intent.ts. An app that ships one of its own gets the
+	// error of a file that is not a route of its tree, which is loud on purpose.
+	if err := writeNativeFile(native, "app/+native-intent.tsx", nativeIntentFile, 0o644); err != nil {
 		return err
 	}
 	views := filepath.Join(app.ProjectRoot, ".bifrost", "views")
