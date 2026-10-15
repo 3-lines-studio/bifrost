@@ -87,7 +87,7 @@ func TestNativeProjectDropsOverlayFilesTheOverlayStoppedShipping(t *testing.T) {
 	native := filepath.Join(projectRoot, ".bifrost", "native")
 	write := func() {
 		t.Helper()
-		if err := writeNativeProject(native, prepared, "", overlay); err != nil {
+		if _, err := writeNativeProject(native, prepared, "", overlay); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -144,7 +144,7 @@ func TestNativeProjectMirrorsTheRouteTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	native := filepath.Join(projectRoot, ".bifrost", "native")
-	if err := writeNativeProject(native, prepared, "http://example.test", filepath.Join(projectRoot, "native")); err != nil {
+	if _, err := writeNativeProject(native, prepared, "http://example.test", filepath.Join(projectRoot, "native")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -185,7 +185,7 @@ func TestNativeProjectDropsStaleRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	native := filepath.Join(projectRoot, ".bifrost", "native")
-	if err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
+	if _, err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
 		t.Fatal(err)
 	}
 	stale := filepath.Join(native, "app", "gone.tsx")
@@ -199,7 +199,7 @@ func TestNativeProjectDropsStaleRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
+	if _, err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
@@ -247,7 +247,7 @@ func TestNativeClientHandsBackTheRedirectItGets(t *testing.T) {
 		t.Fatal(err)
 	}
 	native := filepath.Join(projectRoot, ".bifrost", "native")
-	if err := writeNativeProject(native, prepared, server.URL, filepath.Join(projectRoot, "native")); err != nil {
+	if _, err := writeNativeProject(native, prepared, server.URL, filepath.Join(projectRoot, "native")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -338,7 +338,7 @@ func TestNativeProjectKeepsTheAppFilesItWasGiven(t *testing.T) {
 	}
 	native := filepath.Join(projectRoot, ".bifrost", "native")
 	for run := 1; run <= 2; run++ {
-		if err := writeNativeProject(native, prepared, "", overlay); err != nil {
+		if _, err := writeNativeProject(native, prepared, "", overlay); err != nil {
 			t.Fatalf("run %d: %v", run, err)
 		}
 		for name, want := range files {
@@ -413,7 +413,7 @@ func TestNativeProjectRefusesAnOverlayRouteTheServerDoesNotServe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = writeNativeProject(filepath.Join(projectRoot, ".bifrost", "native"), prepared, "", overlay)
+	_, err = writeNativeProject(filepath.Join(projectRoot, ".bifrost", "native"), prepared, "", overlay)
 	if err == nil || !strings.Contains(err.Error(), "not a route") {
 		t.Fatalf("err = %v", err)
 	}
@@ -901,7 +901,7 @@ func TestNativeWarningsHandTheFileToTheTransformerTheAppInstalled(t *testing.T) 
 		t.Fatal(err)
 	}
 	native := filepath.Join(projectRoot, ".bifrost", "native")
-	if err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
+	if _, err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1275,7 +1275,7 @@ func TestNativePageTableLeavesOutTheNotFoundRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	native := filepath.Join(projectRoot, ".bifrost", "native")
-	if err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
+	if _, err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
 		t.Fatal(err)
 	}
 	source, err := os.ReadFile(filepath.Join(native, "bifrost", "route.ts"))
@@ -1320,7 +1320,7 @@ func TestNativePagesAreMatchedTheWayAUrlSpellsThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	native := filepath.Join(projectRoot, ".bifrost", "native")
-	if err := writeNativeProject(native, prepared, "http://example.test", filepath.Join(projectRoot, "native")); err != nil {
+	if _, err := writeNativeProject(native, prepared, "http://example.test", filepath.Join(projectRoot, "native")); err != nil {
 		t.Fatal(err)
 	}
 	probe := `import { hasPage } from "./bifrost/route.ts";
@@ -1493,7 +1493,7 @@ func TestNativeTurnsAUrlThatArrivedIntoAMoveOfTheRouter(t *testing.T) {
 	// is written by the generator and not by an app, because what it decides is the
 	// same for every app.
 	projectRoot := t.TempDir()
-	if err := writeNativeProject(filepath.Join(projectRoot, ".bifrost", "native"), appRouter{ProjectRoot: projectRoot}, "http://127.0.0.1:8080", filepath.Join(projectRoot, "native")); err != nil {
+	if _, err := writeNativeProject(filepath.Join(projectRoot, ".bifrost", "native"), appRouter{ProjectRoot: projectRoot}, "http://127.0.0.1:8080", filepath.Join(projectRoot, "native")); err != nil {
 		t.Fatal(err)
 	}
 	content, err := os.ReadFile(filepath.Join(projectRoot, ".bifrost", "native", "app", "+native-intent.tsx"))
@@ -1839,7 +1839,7 @@ func TestNativeMetroConfigKeepsTheResolverThatWasAlreadyThere(t *testing.T) {
 		t.Fatal(err)
 	}
 	native := filepath.Join(projectRoot, ".bifrost", "native")
-	if err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
+	if _, err := writeNativeProject(native, prepared, "", filepath.Join(projectRoot, "native")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1999,5 +1999,113 @@ func TestNativeCarriesTheStateOfAnElementToTheStylesheet(t *testing.T) {
 	// one the compiler spells: a dash and the letter after it, in camel case.
 	if !strings.Contains(host, "const state = (given.dataSet ?? {}) as Record<string, unknown>;") {
 		t.Fatal("a dataSet the page wrote itself would be thrown away")
+	}
+}
+
+func TestNativeLeavesTheProjectAloneWhenNothingChanged(t *testing.T) {
+	// Metro watches the generated project and a file replaced with the same bytes
+	// is a change for the watcher: the bundler throws its cache away for it.
+	// Measured on the app of the case: `bifrost native` with nothing changed cost a
+	// cold bundle of 81.6 s, and the only reason the run could not be free was that
+	// every file of the project was replaced -- `os.RemoveAll` of `app/` and
+	// `bifrost/` and then a write of each one: measured, 38 of the 44 files of the
+	// generated project, and only one of them had any reason to change.
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(projectRoot, ".bifrost", "native")
+	overlay := filepath.Join(projectRoot, "native")
+	if err := os.MkdirAll(overlay, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// An app that ships a file of its own under a tree the generator owns is the
+	// case that was left behind: `metro.config.js` was written by the generator and
+	// then replaced by the app's, so its mtime changed on every run even after the
+	// strays were taken care of. Measured on the app of the case, with that write
+	// left in: it was the only file of the run that changed nothing.
+	if err := os.WriteFile(filepath.Join(overlay, "metro.config.js"), []byte("module.exports = withBifrostWarnings({});\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeNativeProject(native, prepared, "", overlay); err != nil {
+		t.Fatal(err)
+	}
+	before := map[string]time.Time{}
+	for _, tree := range []string{"app", "bifrost", "metro.config.js"} {
+		err := filepath.WalkDir(filepath.Join(native, tree), func(path string, entry os.DirEntry, err error) error {
+			if err != nil || entry.IsDir() {
+				return err
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			before[path] = info.ModTime()
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(before) < 20 {
+		t.Fatalf("the project is too small to say anything: %d files", len(before))
+	}
+	time.Sleep(20 * time.Millisecond)
+	same, err := writeNativeProject(native, prepared, "", overlay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !same {
+		t.Fatal("a run that changes nothing does not say so")
+	}
+	for path, when := range before {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("%s went missing: %v", path, err)
+		}
+		if !info.ModTime().Equal(when) {
+			t.Fatalf("%s was written again, which is a cold bundle for Metro", path)
+		}
+	}
+	// And the run that does change something says that too, or the line above is
+	// worth nothing: a route added is a file added.
+	if err := os.MkdirAll(filepath.Join(appRoot, "other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "other", "page.tsx"), []byte("export default function Other() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err = prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, err = writeNativeProject(native, prepared, "", overlay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same {
+		t.Fatal("a run that added a screen says nothing changed")
+	}
+	// And what the app deleted does not stay: the tree is a build artifact.
+	if err := os.RemoveAll(filepath.Join(appRoot, "other")); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err = prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeNativeProject(native, prepared, "", overlay); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(native, "app", "other.tsx")); !os.IsNotExist(err) {
+		t.Fatalf("a removed route left its screen behind: %v", err)
 	}
 }

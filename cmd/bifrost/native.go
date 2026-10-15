@@ -2900,10 +2900,17 @@ func runNative(args []string) error {
 	}
 	native := filepath.Join(projectRoot, ".bifrost", "native")
 	overlay := filepath.Join(projectRoot, *from)
-	if err := writeNativeProject(native, prepared, *origin, overlay); err != nil {
+	same, err := writeNativeProject(native, prepared, *origin, overlay)
+	if err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(os.Stdout, "Bifrost native project: %s\n", filepath.ToSlash(native))
+	// A run that changed nothing says so, and that is the whole difference between a
+	// run Metro hears about and one it does not: a restart of the bundler is a cold
+	// bundle -- 81.6 s measured -- and there is nothing to restart for.
+	if same {
+		_, _ = fmt.Fprintln(os.Stdout, "  nothing changed: Metro does not have to be restarted")
+	}
 	if overlayExists(overlay) {
 		_, _ = fmt.Fprintf(os.Stdout, "  app files from: %s\n", filepath.ToSlash(overlay))
 		if warning := nativeOverlayWarning(overlay); warning != "" {
@@ -2914,26 +2921,37 @@ func runNative(args []string) error {
 	return nil
 }
 
-func writeNativeProject(native string, app appRouter, origin, overlay string) error {
+// The run says whether every file of the trees it owns already had the bytes it
+// would write, which is the difference between a run Metro hears about and one it
+// does not.
+func writeNativeProject(native string, app appRouter, origin, overlay string) (bool, error) {
 	screens := make(map[string]appRoute, len(app.Routes))
 	for _, route := range app.Routes {
 		view, err := expoRouterPath(route.Pattern)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if previous, exists := screens[view]; exists {
-			return fmt.Errorf("bifrost: routes %s and %s both map to native path %s", previous.Pattern, route.Pattern, view)
+			return false, fmt.Errorf("bifrost: routes %s and %s both map to native path %s", previous.Pattern, route.Pattern, view)
 		}
 		screens[view] = route
 	}
-	for _, name := range []string{"app", "bifrost"} {
-		if err := os.RemoveAll(filepath.Join(native, name)); err != nil {
-			return err
-		}
-	}
+	// What this run writes under app/ and bifrost/ is recorded as it goes, so that
+	// what the run before left and this one does not is taken out at the end -- and
+	// a file that did not change keeps its mtime, which is what keeps Metro from
+	// throwing its cache away. See writeNativeFile.
+	written := newNativeWritten()
 	for _, file := range nativeProjectFiles {
-		if err := writeNativeFile(native, file.Name, file.Content, 0o644); err != nil {
-			return err
+		// A file the overlay ships is not written here first and replaced after:
+		// the app's copy is the one that stays, and writing the generated one on
+		// the way is a second mtime on the same run. Measured: the app replaces
+		// `metro.config.js`, and it was the only file of the project whose mtime
+		// still changed on a run that changed nothing.
+		if file.Name != "package.json" && nativeOverlayHas(overlay, file.Name) {
+			continue
+		}
+		if err := written.write(native, file.Name, file.Content, 0o644); err != nil {
+			return false, err
 		}
 	}
 	// The layout and the tag map are written with the overlay in hand, because
@@ -2942,22 +2960,22 @@ func writeNativeProject(native string, app appRouter, origin, overlay string) er
 		"app/_layout.tsx":  nativeLayout(overlay),
 		"bifrost/host.tsx": nativeHost(overlay),
 	} {
-		if err := writeNativeFile(native, name, content, 0o644); err != nil {
-			return err
+		if err := written.write(native, name, content, 0o644); err != nil {
+			return false, err
 		}
 	}
 	manifest := nativePackageManifest()
 	if err := mergeNativeOverlayManifest(overlay, manifest); err != nil {
-		return err
+		return false, err
 	}
-	if err := writeNativeJSON(native, "package.json", manifest); err != nil {
-		return err
+	if err := written.writeJSON(native, "package.json", manifest); err != nil {
+		return false, err
 	}
-	if err := writeNativeJSON(native, "app.json", nativeAppManifest(app.ProjectRoot)); err != nil {
-		return err
+	if err := written.writeJSON(native, "app.json", nativeAppManifest(app.ProjectRoot)); err != nil {
+		return false, err
 	}
-	if err := writeNativeFile(native, "bifrost/origin.ts", nativeOrigin(origin), 0o644); err != nil {
-		return err
+	if err := written.write(native, "bifrost/origin.ts", nativeOrigin(origin), 0o644); err != nil {
+		return false, err
 	}
 	pageViews := make([]string, 0, len(screens))
 	for view, route := range screens {
@@ -2969,33 +2987,46 @@ func writeNativeProject(native string, app appRouter, origin, overlay string) er
 		}
 		pageViews = append(pageViews, view)
 	}
-	if err := writeNativeFile(native, "bifrost/route.ts", nativeRoute(nativePagePaths(pageViews)), 0o644); err != nil {
-		return err
+	if err := written.write(native, "bifrost/route.ts", nativeRoute(nativePagePaths(pageViews)), 0o644); err != nil {
+		return false, err
 	}
 	// The intent of the system is written here and not by an app: it is the seam
 	// between a url that arrived and a screen, and what it decides is the same for
 	// every app -- see bifrost/intent.ts. An app that ships one of its own gets the
 	// error of a file that is not a route of its tree, which is loud on purpose.
-	if err := writeNativeFile(native, "app/+native-intent.tsx", nativeIntentFile, 0o644); err != nil {
-		return err
+	if err := written.write(native, "app/+native-intent.tsx", nativeIntentFile, 0o644); err != nil {
+		return false, err
 	}
 	views := filepath.Join(app.ProjectRoot, ".bifrost", "views")
 	for view, route := range screens {
 		source, err := screenSource(native, views, view, route, app.RouteParams[route.Pattern])
 		if err != nil {
-			return err
+			return false, err
 		}
-		if err := writeNativeFile(native, filepath.Join("app", filepath.FromSlash(view)+".tsx"), source, 0o644); err != nil {
-			return err
+		name := filepath.Join("app", filepath.FromSlash(view)+".tsx")
+		if err := written.write(native, name, source, 0o644); err != nil {
+			return false, err
 		}
 	}
-	return copyNativeOverlay(native, overlay, screens)
+	if err := copyNativeOverlay(native, overlay, screens, written); err != nil {
+		return false, err
+	}
+	// Last, so that the files the overlay put under these two trees are known and
+	// not taken for leftovers: an app ships `bifrost/host-extra.tsx` of its own,
+	// and removing it here would put it back with a new mtime on every run, which
+	// is the exact thing this is here to avoid.
+	for _, tree := range []string{"app", "bifrost"} {
+		if err := written.removeStrays(native, tree); err != nil {
+			return false, err
+		}
+	}
+	return written.untouched(), nil
 }
 
 // App files are copied last, so an app owns its screens, its layout and the
 // client it talks to the server with, while the route table keeps owning which
 // routes exist.
-func copyNativeOverlay(native, overlay string, screens map[string]appRoute) error {
+func copyNativeOverlay(native, overlay string, screens map[string]appRoute, written *nativeWritten) error {
 	names, err := nativeOverlayFiles(overlay)
 	if err != nil {
 		return err
@@ -3015,7 +3046,7 @@ func copyNativeOverlay(native, overlay string, screens map[string]appRoute) erro
 		if err != nil {
 			return err
 		}
-		if err := writeNativeFile(native, name, string(content), 0o644); err != nil {
+		if err := written.write(native, name, string(content), 0o644); err != nil {
 			return err
 		}
 	}
@@ -3397,12 +3428,114 @@ func expoRouterSegment(segment string) string {
 	return "[" + name + "]"
 }
 
+// A file is written only when what is on disk is not already what goes there.
+//
+// The generated project is a build artifact and every run rewrites it, so it looks
+// like the mtime does not matter -- and it does, because Metro watches this tree:
+// a file that is replaced with the same bytes is a change for the watcher, and the
+// bundler throws its cache away for it. Measured: `bifrost native` with nothing
+// changed cost a cold bundle of 81.6 s, and the only reason the run could not be
+// free is that every file of the project was being replaced. An app that changes
+// one screen pays for one screen.
 func writeNativeFile(native, name, content string, mode os.FileMode) error {
+	_, err := writeNativeFileTelling(native, name, content, mode)
+	return err
+}
+
+// The same, saying whether the bytes on disk had to change. A run that changes
+// nothing is a run Metro does not hear about, which is the whole point: see
+// writeNativeFile.
+func writeNativeFileTelling(native, name, content string, mode os.FileMode) (bool, error) {
 	filePath := filepath.Join(native, filepath.FromSlash(name))
+	if current, err := os.ReadFile(filePath); err == nil && string(current) == content {
+		if info, err := os.Stat(filePath); err == nil && info.Mode().Perm() == mode.Perm() {
+			return false, nil
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		return false, err
+	}
+	return true, os.WriteFile(filePath, []byte(content), mode)
+}
+
+// What a run wrote, so that what the run before wrote and this one did not can be
+// taken out. The trees of the project used to be deleted whole before writing
+// them again, which is right about what to keep and wrong about the mtime: see
+// writeNativeFile.
+type nativeWritten struct {
+	kept    map[string]bool
+	changed bool
+}
+
+func newNativeWritten() *nativeWritten {
+	return &nativeWritten{kept: map[string]bool{}}
+}
+
+func (w *nativeWritten) add(name string) string {
+	w.kept[filepath.ToSlash(filepath.Clean(name))] = true
+	return name
+}
+
+// A file this run wrote, because what was on disk was not what goes there.
+func (w *nativeWritten) wrote() {
+	w.changed = true
+}
+
+// Write a file of the generated project: it is recorded as written -- so a later
+// run knows it is not a leftover -- and the run learns whether the bytes on disk
+// had to change. Every write of the trees the generator owns goes through here,
+// and a write that goes around it is a run that says nothing changed when it did.
+func (w *nativeWritten) write(native, name, content string, mode os.FileMode) error {
+	w.add(name)
+	changed, err := writeNativeFileTelling(native, name, content, mode)
+	if err != nil {
 		return err
 	}
-	return os.WriteFile(filePath, []byte(content), mode)
+	if changed {
+		w.wrote()
+	}
+	return nil
+}
+
+func (w *nativeWritten) writeJSON(native, name string, value any) error {
+	content, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	return w.write(native, name, string(content)+"\n", 0o644)
+}
+
+// The bytes of every file of the trees the generator owns are the ones it would
+// write: the run can say it and Metro never hears about it.
+func (w *nativeWritten) untouched() bool {
+	return !w.changed
+}
+
+// A file of the tree that this run did not write is a leftover of the run before:
+// a route the app deleted, a module it renamed. The tree is a build artifact, so
+// nothing in it is worth keeping.
+func (w *nativeWritten) removeStrays(native, tree string) error {
+	root := filepath.Join(native, tree)
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(native, path)
+		if err != nil {
+			return err
+		}
+		if w.kept[filepath.ToSlash(relative)] {
+			return nil
+		}
+		w.wrote()
+		return os.Remove(path)
+	})
 }
 
 func writeNativeJSON(native, name string, value any) error {
