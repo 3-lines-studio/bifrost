@@ -1404,16 +1404,30 @@ func TestNativeShimAnswersWhereThePageIs(t *testing.T) {
 	// A url the app does not own is answered by the server on the web: the browser
 	// leaves the document and lands wherever it redirects, with the cookies of the
 	// answer. The request is the app's here, so that what the server sets belongs
-	// to the client that will use it, and what it does not answer with a redirect
-	// is handed over: the browser, which is where it went before.
-	if !strings.Contains(dom, "follow(target).then((next) => {") {
+	// to the client that will use it, and a redirect that leaves this server is
+	// handed to the browser, which is where it went before.
+	if !strings.Contains(dom, "follow(target).then((answer) => {") {
 		t.Fatal("a url that is not a page of the app is never asked for")
 	}
-	if !strings.Contains(dom, "Linking().openURL(target)") {
-		t.Fatal("a url the server does not redirect goes into the router")
+	if !strings.Contains(dom, "openElsewhere(answer.href);") {
+		t.Fatal("a redirect that leaves this server is not handed to the browser")
 	}
-	if strings.Index(dom, "Linking().openURL(target)") < strings.Index(dom, "follow(target)") {
+	if strings.Index(dom, "openElsewhere(answer.href)") < strings.Index(dom, "follow(target)") {
 		t.Fatal("the browser is handed a url before it was ever asked for")
+	}
+	// And a url of this app's own server that the server answers with no move is
+	// never handed over: this app is what the system opens that domain with, so
+	// asking for it opens this app again with the same url. Measured on a link of
+	// a mail that had already been used: 1158 launches of the app in one minute
+	// and a phone that had to be restarted.
+	if !strings.Contains(dom, "if (url.indexOf(ORIGIN) === 0) {") {
+		t.Fatal("a document of this server would be handed to the browser, which opens this app")
+	}
+	if !strings.Contains(dom, "is a document of this app's own server and no screen of this app can paint it") {
+		t.Fatal("the loop is not said out loud where it is broken")
+	}
+	if !strings.Contains(dom, "was handed to the browser a moment ago; not again") {
+		t.Fatal("the same url can be handed to the browser twice in a row")
 	}
 	// A relative url is resolved against the directory of the current one, which
 	// is a piece of a browser this does not carry: naming it beats guessing.
@@ -1459,7 +1473,7 @@ func TestNativeAsksItsOwnServerForAUrlThatIsNotAPage(t *testing.T) {
 		t.Fatal("a url of the server has nothing to ask for it")
 	}
 	for _, said := range []string{
-		"export async function follow(address: string): Promise<string | null>",
+		"export async function follow(address: string): Promise<Answered | null>",
 		"export function pathOf(url: string): string",
 		// The redirect is read and not followed, because the address it names is the
 		// whole answer: it says whether the app stays or the browser goes.
@@ -1471,13 +1485,18 @@ func TestNativeAsksItsOwnServerForAUrlThatIsNotAPage(t *testing.T) {
 			t.Fatalf("the request of a url of the server does not %s", said)
 		}
 	}
-	// Asking the api is not free: a checkout session is created by the request
-	// itself, so a url of the api is the browser's and nothing is asked in between.
-	if !strings.Contains(intent, `const API = "/api/";`) {
-		t.Fatal("a url of the api would be asked for on the way to the browser")
+	// Every url of the server is asked for, the api included. It used to be left
+	// to the browser for being the url that creates a checkout session with the
+	// request itself, and what that cost is the button of Google: the dance of an
+	// oauth starts by asking that url, and the cookie of the state belongs to
+	// whoever asked -- so a browser that asks is a browser that ends the dance with
+	// a session this app will never have. What is not asked for is a url that the
+	// app cannot answer and the server does not move: see the shim.
+	if !strings.Contains(intent, "export async function follow(address: string): Promise<Answered | null> {") {
+		t.Fatal("a url of the server is asked for somewhere else")
 	}
-	if strings.Index(intent, "path.indexOf(API) === 0") < 0 {
-		t.Fatal("the api of the server is asked for like a page")
+	if !strings.Contains(intent, `return ours === null ? { kind: "outside", href: at } : { kind: "inside", href: ours };`) {
+		t.Fatal("a redirect that leaves this server is not told apart from one of ours")
 	}
 	// An address that looks relative and leaves the origin -- `//elsewhere/x` -- is
 	// not one of ours, and the check has to come before the one for a path.
@@ -1502,7 +1521,7 @@ func TestNativeTurnsAUrlThatArrivedIntoAMoveOfTheRouter(t *testing.T) {
 	}
 	written := string(content)
 	for _, said := range []string{
-		`import { follow, ownPath, pathOf } from "../bifrost/intent";`,
+		`import { follow, pathOf } from "../bifrost/intent";`,
 		`import { hasPage } from "../bifrost/route";`,
 		"export async function redirectSystemPath(",
 		"if (hasPage(address)) {",
@@ -1512,10 +1531,21 @@ func TestNativeTurnsAUrlThatArrivedIntoAMoveOfTheRouter(t *testing.T) {
 		}
 	}
 	// A url of this app's own server that the server does not answer with a
-	// redirect is a document, and a document belongs to the browser -- the same
-	// place it goes when a page hands it over.
-	if !strings.Contains(written, "await Linking.openURL(ORIGIN + ours)") {
-		t.Fatal("a url the server answers with a document does not reach the browser")
+	// redirect is a document, and this app cannot hand it over: the App Link of
+	// this domain is its own, so asking the system to open it opens this app again
+	// with the same url. Measured on a link of a mail that had already been used:
+	// 1158 launches of the app in one minute and a phone that had to be restarted.
+	if strings.Contains(written, "Linking.openURL(ORIGIN +") {
+		t.Fatal("a document of this server is handed to the browser, which opens this app again")
+	}
+	if !strings.Contains(written, "is a document of this app's own server and no screen of this app can paint it") {
+		t.Fatal("the loop is not said out loud where it is broken")
+	}
+	// And a redirect that leaves this server -- the dance of an oauth provider --
+	// is the one url the browser has to open, because the browser is where that
+	// happens.
+	if !strings.Contains(written, "await Linking.openURL(answer.href)") {
+		t.Fatal("a redirect that leaves this server does not reach the browser")
 	}
 	// A path that is a page stays the router's, exactly as it was before this file
 	// existed: the url that arrived is the one it is given.
