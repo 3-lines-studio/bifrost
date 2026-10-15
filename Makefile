@@ -1,6 +1,6 @@
-.PHONY: check test race vet gate demo native-html native-row native-selectors bench fuzz throughput integration dev-integration reproducible
+.PHONY: check test race vet gate demo native-html native-row native-selectors native-events bench fuzz throughput integration dev-integration reproducible
 
-check: test race vet gate native-html native-row native-selectors demo
+check: test race vet gate native-html native-row native-selectors native-events demo
 
 test:
 	@test -z "$$(gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'))" || (gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'); exit 1)
@@ -35,6 +35,11 @@ native-row:
 native-selectors:
 	bun ./scripts/native-selectors.mjs
 
+# The reader of a stream is a string of Go too, and it is the one that decides
+# what a page that watches its own server sees and when.
+native-events:
+	bun ./scripts/native-events.mjs
+
 bench:
 	go test -run '^$$' -bench . -benchmem ./...
 
@@ -58,6 +63,7 @@ integration:
 	bun ./scripts/native-html.mjs
 	bun ./scripts/native-row.mjs
 	bun ./scripts/native-selectors.mjs
+	bun ./scripts/native-events.mjs
 
 dev-integration:
 	bash ./scripts/dev-integration.sh
