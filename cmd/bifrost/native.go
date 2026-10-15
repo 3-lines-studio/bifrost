@@ -1369,6 +1369,49 @@ const { follow } = require("./intent");
 const router = () => require("expo-router").router;
 const Linking = () => require("react-native").Linking;
 
+// A url that is not a page of this app and that the app cannot answer: on the
+// web the browser leaves the document and paints whatever the server has for it,
+// and here the browser is another app.
+//
+// One url of this app's own server cannot be handed over: this app is what the
+// system opens that domain with -- the App Link of fonnso.com is its own, which
+// is the whole point of the target -- so asking the system to open it opens this
+// app again, with the same url, and the same answer, forever. Measured on a link
+// of a mail that had already been used: 1158 launches of the app in one minute,
+// and the phone had to be restarted. So a document of this server is left where
+// it is and said out loud, and nothing is opened.
+//
+// What is left is a url of another server -- the dance of an oauth provider, a
+// checkout -- and that one the system does open. It is remembered for a moment
+// so that the same url is not asked for twice in a row, which is how a loop
+// starts when something else in the middle keeps answering the same way.
+const ELSEWHERE = new Map();
+const ELSEWHERE_WHILE = 10000;
+
+function openElsewhere(target: string): void {
+  const url = absolute(String(target));
+  if (url.indexOf(ORIGIN) === 0) {
+    console.warn(
+      "bifrost: " + url + " is a document of this app's own server and no screen of this app can paint it; the app stays where it is, because asking the system to open that domain opens this app again",
+    );
+    return;
+  }
+  const at = Date.now();
+  for (const [one, when] of ELSEWHERE) {
+    if (at - when > ELSEWHERE_WHILE) {
+      ELSEWHERE.delete(one);
+    }
+  }
+  if (ELSEWHERE.has(url)) {
+    console.warn("bifrost: " + url + " was handed to the browser a moment ago; not again");
+    return;
+  }
+  ELSEWHERE.set(url, at);
+  Linking().openURL(url).catch(() => {
+    console.warn("bifrost: nothing on this device could open " + url);
+  });
+}
+
 // The address cut the way a url is cut: path, query and fragment.
 const where = () => {
   const at = getAddress();
@@ -1423,28 +1466,30 @@ const go = (to, replace) => {
     return;
   }
   // Not a page of this app. On the web the browser leaves the document and the
-  // server answers -- a link that sets the session cookie, an api route that
-  // redirects to a checkout -- and the client that has to make that request is
-  // this one, so that the cookie of the answer belongs to the client that will
-  // use it and the address the server answers with is one the router can paint.
-  // What the server does not answer with a redirect stays where it was: the
-  // browser, which is what a page asking for it means.
-  follow(target).then((next) => {
-    if (next !== null) {
-      if (next !== getAddress()) {
+  // server answers -- a link that sets the session cookie, a route that starts an
+  // oauth dance -- and the client that has to make that request is this one, so
+  // that the cookie of the answer belongs to the client that will use it.
+  follow(target).then((answer) => {
+    if (answer !== null) {
+      if (answer.kind === "outside") {
+        openElsewhere(answer.href);
+        return;
+      }
+      if (answer.href !== getAddress()) {
         moving = true;
-        setAddress(next);
+        setAddress(answer.href);
       }
       if (replace) {
-        router().replace(next);
+        router().replace(answer.href);
       } else {
-        router().push(next);
+        router().push(answer.href);
       }
       return;
     }
-    Linking().openURL(target).catch(() => {
-      console.warn("bifrost: nothing on this device could open " + target);
-    });
+    // The server answered with no move, so what it has is a document -- a
+    // preview, the text of a link that expired -- and a document is the
+    // browser's. Handing it over is not always possible: see openElsewhere.
+    openElsewhere(target);
   });
 };
 
@@ -1788,12 +1833,6 @@ export function ownPath(address: string): string | null {
   return address.slice(ORIGIN.length) || "/";
 }
 
-// What a server answers that is not a page: the urls of the api are asked for
-// for their effect -- a checkout session gets created, an oauth dance starts --
-// and a page that hands one over is asking for the browser, not for a request
-// made from here on the way.
-const API = "/api/";
-
 // A url of this app's own server that the router has no screen for. In a browser
 // the document goes away and the server answers -- a 303, a session cookie, and
 // the address to go on from -- and this is the same request made by the app, so
@@ -1807,9 +1846,30 @@ const API = "/api/";
 // the runtime answers a 303 as a 303 when it is told manual, with the
 // location saying where it points, while a request that answers 200 is a
 // document of the server -- a preview, say -- that no screen of this app has.
-export async function follow(address: string): Promise<string | null> {
+export type Answered =
+  // The server named another address of this app: the link of a mail that sets
+  // the session, a route that moved.
+  | { kind: "inside"; href: string }
+  // The server named an address that is not of this app: the dance of an oauth
+  // provider, the url of a checkout. The browser is the one that goes there, and
+  // the app only has to hand it over.
+  | { kind: "outside"; href: string };
+
+// What the server answers a url of its own with, when that answer is a move.
+//
+// It is read instead of followed, because the address it names is the whole
+// answer: one inside this origin means the app stays, and one outside means the
+// browser goes. It is asked of every url of the server and not left to the
+// browser, because the cookie of an answer has to land in the jar the app will
+// send with the pages -- measured on the dance of Google: the cookie of the
+// state belongs to whoever asked for the provider, and the callback is only
+// allowed to follow it from there.
+//
+// A url the server answers without a move is a document of the server, and a
+// document is the browser's: there is nothing to hand back here.
+export async function follow(address: string): Promise<Answered | null> {
   const path = ownPath(address);
-  if (path === null || path.indexOf(API) === 0) {
+  if (path === null) {
     return null;
   }
   let response: Response;
@@ -1825,7 +1885,8 @@ export async function follow(address: string): Promise<string | null> {
   if (at === null || at === "") {
     return null;
   }
-  return ownPath(at);
+  const ours = ownPath(at);
+  return ours === null ? { kind: "outside", href: at } : { kind: "inside", href: ours };
 }
 `
 
@@ -1836,31 +1897,43 @@ export async function follow(address: string): Promise<string | null> {
 // browser would and moves to the address the answer names, and what the server
 // does not answer with a redirect is left alone, which is where it landed before.
 const nativeIntentFile = `import { Linking } from "react-native";
-import { follow, ownPath, pathOf } from "../bifrost/intent";
-import { ORIGIN } from "../bifrost/origin";
+import { follow, pathOf } from "../bifrost/intent";
 import { hasPage } from "../bifrost/route";
 
+// The intent of the system is the url a link opened the app with. A path that is
+// a page is the router's, exactly as it was before this file existed, and a path
+// that is not is a url of the server: the server is who the link is talking to,
+// so it is asked the way a browser would ask it and the app moves to the address
+// the answer names.
+//
+// A redirect that leaves this server is the one case where the browser has to
+// go: the dance of an oauth provider happens there and comes back to this app as
+// another url of this domain.
+//
+// And a url of this server that the server answers with no move is a document,
+// and this app cannot hand it over: the App Link of this domain is its own, so
+// asking the system to open it opens this app again with the same url, which is
+// how a link of a mail that had already been used blocked a phone -- measured,
+// 1158 launches in one minute. It is said and nothing is opened.
 export async function redirectSystemPath({ path }: { path: string; initial: boolean }) {
   const address = pathOf(path);
   if (hasPage(address)) {
     return path;
   }
-  const next = await follow(address);
-  if (next !== null) {
-    return next;
+  const answer = await follow(address);
+  if (answer !== null) {
+    if (answer.kind === "outside") {
+      await Linking.openURL(answer.href).catch(() => {
+        console.warn("bifrost: nothing on this device could open " + answer.href);
+      });
+      return null;
+    }
+    return answer.href;
   }
-  // The server answered with no address for this app, so what it has is a
-  // document -- a preview, the text of a link that expired -- and a document is
-  // the browser's, which is where this url goes in the web app. The app stays
-  // where it is instead of opening a screen the router has nothing for.
-  const ours = ownPath(address);
-  if (ours !== null) {
-    await Linking.openURL(ORIGIN + ours).catch(() => {
-      console.warn("bifrost: nothing on this device could open " + ORIGIN + ours);
-    });
-    return null;
-  }
-  return path;
+  console.warn(
+    "bifrost: " + address + " is a document of this app's own server and no screen of this app can paint it; the app stays where it is, because asking the system to open that domain opens this app again",
+  );
+  return null;
 }
 `
 
@@ -1955,6 +2028,7 @@ export function onRefresh(listener: () => void): () => void {
 const nativeNavigation = `import { createContext, useContext, type ReactNode } from "react";
 import { Pressable, Text } from "react-native";
 import { router } from "expo-router";
+import { ORIGIN } from "./origin";
 import { refresh } from "./refresh";
 
 export { refresh };
@@ -2008,7 +2082,20 @@ export function useSearchParams(): URLSearchParams {
   return useContext(RouteContext).searchParams;
 }
 
+// A link of a page goes through the same door window.location goes through, and
+// not straight to the router. The two are not the same thing: a url of this
+// server that is not a screen of this app is not a route -- a link that sets the
+// session cookie, the url that starts an oauth dance, a document like a preview
+// -- and the router is the one thing that cannot answer it. Measured on the
+// button of Google of the app: the router was handed /api/auth/google and
+// painted "Unmatched Route", which is what it says when a url is not one of its
+// own. What knows the difference is the shim of window.location, so the link
+// asks it.
 export async function navigate(href: string): Promise<void> {
+  if (href.charAt(0) === "/" || href.indexOf(ORIGIN) === 0) {
+    window.location.href = href;
+    return;
+  }
   router.push(href as never);
 }
 
