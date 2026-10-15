@@ -1402,13 +1402,18 @@ func TestNativeShimAnswersWhereThePageIs(t *testing.T) {
 		}
 	}
 	// A url the app does not own is answered by the server on the web: the browser
-	// leaves the document and lands wherever it redirects. That is what the shim
-	// hands over, rather than a screen the router cannot fill.
-	if !strings.Contains(dom, "Linking().openURL(target)") {
-		t.Fatal("a url that is not a page of the app goes into the router")
+	// leaves the document and lands wherever it redirects, with the cookies of the
+	// answer. The request is the app's here, so that what the server sets belongs
+	// to the client that will use it, and what it does not answer with a redirect
+	// is handed over: the browser, which is where it went before.
+	if !strings.Contains(dom, "follow(target).then((next) => {") {
+		t.Fatal("a url that is not a page of the app is never asked for")
 	}
-	if !strings.Contains(dom, "nothing on this device could open") {
-		t.Fatal("a url that opened nothing says nothing")
+	if !strings.Contains(dom, "Linking().openURL(target)") {
+		t.Fatal("a url the server does not redirect goes into the router")
+	}
+	if strings.Index(dom, "Linking().openURL(target)") < strings.Index(dom, "follow(target)") {
+		t.Fatal("the browser is handed a url before it was ever asked for")
 	}
 	// A relative url is resolved against the directory of the current one, which
 	// is a piece of a browser this does not carry: naming it beats guessing.
@@ -1435,6 +1440,90 @@ func TestNativeShimAnswersWhereThePageIs(t *testing.T) {
 	// Nothing else is installed at the cost of what is already there.
 	if strings.Contains(dom, "target.document =") || strings.Contains(dom, "target.window =") {
 		t.Fatal("the shim overwrites the document or the window the app installed")
+	}
+}
+
+func TestNativeAsksItsOwnServerForAUrlThatIsNotAPage(t *testing.T) {
+	// A page writes the url the browser would leave the document for -- the link
+	// that opens a session, the endpoint that starts a checkout -- and on a native
+	// target the client that has to make that request is the app: a cookie set into
+	// a browser is a session the app will never have. What the server redirects
+	// inside its own origin is an address the router can paint, and everything else
+	// is the browser's, which is where it went before.
+	files := map[string]string{}
+	for _, file := range nativeProjectFiles {
+		files[file.Name] = file.Content
+	}
+	intent, ok := files["bifrost/intent.ts"]
+	if !ok {
+		t.Fatal("a url of the server has nothing to ask for it")
+	}
+	for _, said := range []string{
+		"export async function follow(address: string): Promise<string | null>",
+		"export function pathOf(url: string): string",
+		// The redirect is read and not followed, because the address it names is the
+		// whole answer: it says whether the app stays or the browser goes.
+		`fetch(ORIGIN + path, { redirect: "manual" })`,
+		`response.headers.get("location")`,
+		"if (response.status < 300 || response.status > 399) {",
+	} {
+		if !strings.Contains(intent, said) {
+			t.Fatalf("the request of a url of the server does not %s", said)
+		}
+	}
+	// Asking the api is not free: a checkout session is created by the request
+	// itself, so a url of the api is the browser's and nothing is asked in between.
+	if !strings.Contains(intent, `const API = "/api/";`) {
+		t.Fatal("a url of the api would be asked for on the way to the browser")
+	}
+	if strings.Index(intent, "path.indexOf(API) === 0") < 0 {
+		t.Fatal("the api of the server is asked for like a page")
+	}
+	// An address that looks relative and leaves the origin -- `//elsewhere/x` -- is
+	// not one of ours, and the check has to come before the one for a path.
+	if !strings.Contains(intent, "address.charAt(1) === \"/\" ? null : address") {
+		t.Fatal("a protocol-relative url is taken as a path of the app")
+	}
+}
+
+func TestNativeTurnsAUrlThatArrivedIntoAMoveOfTheRouter(t *testing.T) {
+	// A deep link that opens the app at a url the router has no screen for is what
+	// this is for: measured on the app of the case, the link of a mail left the
+	// screen on "Unmatched Route" and the session cookie landed nowhere. The file
+	// is written by the generator and not by an app, because what it decides is the
+	// same for every app.
+	projectRoot := t.TempDir()
+	if err := writeNativeProject(filepath.Join(projectRoot, ".bifrost", "native"), appRouter{ProjectRoot: projectRoot}, "http://127.0.0.1:8080", filepath.Join(projectRoot, "native")); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(projectRoot, ".bifrost", "native", "app", "+native-intent.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	written := string(content)
+	for _, said := range []string{
+		`import { follow, ownPath, pathOf } from "../bifrost/intent";`,
+		`import { hasPage } from "../bifrost/route";`,
+		"export async function redirectSystemPath(",
+		"if (hasPage(address)) {",
+	} {
+		if !strings.Contains(written, said) {
+			t.Fatalf("the intent of the system does not %s", said)
+		}
+	}
+	// A url of this app's own server that the server does not answer with a
+	// redirect is a document, and a document belongs to the browser -- the same
+	// place it goes when a page hands it over.
+	if !strings.Contains(written, "await Linking.openURL(ORIGIN + ours)") {
+		t.Fatal("a url the server answers with a document does not reach the browser")
+	}
+	// A path that is a page stays the router's, exactly as it was before this file
+	// existed: the url that arrived is the one it is given.
+	if !strings.Contains(written, "return path;") {
+		t.Fatal("a deep link to a page of the app is not left to the router")
+	}
+	if !strings.Contains(written, "return path;") || !strings.Contains(written, "return null;") {
+		t.Fatal("a url that arrived goes somewhere it was not told to")
 	}
 }
 

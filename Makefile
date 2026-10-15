@@ -1,6 +1,6 @@
-.PHONY: check test race vet gate demo native-html native-row native-selectors native-events native-scroll bench fuzz throughput integration dev-integration reproducible
+.PHONY: check test race vet gate demo native-html native-row native-selectors native-events native-scroll native-intent bench fuzz throughput integration dev-integration reproducible
 
-check: test race vet gate native-html native-row native-selectors native-events native-scroll demo
+check: test race vet gate native-html native-row native-selectors native-events native-scroll native-intent demo
 
 test:
 	@test -z "$$(gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'))" || (gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'); exit 1)
@@ -44,6 +44,12 @@ native-events:
 native-scroll:
 	bun ./scripts/native-scroll.mjs
 
+# The decision of what a url that is not a page of the app is, which is a string
+# of Go too, and it is the one that decides whether a link that opens a session
+# leaves the cookie in the app or in a browser.
+native-intent:
+	bun ./scripts/native-intent.mjs
+
 bench:
 	go test -run '^$$' -bench . -benchmem ./...
 
@@ -69,6 +75,7 @@ integration:
 	bun ./scripts/native-selectors.mjs
 	bun ./scripts/native-events.mjs
 	bun ./scripts/native-scroll.mjs
+	bun ./scripts/native-intent.mjs
 
 dev-integration:
 	bash ./scripts/dev-integration.sh
