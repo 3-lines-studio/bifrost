@@ -614,6 +614,89 @@ func TestNativeTakesTheTagOfASelectorDownToAClassInAStylesheet(t *testing.T) {
 	}
 }
 
+func TestNativeMakesABlockThatScrollsAScrollView(t *testing.T) {
+	// A native view only scrolls when it is a ScrollView, and the classes that
+	// ask for a scroll are not declarations the compiler can express: measured on
+	// the app of the case, 36 uses in 16 files, and every panel of the chat came
+	// out with its content clipped and no way to reach the rest.
+	shipped := false
+	for _, file := range nativeProjectFiles {
+		if file.Name == "bifrost/scroll.js" && file.Content == nativeScroll {
+			shipped = true
+		}
+	}
+	if !shipped {
+		t.Fatal("the decision of what scrolls is not part of the generated project")
+	}
+	if !strings.Contains(nativeHostHead, `import { scrollOf, splitScroll } from "./scroll";`) {
+		t.Fatal("the map does not read the decision")
+	}
+	if !strings.Contains(nativeHostBody, "function Scroller({ className, contentContainerStyle, children, ...rest }") {
+		t.Fatal("the map does not paint a block that scrolls")
+	}
+	if !strings.Contains(nativeHostBody, "<ScrollView") {
+		t.Fatal("a block that scrolls is not a ScrollView")
+	}
+	// With the keyboard up a scroll view eats the first tap: measured, the send
+	// button of a form focused with the keyboard open had to be pressed twice.
+	if !strings.Contains(nativeHostBody, `keyboardShouldPersistTaps="handled"`) {
+		t.Fatal("a tap with the keyboard up would be eaten")
+	}
+	// React Native refuses a style with alignItems or justifyContent on the scroll
+	// view itself and does not render at all: measured, the whole app came out a
+	// "ScrollView child layout" render error. They belong to the content, which is
+	// what they mean in a browser too.
+	if !strings.Contains(nativeHostBody, "const split = splitScroll(className);") {
+		t.Fatal("the layout of the children is left on the box that clips")
+	}
+	if !strings.Contains(nativeScroll, "function splitScroll(className)") {
+		t.Fatal("nothing takes the layout of the children out of the class")
+	}
+	if !strings.Contains(nativeHostBody, "contentContainerStyle={content as never}") {
+		t.Fatal("the layout of the children does not reach the content")
+	}
+	// The direction a ScrollView takes is one, and the class that asks for both
+	// is answered with the one that reaches what is below the fold.
+	if !strings.Contains(nativeScroll, `if (down && across) {`) {
+		t.Fatal("a block that asks for both directions is not answered")
+	}
+	if !strings.Contains(nativeScroll, `return "vertical";`) {
+		t.Fatal("the vertical scroll is not the one a block that asks for both gets")
+	}
+	// A class the map paints is not a class the target dropped: saying it was
+	// would be a line in the log about something that works.
+	if !strings.Contains(nativeCSSWarnings, `const { scrollOf } = require("./scroll");`) {
+		t.Fatal("the report does not know what the map paints")
+	}
+	if !strings.Contains(nativeCSSWarnings, "if (scrollOf(at) !== null) {") {
+		t.Fatal("the report would call a class the map paints a dropped one")
+	}
+}
+
+func TestNativeASubmitButtonAnswersTheEnterOfAField(t *testing.T) {
+	// A page writes onKeyDown for the key that ends the typing, and it never
+	// fires here: measured on the app of the case, the composer of the chat
+	// answered Enter and the device did nothing, so the button was the only way
+	// to send. The event a page reads carries the key and the form it is inside.
+	if !strings.Contains(nativeHostBody, "onSubmitEditing={onKeyDown === undefined ? undefined : enter}") {
+		t.Fatal("the Enter of a field does not answer the page")
+	}
+	if !strings.Contains(nativeHostBody, `key: "Enter",`) {
+		t.Fatal("the event of a key says nothing about the key")
+	}
+	if !strings.Contains(nativeHostBody, "currentTarget: { form: { requestSubmit: () => form?.submit() } }") {
+		t.Fatal("a page that submits the form from the event has nothing to submit")
+	}
+	// A field of many rows wraps and does not turn into a column of one line per
+	// word; one of one row keeps the behaviour of an input.
+	if !strings.Contains(nativeHostBody, `multiline={typeof rows === "number"}`) {
+		t.Fatal("a textarea is not painted as a field of many rows")
+	}
+	if !strings.Contains(nativeHostBody, `submitBehavior={typeof rows === "number" ? "submit" : "blurAndSubmit"}`) {
+		t.Fatal("the key that ends the typing is not the one the browser uses")
+	}
+}
+
 func TestNativeWatchesAStreamOfItsOwnServer(t *testing.T) {
 	// A page watches its server through `new EventSource(url)`, and there is no
 	// such thing on a native target: measured, the live path of the app of the
@@ -699,7 +782,7 @@ func TestNativeWarningsGoInFrontOfTheCompilerTheAppInstalled(t *testing.T) {
 	}
 	// The class reaches the stylesheet escaped -- .h-[100dvh] is written
 	// .h-\[100dvh\] -- and the app can only search for the name it wrote.
-	if !strings.Contains(nativeCSSWarnings, "at: className(selector)") {
+	if !strings.Contains(nativeCSSWarnings, "const at = className(selector);") {
 		t.Fatal("the report names the selector as the compiler spelled it, not as the app wrote it")
 	}
 	if !strings.Contains(nativeCSSWarnings, "String.fromCodePoint(parseInt(hex, 16))") {
@@ -1487,7 +1570,7 @@ func TestNativeTagMapKeepsTheValueOfEveryFieldOfAForm(t *testing.T) {
 	// document, so the answer has to come from the field itself: what the page
 	// set, and what somebody typed into a field the page let keep its own value.
 	host := nativeHost("")
-	if !strings.Contains(host, "function Field({ name, value, defaultValue, ...rest }") {
+	if !strings.Contains(host, "function Field({ name, value, defaultValue, rows, onKeyDown, ...rest }") {
 		t.Fatal("a field does not know its own name")
 	}
 	if !strings.Contains(host, `form.fields.set(name, held === undefined || held === null ? "" : String(held))`) {

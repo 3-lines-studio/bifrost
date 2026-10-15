@@ -448,6 +448,7 @@ const nativeCSSWarnings = `const path = require("node:path");
 const { unstable_transformerPath } = require("@expo/metro-config");
 const { compile } = require("react-native-css/compiler");
 const { withTagClasses } = require("./selectors");
+const { scrollOf } = require("./scroll");
 
 const worker = require(unstable_transformerPath);
 
@@ -465,6 +466,9 @@ const isStylesheet = (filePath) => /\.(s?css|sass)$/.test(filePath);
 // the reset Tailwind ships is full of them.
 function dropped(css, warnings) {
   const values = warnings.values ?? {};
+  // A class the map answers with a ScrollView is not a class this target
+  // dropped, and reporting it would be a line in the log about something that
+  // works.
   const found = [];
   let parse;
   try {
@@ -486,9 +490,14 @@ function dropped(css, warnings) {
       }
       rule.walkDecls((declaration) => {
         for (const value of values[declaration.prop] ?? []) {
-          if (declaration.value.includes(String(value))) {
-            found.push({ at: className(selector), property: declaration.prop, value: declaration.value.trim() });
+          if (!declaration.value.includes(String(value))) {
+            continue;
           }
+          const at = className(selector);
+          if (scrollOf(at) !== null) {
+            continue;
+          }
+          found.push({ at, property: declaration.prop, value: declaration.value.trim() });
         }
       });
     }
@@ -1941,6 +1950,113 @@ const styles = StyleSheet.create({
 });
 `
 
+// A block that scrolls is written in the stylesheet, and a native view only
+// scrolls when it is a ScrollView: `overflow-y-auto` is not a declaration native
+// can express, so the compiler drops it -- with a warning for `overflow-auto` and
+// with none at all for `overflow-x-auto` and `overflow-y-auto` -- and the block
+// grows past the screen and is clipped. Measured on the app of the case: 36 uses
+// in 16 files, and every panel of the chat (files, vault, slack, the invitations)
+// came out with its content cut and no way to reach the rest.
+//
+// A page names the scroll with a class, so the class is what the map reads. The
+// decision lives in a module of its own, in plain JavaScript, because the
+// transformer reads it too: a class the map paints is not a class the target
+// dropped, and saying it was would be a lie in the log.
+const nativeScroll = `// The classes that ask a block to scroll, by the direction they ask for. What a
+// browser calls a scroll is a box with the content clipped inside it; here it is
+// a ScrollView, and the direction decides which way it scrolls.
+const VERTICAL = ["overflow-y-auto", "overflow-y-scroll", "overflow-auto", "overflow-scroll"];
+const HORIZONTAL = ["overflow-x-auto", "overflow-x-scroll"];
+
+// What a class asks for, or nothing when it asks for no scroll at all. The one
+// that hides is a clip and not a scroll, and it is left to the compiler, which
+// expresses it as it is.
+function scrollOf(className) {
+  if (typeof className !== "string" || className === "") {
+    return null;
+  }
+  const names = className.split(/\s+/);
+  const down = names.some((name) => VERTICAL.indexOf(name) >= 0);
+  const across = names.some((name) => HORIZONTAL.indexOf(name) >= 0);
+  if (down && across) {
+    // A native ScrollView scrolls one way. A block that asks for both is asking
+    // for a box inside a box, and the direction that is worth more -- the one
+    // that reaches the content below the fold -- is the one it gets.
+    return "vertical";
+  }
+  if (down) {
+    return "vertical";
+  }
+  if (across) {
+    return "horizontal";
+  }
+  return null;
+}
+
+// The layout of the children of a box, which a native ScrollView does not let
+// the box hold: React Native refuses a style with alignItems or justifyContent on
+// the scroll view itself and does not render at all -- it says "ScrollView child
+// layout must be applied through the contentContainerStyle prop".
+//
+// It is right about the meaning, and the meaning is the browser's: the items of a
+// box that scrolls sit along the middle of the box. So the two families of class
+// that say it come out of the box and go to the content, and a class of a variant
+// -- md:items-center -- is the same class for this.
+const IN_CONTENT = /^!?(items|justify)-(.+)$/;
+
+const LAYOUT = {
+  items: {
+    start: "flex-start",
+    end: "flex-end",
+    center: "center",
+    baseline: "baseline",
+    stretch: "stretch",
+  },
+  justify: {
+    start: "flex-start",
+    end: "flex-end",
+    center: "center",
+    between: "space-between",
+    around: "space-around",
+    evenly: "space-evenly",
+  },
+};
+
+// What is left for the box, and what the content has to carry instead. The
+// class-derived style is written by the compiler from the class itself, and the
+// map cannot take a declaration out of it: the class is the only handle there is,
+// so the class is what moves.
+function splitScroll(className) {
+  const names = String(className === undefined || className === null ? "" : className)
+    .split(/\s+/)
+    .filter((name) => name !== "");
+  const box = [];
+  const content = {};
+  for (const name of names) {
+    const at = name.lastIndexOf(":");
+    const last = at < 0 ? name : name.slice(at + 1);
+    const found = IN_CONTENT.exec(last);
+    if (found === null) {
+      box.push(name);
+      continue;
+    }
+    const value = LAYOUT[found[1]][found[2]];
+    if (value === undefined) {
+      // A value this does not know: the box cannot hold it either way, because
+      // the renderer refuses the declaration, so it is dropped and said.
+      if (typeof console !== "undefined") {
+        console.warn("bifrost: " + name + " has no counterpart on a box that scrolls");
+      }
+      continue;
+    }
+    content[found[1] === "items" ? "alignItems" : "justifyContent"] = value;
+  }
+  return { className: box.join(" "), content };
+}
+
+module.exports = { scrollOf, splitScroll, VERTICAL, HORIZONTAL };
+`
+
 // A page is written once, for the browser, and the tags in it are what the
 // screen paints. This table is the vocabulary a native target supports, so the
 // runtime and the tests read the same list, and it is also the file an app is
@@ -1971,7 +2087,8 @@ for (const [name, component] of Object.entries(extraTags)) {
 `
 
 const nativeHostHead = `import { Children, Fragment, createElement, isValidElement, type ReactNode } from "react";
-import { Image, Linking, Pressable, Text, TextInput, View } from "react-native";
+import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { scrollOf, splitScroll } from "./scroll";
 import { navigate } from "virtual:bifrost/navigation";
 import { FormProvider, useForm, usePress } from "./form";
 `
@@ -2014,10 +2131,48 @@ export function droppedProps(name: string, props: unknown): string[] {
   return DOM_ONLY.filter((prop) => (props as Record<string, unknown>)[prop] !== undefined);
 }
 
+// The block that scrolls, when the classes ask for it, and a plain View when
+// they do not. Two things of a ScrollView are not decoration and both were a
+// render error before they were here.
+//
+// Keeping the keyboard up while a tap lands: with the keyboard up a scroll view
+// eats the first tap -- measured on the app of the case, the send button of a
+// form focused with the keyboard open had to be pressed twice -- and "handled"
+// is what gives the tap to the button that answers it.
+//
+// And the layout of the children: the two families of class that say where the
+// items of a box sit -- items-center, justify-between -- do not belong to the box
+// that scrolls, they belong to what it holds. ./scroll takes them out of the
+// class and hands them over, which is the only handle there is: the style of a
+// box is written by the compiler from its class, and no prop can remove a
+// declaration from it.
+function Scroller({ className, contentContainerStyle, children, ...rest }: { className?: unknown; contentContainerStyle?: unknown; children?: ReactNode } & Record<string, unknown>) {
+  const scroll = scrollOf(className);
+  if (scroll === null) {
+    return <View className={className} {...rest}>{children}</View>;
+  }
+  const split = splitScroll(className);
+  const content =
+    Object.keys(split.content).length === 0
+      ? contentContainerStyle
+      : [contentContainerStyle, split.content];
+  return (
+    <ScrollView
+      className={split.className}
+      contentContainerStyle={content as never}
+      horizontal={scroll === "horizontal"}
+      keyboardShouldPersistTaps="handled"
+      {...rest}
+    >
+      {children}
+    </ScrollView>
+  );
+}
+
 // Only a Text may hold a string, so a block that holds text has to become one.
 // A run of text and inline elements is wrapped together; everything else keeps
 // its own component, which is what a block child already is.
-function Box({ children, ...rest }: { children?: ReactNode } & Record<string, unknown>) {
+function Box({ children, className, ...rest }: { children?: ReactNode; className?: unknown } & Record<string, unknown>) {
   const runs: ReactNode[] = [];
   let text: ReactNode[] = [];
   const close = () => {
@@ -2035,7 +2190,7 @@ function Box({ children, ...rest }: { children?: ReactNode } & Record<string, un
     runs.push(child);
   }
   close();
-  return <View {...rest}>{runs}</View>;
+  return <Scroller className={className} {...rest}>{runs}</Scroller>;
 }
 
 function Anchor({ href, children, onPress, ...rest }: { href?: string; children?: unknown; onPress?: unknown } & Record<string, unknown>) {
@@ -2077,15 +2232,47 @@ function FormTag({ onSubmit, children, ...rest }: { onSubmit?: unknown; children
 // One field of a form: what the page set, and what somebody typed when the page
 // let the field keep it. A page that reads the fields out of the event asks the
 // form for them, and the answer is what a browser would have given it.
-function Field({ name, value, defaultValue, ...rest }: Record<string, unknown>) {
+// A field is typed in, and the key that ends the typing is the one a browser
+// calls Enter. A page writes that as onKeyDown, which is a name for the document
+// and never fires here: measured on the app of the case, the composer of the chat
+// answered Enter and the device did nothing, so the only way to send was the
+// button.
+//
+// The event a page reads is given the two things it uses: the key, and the form
+// it is inside, whose requestSubmit is the form of this map. That is why the
+// composer needs no change to send with Enter.
+function Field({ name, value, defaultValue, rows, onKeyDown, ...rest }: Record<string, unknown>) {
   const form = useForm();
   const held = value === undefined ? defaultValue : value;
   if (form && typeof name === "string") {
     form.fields.set(name, held === undefined || held === null ? "" : String(held));
   }
+  const enter = (event: unknown) => {
+    if (typeof onKeyDown !== "function") {
+      return;
+    }
+    (onKeyDown as (event: unknown) => void)({
+      key: "Enter",
+      shiftKey: false,
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      preventDefault() {},
+      stopPropagation() {},
+      nativeEvent: event,
+      target: null,
+      currentTarget: { form: { requestSubmit: () => form?.submit() } },
+    });
+  };
   return (
     <TextInput
       defaultValue={value === undefined ? (defaultValue as string) : (value as string)}
+      // A field of many rows wraps its text and stays single until it is sent,
+      // which is what the rows of a textarea ask for; one of one row keeps the
+      // behaviour of an input, whose Enter ends the typing.
+      multiline={typeof rows === "number"}
+      submitBehavior={typeof rows === "number" ? "submit" : "blurAndSubmit"}
+      onSubmitEditing={onKeyDown === undefined ? undefined : enter}
       {...rest}
       onChangeText={(text) => {
         if (form && typeof name === "string") {
@@ -2324,6 +2511,7 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/css-warnings.js", nativeCSSWarnings},
 	{"bifrost/native-internal.js", nativeNativeInternal},
 	{"bifrost/row-direction.js", nativeRowDirection},
+	{"bifrost/scroll.js", nativeScroll},
 	{"bifrost/selectors.js", nativeSelectors},
 	{"bifrost/data.ts", nativeData},
 	{"bifrost/dom.js", nativeDOM},
