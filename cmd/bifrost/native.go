@@ -162,7 +162,32 @@ function withBifrost(config) {
     config.resolver.resolveRequest ??
     ((context, moduleName, platform) => context.resolveRequest(context, moduleName, platform));
 
+  // react-dom is patched where it is loaded -- one portal that renders inline
+  // instead of into a document that does not exist, see bifrost/dom.js -- and the
+  // patch is one patch only if every module is looking at the same copy of it.
+  // Measured: the bundle of the case carried two, one reached from the app's own
+  // components (at the workspace root) and one from this project, and the page
+  // was calling the unpatched one -- the menu of a tab answered "Target container
+  // is not a DOM element", which in a release build reaches the screen as a
+  // minified React error with nothing to read. The name is resolved once, from
+  // the workspace, for every module that asks for it; asking from there is what
+  // makes the copies one.
+  const reactDOMFrom = (context, platform, name) => {
+    try {
+      return inherited(
+        { ...context, originModulePath: path.join(workspaceRoot, "package.json") },
+        name,
+        platform,
+      );
+    } catch {
+      return inherited(context, name, platform);
+    }
+  };
+
   config.resolver.resolveRequest = (context, moduleName, platform) => {
+    if (moduleName === "react-dom") {
+      return reactDOMFrom(context, platform, moduleName);
+    }
     if (moduleName === "virtual:bifrost/navigation") {
       return { type: "sourceFile", filePath: navigation };
     }
@@ -1197,26 +1222,70 @@ const size = () => {
 
 const listeners = new Map();
 
+// A node of this document, in the shape a page asks of one. What it cannot do
+// it answers as absent or empty, which is what a page already handles -- and
+// every one of these has a measured reason to be here:
+//
+//   - nodeType is what react-dom checks before it will use a node as the
+//     container of a portal, and the body is the container a page asks for by
+//     default.
+//   - contains and children are how base-ui hides the rest of the app while
+//     a dialog is open (markOthers walks the children of the body and marks
+//     what the dialog is not): with no contains the walk threw
+//     "undefined is not a function" inside FloatingFocusManager every time a
+//     sheet was opened, which in a release build is a minified React error.
+//   - getRootNode is what tabbable walks up to before it decides what can be
+//     focused.
 const element = () => ({
+  nodeType: 1,
+  isConnected: true,
+  ownerDocument: null,
+  dataset: {},
+  children: [],
+  childNodes: [],
+  firstChild: null,
+  lastChild: null,
+  parentElement: null,
+  parentNode: null,
+  nextSibling: null,
+  previousSibling: null,
+  assignedSlot: null,
+  innerHTML: "",
+  textContent: "",
   style: { setProperty() {}, removeProperty() {} },
   classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
   setAttribute() {},
   removeAttribute() {},
+  hasAttribute: () => false,
+  toggleAttribute() {},
   getAttribute: () => null,
   appendChild: (child) => child,
   removeChild() {},
+  replaceChildren() {},
+  remove() {},
   addEventListener() {},
   removeEventListener() {},
+  dispatchEvent: () => true,
   querySelector: () => null,
   querySelectorAll: () => [],
+  matches: () => false,
+  closest: () => null,
+  contains: () => false,
+  hasChildNodes: () => false,
+  getRootNode() {
+    return this;
+  },
+  compareDocumentPosition: () => 0,
   getBoundingClientRect: () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 }),
+  getClientRects: () => [],
   focus() {},
   blur() {},
+  click() {},
   scrollIntoView() {},
-  closest: () => null,
 });
 
 const root = element();
+root.ownerDocument = root;
 
 const on = (type, listener) => {
   if (!listeners.has(type)) {
@@ -1502,6 +1571,10 @@ const install = () => {
     head: root,
     defaultView: target,
     title: "",
+    // A page walks up from a node to the root of the tree it is in, and the walk
+    // ends where the root answers that it is not a shadow root. This document is
+    // that root and this is a node that cannot be asked for one.
+    getRootNode: () => root,
     // There is no document to hold a cookie here, so a read answers that there
     // is none. A session that has to survive belongs in a store of the app's
     // own; the client already sends its cookie jar with every request.
@@ -1532,6 +1605,12 @@ const install = () => {
     DOCUMENT_POSITION_CONTAINED_BY: 16,
     DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC: 32,
   });
+  // A page asks whether a node is a shadow root with instanceof, and an
+  // instanceof whose right side is undefined is a throw, not a false: nothing
+  // here is a shadow root, and for that to be the answer the constructor has to
+  // exist. Measured: the walk above of the tabbable of a dialog reached this
+  // right after asking a node for its root, and the sheet did not open.
+  target.ShadowRoot ??= class ShadowRoot {};
   target.addEventListener ??= on;
   target.removeEventListener ??= off;
   target.dispatchEvent ??= () => true;
@@ -1565,6 +1644,47 @@ const install = () => {
   }
 };
 
+// A portal is a trick of the document: it takes a node out of where it was
+// written and puts it somewhere else, to escape a box that clips it. There is no
+// document here, and the container a page asks for -- the body, usually -- is the
+// object above, which is not a node: react-dom refuses it, and a component that
+// only paints its content through a portal throws instead of painting. Measured
+// on the case: the tab bar menu of the app, which is a dropdown with a portal
+// under it, answered "Target container is not a DOM element", and in a release
+// build that reaches the screen as a minified React error with no way to know
+// what it was.
+//
+// A native view paints its children inside itself, over the ones that came
+// before, and the tree is the order of the page -- so what a portal was for is
+// already true where the portal was written: the children render inline, and the
+// overlay is the last thing painted. It is a smaller answer than the browser's
+// and it is written down as one: a box that clips its children clips these too.
+//
+// The patch goes on react-dom itself and not on a copy of it, because @base-ui
+// imports the module whole, as a namespace; what it calls is the member of this
+// object, whenever it reads it.
+const reactDOM = () => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require("react-dom");
+  } catch {
+    return null;
+  }
+};
+
+const portalless = () => {
+  const dom = reactDOM();
+  if (!dom || typeof dom.createPortal !== "function") {
+    return;
+  }
+  try {
+    dom.createPortal = (children) => children;
+  } catch {
+    console.warn("bifrost: react-dom does not let its createPortal be replaced, so a portal of the page will throw");
+  }
+};
+
+portalless();
 install();
 
 export default install;
