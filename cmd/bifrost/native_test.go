@@ -1939,3 +1939,39 @@ func TestNativeAnswersTheInteractionAPageWritesForTheBrowser(t *testing.T) {
 		t.Fatal("react-native's own views would be rewritten")
 	}
 }
+
+func TestNativeAPageThatPaintsThroughAPortalStillPaints(t *testing.T) {
+	// Measured on fonnso: the two buttons of the tab bar of the app -- the one that
+	// opens the sidebar and the one that opens the project menu -- answered a
+	// minified React error. Both paint a sheet, and a sheet of @base-ui goes
+	// through react-dom's createPortal, which refuses a container that is not a
+	// node: the body of this shim is an object, and the render died inside
+	// FloatingPortal before anything was painted.
+	//
+	// What the shim has to carry for that to work is the shape of a node, not only
+	// the members the page it was written for happened to ask for: with no
+	// createPortal replaced the sheet threw at the container, and with a body that
+	// had no contains the walk that hides the rest of the app while a dialog is
+	// open (markOthers) threw "undefined is not a function" right after.
+	for _, wanted := range []string{
+		"nodeType: 1",
+		"contains: () => false",
+		"children: [],",
+		"getRootNode() {",
+		"dom.createPortal = (children) => children;",
+	} {
+		if !strings.Contains(nativeDOM, wanted) {
+			t.Fatalf("the document of the shim does not carry %q", wanted)
+		}
+	}
+	// The patch goes on react-dom itself, and a patch is one patch only if every
+	// module is looking at one copy of it: the name is resolved from the workspace
+	// for whoever asks. Measured on the app: two copies in the bundle, and the page
+	// was calling the one that was not patched.
+	if !strings.Contains(nativeMetroHelper, `if (moduleName === "react-dom") {`) {
+		t.Fatal("react-dom is not resolved to a single copy")
+	}
+	if !strings.Contains(nativeMetroHelper, `path.join(workspaceRoot, "package.json")`) {
+		t.Fatal("the copy is not the one of the workspace")
+	}
+}
