@@ -637,6 +637,17 @@ func TestNativeMakesABlockThatScrollsAScrollView(t *testing.T) {
 	if !strings.Contains(nativeHostBody, "<ScrollView") {
 		t.Fatal("a block that scrolls is not a ScrollView")
 	}
+	// The box that is measured stays the box it was: with the app's own onLayout
+	// on the ScrollView the whole screen went into a remount cycle -- measured,
+	// ~25 warnings a second from react-native-css against 5 in 30 s without it --
+	// because the height a ScrollView reports is not the height the parent
+	// measured from, so the measurement feeds the layout back.
+	if !strings.Contains(nativeHostBody, "<View className={split.className} {...rest}>") {
+		t.Fatal("the block that scrolls is not wrapped by the box it was")
+	}
+	if !strings.Contains(nativeHostBody, "style={SCROLL_FILLS}") {
+		t.Fatal("the scroll view inside the block does not fill it")
+	}
 	// With the keyboard up a scroll view eats the first tap: measured, the send
 	// button of a form focused with the keyboard open had to be pressed twice.
 	if !strings.Contains(nativeHostBody, `keyboardShouldPersistTaps="handled"`) {

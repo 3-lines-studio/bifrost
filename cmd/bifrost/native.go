@@ -2091,6 +2091,11 @@ import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from "re
 import { scrollOf, splitScroll } from "./scroll";
 import { navigate } from "virtual:bifrost/navigation";
 import { FormProvider, useForm, usePress } from "./form";
+
+// The scroll view of a box that scrolls fills the box, which is what its content
+// did in a browser: the box has the size the page gave it and clips what goes
+// past it.
+const SCROLL_FILLS = { flex: 1 };
 `
 
 const nativeHostBody = `
@@ -2146,6 +2151,29 @@ export function droppedProps(name: string, props: unknown): string[] {
 // class and hands them over, which is the only handle there is: the style of a
 // box is written by the compiler from its class, and no prop can remove a
 // declaration from it.
+// The block that scrolls, when the classes ask for it, and a plain View when
+// they do not. Three things of a ScrollView are not decoration and all three were
+// a render error before they were here.
+//
+// Keeping the keyboard up while a tap lands: with the keyboard up a scroll view
+// eats the first tap -- measured on the app of the case, the send button of a
+// form focused with the keyboard open had to be pressed twice -- and "handled"
+// is what gives the tap to the button that answers it.
+//
+// The layout of the children: the two families of class that say where the items
+// of a box sit -- items-center, justify-between -- do not belong to the box that
+// scrolls, they belong to what it holds. ./scroll takes them out of the class and
+// hands them over, which is the only handle there is: the style of a box is
+// written by the compiler from its class, and no prop can remove a declaration
+// from it.
+//
+// And the measured box stays the box it was: the ScrollView goes inside a View
+// that keeps the class minus what moved. Measured on the app of the case, a box
+// that scrolls with the app's own onLayout on the ScrollView put the whole screen
+// into a remount cycle -- ~25 warnings a second from react-native-css against 5
+// in 30 s without it -- because the height a ScrollView reports is not the height
+// the parent measured from, and the measurement feeds the layout back. The View
+// on the outside reports what it always reported.
 function Scroller({ className, contentContainerStyle, children, ...rest }: { className?: unknown; contentContainerStyle?: unknown; children?: ReactNode } & Record<string, unknown>) {
   const scroll = scrollOf(className);
   if (scroll === null) {
@@ -2157,15 +2185,16 @@ function Scroller({ className, contentContainerStyle, children, ...rest }: { cla
       ? contentContainerStyle
       : [contentContainerStyle, split.content];
   return (
-    <ScrollView
-      className={split.className}
-      contentContainerStyle={content as never}
-      horizontal={scroll === "horizontal"}
-      keyboardShouldPersistTaps="handled"
-      {...rest}
-    >
-      {children}
-    </ScrollView>
+    <View className={split.className} {...rest}>
+      <ScrollView
+        contentContainerStyle={content as never}
+        horizontal={scroll === "horizontal"}
+        keyboardShouldPersistTaps="handled"
+        style={SCROLL_FILLS}
+      >
+        {children}
+      </ScrollView>
+    </View>
   );
 }
 
