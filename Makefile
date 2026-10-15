@@ -1,6 +1,6 @@
-.PHONY: check test race vet gate demo native-html native-row native-selectors native-events bench fuzz throughput integration dev-integration reproducible
+.PHONY: check test race vet gate demo native-html native-row native-selectors native-events native-scroll bench fuzz throughput integration dev-integration reproducible
 
-check: test race vet gate native-html native-row native-selectors native-events demo
+check: test race vet gate native-html native-row native-selectors native-events native-scroll demo
 
 test:
 	@test -z "$$(gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'))" || (gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'); exit 1)
@@ -40,6 +40,10 @@ native-selectors:
 native-events:
 	bun ./scripts/native-events.mjs
 
+# The decision of what a block that scrolls is, which is a string of Go too.
+native-scroll:
+	bun ./scripts/native-scroll.mjs
+
 bench:
 	go test -run '^$$' -bench . -benchmem ./...
 
@@ -64,6 +68,7 @@ integration:
 	bun ./scripts/native-row.mjs
 	bun ./scripts/native-selectors.mjs
 	bun ./scripts/native-events.mjs
+	bun ./scripts/native-scroll.mjs
 
 dev-integration:
 	bash ./scripts/dev-integration.sh
