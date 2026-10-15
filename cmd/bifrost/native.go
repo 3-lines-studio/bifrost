@@ -2606,11 +2606,31 @@ for (const name of HIDDEN) {
 // painted, and its children are read the same way. Measured on fonnso: the body
 // of every message of the assistant is markdown compiled to HTML, and the bubble
 // came out empty.
+//
+// And the state of an element, which a page writes as a data attribute and a
+// stylesheet picks up with a data-[...] variant. The compiler reads those from a
+// prop called dataSet, so an attribute that travels with its own name reaches
+// nothing: measured on the case, every placement of the sheet of the app -- the
+// side it comes from, its height, how far it slides -- lived under a
+// data-[side=right] variant, and the panel came out at the top of the list in
+// the order the tree happened to have it, with none of it applied. The name is
+// turned the way the compiler spells it: a dash and the letter after it, in
+// camel case.
 export function nativeProps(props: unknown, tag?: string): unknown {
   if (props === null || typeof props !== "object") {
     return props;
   }
   const given = { ...(props as Record<string, unknown>) };
+  for (const name of Object.keys(given)) {
+    if (!name.startsWith("data-") || name.length === 5) {
+      continue;
+    }
+    const key = name.slice(5).replace(/-(.)/g, (_, letter: string) => letter.toUpperCase());
+    const state = (given.dataSet ?? {}) as Record<string, unknown>;
+    state[key] = given[name];
+    given.dataSet = state;
+    delete given[name];
+  }
   const inner = given.dangerouslySetInnerHTML as { __html?: unknown } | undefined;
   if (inner !== undefined) {
     delete given.dangerouslySetInnerHTML;

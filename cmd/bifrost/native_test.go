@@ -1975,3 +1975,29 @@ func TestNativeAPageThatPaintsThroughAPortalStillPaints(t *testing.T) {
 		t.Fatal("the copy is not the one of the workspace")
 	}
 }
+
+func TestNativeCarriesTheStateOfAnElementToTheStylesheet(t *testing.T) {
+	// Measured on fonnso: the sheet of the project menu of the app came out at
+	// the top of the list, in the order the tree happened to have it, with none
+	// of its placement applied. Every one of those rules lived under a
+	// data-[side=right] variant, and a variant is only taken when the element
+	// says what it is: the compiler reads that from a prop named dataSet, and an
+	// attribute travelling with the name a browser gave it reached nothing.
+	host := nativeHost("")
+	for _, wanted := range []string{
+		`if (!name.startsWith("data-") || name.length === 5) {`,
+		`const key = name.slice(5).replace(/-(.)/g, (_, letter: string) => letter.toUpperCase());`,
+		"state[key] = given[name];",
+		"given.dataSet = state;",
+		"delete given[name];",
+	} {
+		if !strings.Contains(host, wanted) {
+			t.Fatalf("the tag map does not carry the state of an element: %q", wanted)
+		}
+	}
+	// The rest of the shape is what react-native-css reads, and the name is the
+	// one the compiler spells: a dash and the letter after it, in camel case.
+	if !strings.Contains(host, "const state = (given.dataSet ?? {}) as Record<string, unknown>;") {
+		t.Fatal("a dataSet the page wrote itself would be thrown away")
+	}
+}
