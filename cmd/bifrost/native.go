@@ -2598,23 +2598,32 @@ function Scroller({ className, contentContainerStyle, children, ...rest }: { cla
   );
 }
 
-// Only a Text may hold a string, so a block that holds text has to become one.
-// What wraps a run of text and what a flex container does with an element is not
-// decided here: see bifrost/runs.js.
-function Box({ children, className, ...rest }: { children?: ReactNode; className?: unknown } & Record<string, unknown>) {
-  const runs = runsOf(
+// Only a Text may hold a string, so a block that holds text has to become one,
+// and a button holds text the same way. Which strings are one text and which are
+// items of their own is not decided here: see bifrost/runs.js. What that rule
+// answers for a button is that an icon is an item and not part of the label.
+// Measured on the login page of fonnso, with the whole of a button's children in
+// one Text: the mark of Google took the 735 px of the box and the label was
+// painted from x=834, past the 996 the button ends at -- and the same shape sat
+// over the first letter of the button that sends the mail link.
+function textRuns(children: ReactNode, className: unknown): ReactNode[] {
+  return runsOf(
     Children.toArray(children),
     className,
     (child: unknown) => isValidElement(child) && child.type === Text,
     (run: ReactNode[], at: number) => <Text key={"text-" + at}>{run}</Text>,
   );
-  return <Scroller className={className} {...rest}>{runs}</Scroller>;
 }
 
-function Anchor({ href, children, onPress, ...rest }: { href?: string; children?: unknown; onPress?: unknown } & Record<string, unknown>) {
+function Box({ children, className, ...rest }: { children?: ReactNode; className?: unknown } & Record<string, unknown>) {
+  return <Scroller className={className} {...rest}>{textRuns(children, className)}</Scroller>;
+}
+
+function Anchor({ href, children, className, onPress, ...rest }: { href?: string; children?: unknown; className?: unknown; onPress?: unknown } & Record<string, unknown>) {
   return (
     <Pressable
       accessibilityRole="link"
+      className={className as string}
       onPress={() => {
         if (typeof onPress === "function") {
           (onPress as () => void)();
@@ -2630,13 +2639,13 @@ function Anchor({ href, children, onPress, ...rest }: { href?: string; children?
       }}
       {...rest}
     >
-      <Text>{children}</Text>
+      {textRuns(children, className)}
     </Pressable>
   );
 }
 
-function Button({ children, type, onPress, ...rest }: { children?: unknown; type?: unknown; onPress?: unknown } & Record<string, unknown>) {
-  return <Pressable accessibilityRole="button" onPress={usePress(type, onPress as (() => void) | undefined)} {...rest}><Text>{children}</Text></Pressable>;
+function Button({ children, type, className, onPress, ...rest }: { children?: unknown; type?: unknown; className?: unknown; onPress?: unknown } & Record<string, unknown>) {
+  return <Pressable accessibilityRole="button" className={className as string} onPress={usePress(type, onPress as (() => void) | undefined)} {...rest}>{textRuns(children, className)}</Pressable>;
 }
 
 // A form of the web app keeps its fields and submits them, because there is no

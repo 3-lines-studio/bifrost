@@ -2238,3 +2238,56 @@ console.log(bad === 0 ? "todos bien" : bad + " mal");
 		t.Fatal(said)
 	}
 }
+
+// nativeFunctionBody reads one function out of the generated map, so a test can
+// ask about the shape of a component the app is written against and not about a
+// copy of it.
+func nativeFunctionBody(source, name string) (string, error) {
+	opening := "function " + name + "("
+	start := strings.Index(source, opening)
+	if start < 0 {
+		return "", fmt.Errorf("the map has no function %s", name)
+	}
+	rest := source[start:]
+	end := strings.Index(rest, "\n}\n")
+	if end < 0 {
+		return "", fmt.Errorf("%s is not closed", name)
+	}
+	return rest[:end], nil
+}
+
+func TestNativePaintsTheChildrenOfAButtonAsItemsOfTheirOwn(t *testing.T) {
+	// A button and a link are flex containers in a browser, so what is inside
+	// them is items: an icon is one and the label is another. With the whole of it
+	// in one Text the icon takes the width of the box and the label goes after it,
+	// out of the button -- measured on the login page of fonnso, the mark of
+	// Google at [84,1097][819,1197] and the label painted from x=834 inside a
+	// button that ends at 996, which is the label painted past its border.
+	//
+	// The class is what says which of the two shapes it is: an icon of a button
+	// inside a flex container is an item, and one inside a block would be part of
+	// the run. That is why the class is handed to the rule and not just to the
+	// view.
+	host := nativeHost("")
+	for _, name := range []string{"Box", "Anchor", "Button"} {
+		body, err := nativeFunctionBody(host, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(body, "textRuns(children, className)") {
+			t.Errorf("%s does not ask the run rule for its children:\n%s", name, body)
+		}
+	}
+	// One place decides it, and the thing that decides it is the class: a rule
+	// copied into every component is a rule that drifts.
+	if count := strings.Count(host, "runsOf("); count != 1 {
+		t.Errorf("runsOf is asked %d times, want once", count)
+	}
+	body, err := nativeFunctionBody(host, "textRuns")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, "className,") {
+		t.Errorf("textRuns does not hand the class to the rule:\n%s", body)
+	}
+}
