@@ -2139,3 +2139,102 @@ func TestNativeLeavesTheProjectAloneWhenNothingChanged(t *testing.T) {
 		t.Fatalf("a removed route left its screen behind: %v", err)
 	}
 }
+
+func TestNativeKeepsTheBoxesOfAFlexContainerApart(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	// A block that holds a string becomes a Text, because only a Text may hold
+	// one. Which strings are one text and which are boxes of their own is what a
+	// browser decides from what lays the children out: in a block container the
+	// children flow as text, and in a flex container every child is an item.
+	//
+	// Measured on the app: the footer of the landing page is a flex row with
+	// justify-between around two spans, and it came out as the single line
+	// "Fonnso3 Lines Studio" -- the two items merged into one text, with nowhere
+	// for the space between them to go. The same rule is what a sheet header needs.
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(projectRoot, ".bifrost", "native")
+	if _, err := writeNativeProject(native, prepared, "http://example.test", filepath.Join(projectRoot, "native")); err != nil {
+		t.Fatal(err)
+	}
+	// The elements of the map that are a run of text are the ones the probe calls
+	// inline, and that is all runsOf asks of its caller.
+	probe := `import { runsOf, asksForFlex } from "./bifrost/runs.js";
+const isInline = (child) => typeof child === "object" && child !== null && child.inline === true;
+const nameOf = (child) => (typeof child === "object" && child !== null ? child.name : String(child));
+// A run of text comes back as the element the caller asked for, and a child that
+// is not a run comes back as it is: the probe names both so the two can be told
+// apart in one string.
+const wrap = (run, at) => ({ text: true, value: run.map(nameOf).join("") });
+const label = (run) => (run && run.text ? "text(" + run.value + ")" : nameOf(run));
+const shape = (children, className) => JSON.stringify(runsOf(children, className, isInline, wrap).map(label));
+const span = (name) => ({ inline: true, name });
+const box = (name) => ({ inline: false, name });
+
+const cases = [
+  // A block container flows its children as text, so a bold word in the middle of
+  // a sentence is one line.
+  ["block with two spans", [span("a"), span("b")], "", '["text(ab)"]'],
+  ["block with text around an element", ["hola ", span("b"), " mundo"], "", '["text(hola b mundo)"]'],
+  // A flex container makes an item of each child, so the two spans are two boxes.
+  // The element is already a component, so it travels as itself: what changes is
+  // that it does not join the run of text next to it.
+  ["flex with two spans", [span("a"), span("b")], "flex items-center justify-between", '["a","b"]'],
+  ["inline-flex with two spans", [span("a"), span("b")], "inline-flex", '["a","b"]'],
+  // A run of bare text is one item and an element is another.
+  ["flex with text around an element", ["hola ", span("b")], "flex", '["text(hola )","b"]'],
+  // Anything that is not a run of text keeps its own component either way.
+  ["a block child always breaks the run", ["hola", box("x"), "chau"], "", '["text(hola)","x","text(chau)"]'],
+  ["the same, in a flex container", ["hola", box("x")], "flex", '["text(hola)","x"]'],
+  // A class that is not a display does not make a container: flex-1 says how much
+  // of the box an item takes, and it lays out nothing.
+  ["flex-1 is not a flex container", [span("a"), span("b")], "flex-1", '["text(ab)"]'],
+  // A variant is a class with a colon in it, and this does not read behind it.
+  ["a variant is not the class", [span("a"), span("b")], "md:flex", '["text(ab)"]'],
+];
+
+let bad = 0;
+for (const [what, children, className, want] of cases) {
+  const got = shape(children, className);
+  if (got !== want) {
+    console.log("MAL " + what + ": " + got + " (esperaba " + want + ")");
+    bad++;
+  }
+}
+for (const [className, want] of [["flex", true], ["inline-flex", true], ["flex flex-col", true], ["flex-1", false], ["", false], [undefined, false], ["md:flex", false]]) {
+  const got = asksForFlex(className);
+  if (got !== want) {
+    console.log("MAL asksForFlex(" + className + "): " + got);
+    bad++;
+  }
+}
+console.log(bad === 0 ? "todos bien" : bad + " mal");
+`
+	if err := os.WriteFile(filepath.Join(native, "probe.mjs"), []byte(probe), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	command := exec.CommandContext(ctx, node, "probe.mjs")
+	command.Dir = native
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("runsOf failed: %v\n%s", err, output)
+	}
+	if said := strings.TrimSpace(string(output)); said != "todos bien" {
+		t.Fatal(said)
+	}
+}

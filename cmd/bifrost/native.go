@@ -2392,6 +2392,70 @@ function splitScroll(className) {
 module.exports = { scrollOf, splitScroll, VERTICAL, HORIZONTAL };
 `
 
+const nativeRuns = `// A block that holds a string has to become one Text, because only a Text may
+// hold a string -- and which strings are one text and which are boxes of their
+// own is not a detail of the target: a browser decides it the same way, and it
+// decides it from what lays the children out.
+//
+// In a block container the children flow as text, so two spans side by side are
+// one line, and wrapping them together is what a paragraph with a bold word in
+// the middle needs. In a flex container every child is a box of its own: the
+// same two spans are two flex items, and the browser puts one at each end of the
+// line when the container asks for justify-between.
+//
+// So a container that asks for flex does not absorb an element into the run.
+// Measured on fonnso: the footer of the landing page is a flex row with
+// justify-between around two spans, and it came out as the single line
+// "Fonnso3 Lines Studio" -- the two items merged, with nowhere for the space
+// between them to go.
+const FLEX = ["flex", "inline-flex"];
+
+// Whether the class list asks for a flex container. The names are compared whole
+// because flex-1 is not a display: it is how much of the box an item takes, and
+// it says nothing about who lays out the children.
+function asksForFlex(className) {
+  if (typeof className !== "string" || className === "") {
+    return false;
+  }
+  return className.split(/\s+/).some((name) => FLEX.indexOf(name) >= 0);
+}
+
+// The children of a block, with each run of text wrapped into one element and
+// nothing else touched. isInline says whether a child is one of the elements the
+// target paints as a run of text -- a span and its family -- and the caller is
+// who knows, because the map of an app is not the map of the generator.
+// wrapText is the element a run of text goes into, and it is a callback because
+// this file has no JSX.
+function runsOf(children, className, isInline, wrapText) {
+  const runs = [];
+  let text = [];
+  const close = () => {
+    if (text.length > 0) {
+      const run = text;
+      text = [];
+      runs.push(wrapText(run, runs.length));
+    }
+  };
+  const flex = asksForFlex(className);
+  for (const child of children) {
+    const bare = typeof child === "string" || typeof child === "number";
+    // A run of text is one item of a flex container and an element is another,
+    // so in a flex container the run is closed instead of letting the element
+    // join it.
+    if (!bare && (!isInline(child) || flex)) {
+      close();
+      runs.push(child);
+      continue;
+    }
+    text.push(child);
+  }
+  close();
+  return runs;
+}
+
+module.exports = { runsOf, asksForFlex };
+`
+
 // A page is written once, for the browser, and the tags in it are what the
 // screen paints. This table is the vocabulary a native target supports, so the
 // runtime and the tests read the same list, and it is also the file an app is
@@ -2424,6 +2488,7 @@ for (const [name, component] of Object.entries(extraTags)) {
 const nativeHostHead = `import { Children, Fragment, createElement, isValidElement, type ReactNode } from "react";
 import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { scrollOf, splitScroll } from "./scroll";
+import { runsOf } from "./runs";
 import { navigate } from "virtual:bifrost/navigation";
 import { FormProvider, useForm, usePress } from "./form";
 
@@ -2534,26 +2599,15 @@ function Scroller({ className, contentContainerStyle, children, ...rest }: { cla
 }
 
 // Only a Text may hold a string, so a block that holds text has to become one.
-// A run of text and inline elements is wrapped together; everything else keeps
-// its own component, which is what a block child already is.
+// What wraps a run of text and what a flex container does with an element is not
+// decided here: see bifrost/runs.js.
 function Box({ children, className, ...rest }: { children?: ReactNode; className?: unknown } & Record<string, unknown>) {
-  const runs: ReactNode[] = [];
-  let text: ReactNode[] = [];
-  const close = () => {
-    if (text.length > 0) {
-      runs.push(<Text key={"text-" + runs.length}>{text}</Text>);
-      text = [];
-    }
-  };
-  for (const child of Children.toArray(children)) {
-    if (typeof child === "string" || typeof child === "number" || (isValidElement(child) && child.type === Text)) {
-      text.push(child);
-      continue;
-    }
-    close();
-    runs.push(child);
-  }
-  close();
+  const runs = runsOf(
+    Children.toArray(children),
+    className,
+    (child: unknown) => isValidElement(child) && child.type === Text,
+    (run: ReactNode[], at: number) => <Text key={"text-" + at}>{run}</Text>,
+  );
   return <Scroller className={className} {...rest}>{runs}</Scroller>;
 }
 
@@ -2895,6 +2949,7 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/css-warnings.js", nativeCSSWarnings},
 	{"bifrost/native-internal.js", nativeNativeInternal},
 	{"bifrost/row-direction.js", nativeRowDirection},
+	{"bifrost/runs.js", nativeRuns},
 	{"bifrost/scroll.js", nativeScroll},
 	{"bifrost/selectors.js", nativeSelectors},
 	{"bifrost/data.ts", nativeData},
