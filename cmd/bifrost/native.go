@@ -1661,6 +1661,17 @@ const install = () => {
   target.dispatchEvent ??= () => true;
   target.innerWidth ??= width;
   target.innerHeight ??= height;
+  // Where the page is scrolled to. There is one document here and it does not
+  // scroll -- the boxes that scroll are boxes of the app -- but a library that
+  // places a floating element asks this before it works out a place, and a
+  // missing answer is not zero: measured on the user menu of fonnso, floating-ui
+  // read pageXOffset of a window that had none, every sum after it came out NaN,
+  // and the place it wrote was translate(NaNpx, NaNpx) -- see the rule of
+  // ./host about what happens to one of those.
+  target.pageXOffset ??= 0;
+  target.pageYOffset ??= 0;
+  target.scrollX ??= 0;
+  target.scrollY ??= 0;
   target.localStorage ??= {
     getItem: (key) => (store.has(key) ? store.get(key) : null),
     setItem: (key, value) => { store.set(key, String(value)); },
@@ -2766,6 +2777,25 @@ for (const name of HIDDEN) {
 // the order the tree happened to have it, with none of it applied. The name is
 // turned the way the compiler spells it: a dash and the letter after it, in
 // camel case.
+//
+// And the place of an element that a page worked out by measuring the page: see
+// placed, below.
+function placed(style: unknown): unknown {
+  if (Array.isArray(style)) {
+    return style.map(placed);
+  }
+  if (style === null || typeof style !== "object") {
+    return style;
+  }
+  const transform = (style as Record<string, unknown>).transform;
+  if (typeof transform !== "string" || !/NaN|Infinity/.test(transform)) {
+    return style;
+  }
+  const rest = { ...(style as Record<string, unknown>) };
+  delete rest.transform;
+  return rest;
+}
+
 export function nativeProps(props: unknown, tag?: string): unknown {
   if (props === null || typeof props !== "object") {
     return props;
@@ -2793,6 +2823,18 @@ export function nativeProps(props: unknown, tag?: string): unknown {
     delete given.onClick;
     const pressed = given.onPress as (() => void) | undefined;
     given.onPress = pressed === undefined ? click : () => { pressed(); click(); };
+  }
+  // A page places a popup by measuring the page, and what it measured arrives as
+  // a transform of the style: react-native reads that string too, and refuses one
+  // whose numbers are not numbers. Measured on the user menu of fonnso: a target
+  // that cannot answer a client rect hands over translate(NaNpx, NaNpx) and the
+  // renderer throws "Transform with key translate must be an string with 1 or 2
+  // parameters, found 0" -- the whole screen, black. A number that is not a
+  // number is not a place, so the declaration goes and the box stays where the
+  // flow put it, which is the only place a target without a browser's
+  // measurements can honestly name.
+  if (given.style !== undefined) {
+    given.style = placed(given.style);
   }
   // The tag the page wrote an element of its own as. It arrives only when the
   // element is painted by a component of this table -- a name this table does not
