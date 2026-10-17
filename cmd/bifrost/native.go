@@ -1576,10 +1576,27 @@ const history = {
   },
 };
 
-const fire = (type) => {
-  for (const listener of [...(listeners.get(type) ?? [])]) {
-    listener({ type });
+// What the document answers when something fires an event at it: every listener
+// of that type, the last one first -- the dialog that opened last is the one on
+// top -- and whether there was anyone listening at all. Measured on the sidebar
+// of fonnso: a dialog of the page is dismissed with Escape through a keydown on
+// the document, the phone has no Escape, and the back button took the whole app
+// away instead of closing the sheet. The root asks this before it lets the back
+// button go, and a dialog that answers keeps it.
+const dispatch = (event) => {
+  const given = typeof event === "string" ? { type: event } : event;
+  const set = listeners.get(given && given.type);
+  if (!set || set.size === 0) {
+    return false;
   }
+  for (const listener of [...set].reverse()) {
+    listener(given);
+  }
+  return true;
+};
+
+const fire = (type) => {
+  dispatch({ type });
 };
 
 onAddressChange(() => {
@@ -1637,7 +1654,7 @@ const install = () => {
     querySelectorAll: () => [],
     addEventListener: on,
     removeEventListener: off,
-    dispatchEvent: () => true,
+    dispatchEvent: dispatch,
   };
   target.matchMedia ??= () => query;
   target.ResizeObserver ??= ResizeObserver;
@@ -1796,13 +1813,36 @@ func nativeOverlayHas(overlay, name string) bool {
 
 const nativeLayoutBody = `import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { StyleSheet, View } from "react-native";
+import { useEffect } from "react";
+import { BackHandler, StyleSheet, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+
+// The back button of the phone, as the Escape of a browser: a dialog of the page
+// is dismissed with an Escape keydown that the library listens for on the
+// document, and a dialog that answers keeps the back button from leaving the app.
+// Measured on the sidebar of fonnso: the sheet was open and the back button took
+// the whole app away. With this, the sheet closes and the app stays.
+function Back() {
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      const doc = (globalThis as { document?: { dispatchEvent?: (event: unknown) => boolean } }).document;
+      return doc?.dispatchEvent?.({
+        type: "keydown",
+        key: "Escape",
+        preventDefault() {},
+        stopPropagation() {},
+      }) === true;
+    });
+    return () => subscription.remove();
+  }, []);
+  return null;
+}
 
 function Shell() {
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.shell, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+      <Back />
       <Stack screenOptions={{ headerShown: false }} />
     </View>
   );
