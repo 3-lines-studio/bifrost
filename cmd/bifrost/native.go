@@ -2431,13 +2431,42 @@ function asksForFlex(className) {
   return className.split(/\s+/).some((name) => FLEX.indexOf(name) >= 0);
 }
 
+// The children of a block, with the fragments taken out of the way. A fragment
+// is nothing to a browser: its children are the children of the box that holds
+// it, so a run of text crosses it. Measured on the organization panel of the
+// case: a slug, a slash and a button, with the slash written inside a fragment
+// -- the string stayed out of the run, which is out of the only element that can
+// hold one: react-native says so ("Text strings must be rendered within a
+// <Text> component"), the slash is not painted, and the button behind it falls
+// to the next line where the browser has both on the same one.
+function flatten(children, isFragment) {
+  if (typeof isFragment !== "function") {
+    return children;
+  }
+  const out = [];
+  for (const child of children) {
+    if (Array.isArray(child)) {
+      out.push(...flatten(child, isFragment));
+      continue;
+    }
+    if (isFragment(child)) {
+      const inner = child.props === null || child.props === undefined ? [] : child.props.children;
+      out.push(...flatten(Array.isArray(inner) ? inner : [inner], isFragment));
+      continue;
+    }
+    out.push(child);
+  }
+  return out;
+}
+
 // The children of a block, with each run of text wrapped into one element and
 // nothing else touched. isInline says whether a child is one of the elements the
 // target paints as a run of text -- a span and its family -- and the caller is
 // who knows, because the map of an app is not the map of the generator.
 // wrapText is the element a run of text goes into, and it is a callback because
-// this file has no JSX.
-function runsOf(children, className, isInline, wrapText) {
+// this file has no JSX. isFragment says which child is a fragment, and the
+// caller knows that for the same reason.
+function runsOf(children, className, isInline, wrapText, isFragment) {
   const runs = [];
   let text = [];
   const close = () => {
@@ -2448,7 +2477,7 @@ function runsOf(children, className, isInline, wrapText) {
     }
   };
   const flex = asksForFlex(className);
-  for (const child of children) {
+  for (const child of flatten(children, isFragment)) {
     const bare = typeof child === "string" || typeof child === "number";
     // A run of text is one item of a flex container and an element is another,
     // so in a flex container the run is closed instead of letting the element
@@ -2623,6 +2652,7 @@ function textRuns(children: ReactNode, className: unknown): ReactNode[] {
     className,
     (child: unknown) => isValidElement(child) && child.type === Text,
     (run: ReactNode[], at: number) => <Text key={"text-" + at}>{run}</Text>,
+    (child: unknown) => isValidElement(child) && child.type === Fragment,
   );
 }
 

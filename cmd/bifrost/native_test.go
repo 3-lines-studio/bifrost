@@ -714,6 +714,26 @@ func TestNativeLeavesOutAPlaceThatIsNotANumber(t *testing.T) {
 	}
 }
 
+func TestNativeAFragmentDoesNotCutARunOfText(t *testing.T) {
+	// A fragment is nothing to a browser -- its children are the children of the
+	// box that holds it -- and to react-native it is not: a string that came
+	// inside one stays outside the Text, which is the only element that can hold
+	// a string. Measured on the organization panel of the case,
+	// `{slug}{" / "}<Button>...</Button>` with the slash inside a fragment:
+	// react-native answered "Text strings must be rendered within a <Text>
+	// component", the slash was not painted, and the button fell to the next line
+	// where the browser has both on the same one.
+	if !strings.Contains(nativeRuns, "function flatten(children, isFragment) {") {
+		t.Fatal("a fragment would cut the run of text it sits in")
+	}
+	if !strings.Contains(nativeRuns, "for (const child of flatten(children, isFragment)) {") {
+		t.Fatal("the run of text does not walk the children of a fragment")
+	}
+	if !strings.Contains(nativeHostBody, "child.type === Fragment,") {
+		t.Fatal("the map does not say which child is a fragment")
+	}
+}
+
 func TestNativeASubmitButtonAnswersTheEnterOfAField(t *testing.T) {
 	// A page writes onKeyDown for the key that ends the typing, and it never
 	// fires here: measured on the app of the case, the composer of the chat
