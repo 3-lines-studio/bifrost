@@ -1287,6 +1287,53 @@ const element = () => ({
 const root = element();
 root.ownerDocument = root;
 
+// The root of the page is where a theme is written: the dark class and the
+// color-scheme property. Neither is a class or a property of anything here, so
+// both are answered with the only thing the phone understands.
+const rootClasses = new Set();
+root.classList = {
+  add(name) {
+    rootClasses.add(name);
+    if (name === "dark") {
+      applyScheme("dark");
+    }
+  },
+  remove(name) {
+    rootClasses.delete(name);
+    if (name === "dark") {
+      applyScheme("light");
+    }
+  },
+  toggle(name, force) {
+    const want = force === undefined ? !rootClasses.has(name) : Boolean(force);
+    if (want) {
+      root.classList.add(name);
+    } else {
+      root.classList.remove(name);
+    }
+    return want;
+  },
+  contains: (name) => rootClasses.has(name),
+};
+root.style = {
+  setProperty(name, value) {
+    if (name === "color-scheme") {
+      applyScheme(String(value));
+    }
+  },
+  removeProperty(name) {
+    if (name === "color-scheme") {
+      applyScheme(null);
+    }
+  },
+  get colorScheme() {
+    return currentScheme();
+  },
+  set colorScheme(value) {
+    applyScheme(String(value));
+  },
+};
+
 const on = (type, listener) => {
   if (!listeners.has(type)) {
     listeners.set(type, new Set());
@@ -1298,14 +1345,69 @@ const off = (type, listener) => {
   listeners.get(type)?.delete(listener);
 };
 
-const query = {
-  matches: false,
-  media: "",
-  onchange: null,
-  addEventListener() {},
-  removeEventListener() {},
-  addListener() {},
-  removeListener() {},
+// The color scheme is the one thing a phone has and a page says with two other
+// names: the "dark" class on the root and the "color-scheme" property. Both are
+// answered here, and both end where the phone keeps it -- Appearance -- so a
+// dark: class of the stylesheet, which compiles to a prefers-color-scheme
+// query, follows what the page asked for. Measured on the user menu of fonnso:
+// picking dark moved the marker of the picker and nothing else; the app stayed
+// light because the class went to a classList that answered nothing.
+const appearance = () => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require("react-native").Appearance;
+  } catch {
+    return null;
+  }
+};
+
+const currentScheme = () => {
+  const one = appearance();
+  return (one && one.getColorScheme && one.getColorScheme()) || "light";
+};
+
+const applyScheme = (want) => {
+  const value = want === "dark" || want === "light" ? want : null;
+  // The stylesheet of the target answers its dark: classes from the color scheme
+  // of its own runtime, and that runtime has a switch for it -- the one of the
+  // page of its docs. The phone gets it too, so the controls and the keyboard
+  // follow. Measured on the user menu of fonnso: with the phone alone the class
+  // dark: of the app never flipped.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const css = require("react-native-css/native");
+    if (css && css.colorScheme && typeof css.colorScheme.set === "function") {
+      css.colorScheme.set(value);
+    }
+  } catch {
+    // An app without the style runtime of this target keeps the phone's scheme.
+  }
+  const one = appearance();
+  if (one && typeof one.setColorScheme === "function") {
+    one.setColorScheme(value);
+  }
+};
+
+const query = (media) => {
+  const dark = /prefers-color-scheme:\s*dark/.test(String(media));
+  const light = /prefers-color-scheme:\s*light/.test(String(media));
+  return {
+    media: String(media),
+    onchange: null,
+    get matches() {
+      if (dark) {
+        return currentScheme() === "dark";
+      }
+      if (light) {
+        return currentScheme() === "light";
+      }
+      return false;
+    },
+    addEventListener: on,
+    removeEventListener: off,
+    addListener: on,
+    removeListener: off,
+  };
 };
 
 // base-ui reaches a node's window through element.ownerDocument.defaultView,
@@ -1656,7 +1758,7 @@ const install = () => {
     removeEventListener: off,
     dispatchEvent: dispatch,
   };
-  target.matchMedia ??= () => query;
+  target.matchMedia ??= query;
   target.ResizeObserver ??= ResizeObserver;
   target.Node ??= Object.assign(class Node {}, {
     ELEMENT_NODE: 1,
