@@ -2238,3 +2238,134 @@ console.log(bad === 0 ? "todos bien" : bad + " mal");
 		t.Fatal(said)
 	}
 }
+
+func TestNativeAsksForTheFontOfTheWeightItWants(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	// Un stylesheet pide una familia y un peso por separado, y una pantalla nativa
+	// solo puede cargar un archivo: la fuente que se le pide es una familia y una
+	// bandera de negrita, asi que una fuente variable sale en su instancia por
+	// defecto -- medida en Outfit, 100, o sea Thin -- y un peso de 500 no llega
+	// nunca al archivo que lo tiene.
+	//
+	// Medido en la app: el hero salia en la fuente del sistema, con anchos
+	// distintos, y el mismo parrafo cortaba en otra palabra. Todo el ritmo vertical
+	// de abajo se movia con el.
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(projectRoot, ".bifrost", "native")
+	if _, err := writeNativeProject(native, prepared, "http://example.test", filepath.Join(projectRoot, "native")); err != nil {
+		t.Fatal(err)
+	}
+	probe := `import { withFontWeight, firstFamily, weightOf } from "./bifrost/font-weight.js";
+
+// La forma que este transform lee es la que el compilador escribe: una lista de
+// grupos de declaraciones, y un grupo es un objeto de propiedades en camelCase.
+const rule = (declarations) => ({ d: [declarations] });
+const sheet = (...rules) => ({ s: [[0, rules]] });
+const familyOf = (declarations) => {
+  const copy = { s: [[0, [rule(declarations)]]] };
+  withFontWeight(copy);
+  return copy.s[0][1][0].d[0].fontFamily;
+};
+
+const cases = [
+  ["una familia y un peso", { fontFamily: "'Plus Jakarta Sans Variable', sans-serif", fontWeight: "500" }, "Plus Jakarta Sans Variable 500"],
+  ["sin comillas", { fontFamily: "Outfit Variable", fontWeight: 400 }, "Outfit Variable 400"],
+  ["bold", { fontFamily: "Outfit Variable", fontWeight: "bold" }, "Outfit Variable 700"],
+  ["normal", { fontFamily: "Outfit Variable", fontWeight: "normal" }, "Outfit Variable 400"],
+  // Un peso que ya esta en el nombre no se le agrega dos veces.
+  ["ya lo dice", { fontFamily: "Outfit Variable 600", fontWeight: "600" }, "Outfit Variable 600"],
+  // Lo que no tiene las dos cosas se deja como esta.
+  ["sin peso", { fontFamily: "Outfit Variable" }, "Outfit Variable"],
+  ["sin familia", { fontWeight: "500" }, undefined],
+  ["peso en una variable", { fontFamily: "Outfit Variable", fontWeight: "var(--w)" }, "Outfit Variable"],
+  ["familia en una variable", { fontFamily: "var(--font-sans)", fontWeight: "500" }, "var(--font-sans)"],
+];
+
+let bad = 0;
+for (const [what, declarations, want] of cases) {
+  const got = familyOf(declarations);
+  if (got !== want) {
+    console.log("MAL " + what + ": " + got + " (esperaba " + want + ")");
+    bad++;
+  }
+}
+// Y el peso que se saca del nombre es el numero con el que la app registra.
+for (const [value, want] of [["500", "500"], [500, "500"], ["bold", "700"], ["normal", "400"], ["var(--w)", null], [undefined, null], ["fina", null]]) {
+  const got = weightOf(value);
+  if (got !== want) {
+    console.log("MAL weightOf(" + value + "): " + got + " (esperaba " + want + ")");
+    bad++;
+  }
+}
+console.log(bad === 0 ? "todos bien" : bad + " mal");
+`
+	if err := os.WriteFile(filepath.Join(native, "probe.mjs"), []byte(probe), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	command := exec.CommandContext(ctx, node, "probe.mjs")
+	command.Dir = native
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("withFontWeight failed: %v\n%s", err, output)
+	}
+	if said := strings.TrimSpace(string(output)); said != "todos bien" {
+		t.Fatal(said)
+	}
+}
+
+func TestNativeWaitsForTheFontsBeforeTheFirstScreen(t *testing.T) {
+	// Una pantalla que se pinta con la fuente equivocada es una pantalla con otro
+	// layout: el ancho de cada palabra cambia y el parrafo corta en otro lado. Por
+	// eso espera, y por eso la app que no shippea ninguna no cambia nada: el mapa
+	// vacio contesta al toque.
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(projectRoot, ".bifrost", "native")
+	if _, err := writeNativeProject(native, prepared, "http://example.test", filepath.Join(projectRoot, "native")); err != nil {
+		t.Fatal(err)
+	}
+	layout, err := os.ReadFile(filepath.Join(native, "app", "_layout.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"useFonts(fonts)", "from \"./bifrost/fonts\"", "if (!ready)"} {
+		if !strings.Contains(string(layout), want) {
+			t.Fatalf("el layout no espera a las fuentes: falta %q", want)
+		}
+	}
+	// Y el mapa que el generador escribe esta vacio, para que una app sin fuentes
+	// se comporte como antes.
+	empty, err := os.ReadFile(filepath.Join(native, "bifrost", "fonts.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(empty), "Record<string, FontSource> = {}") {
+		t.Fatalf("el mapa de fuentes no viene vacio:\n%s", empty)
+	}
+}

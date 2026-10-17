@@ -320,11 +320,12 @@ const nativeNativeInternal = `// The runtime keeps one collection of styles for 
 // rules of the same element.
 const upstream = require("react-native-css/native-internal");
 const { withRowDirection } = require("./row-direction");
+const { withFontWeight } = require("./font-weight");
 
 const collection = upstream.StyleCollection;
 if (collection && typeof collection.inject === "function") {
   const inject = collection.inject.bind(collection);
-  collection.inject = (stylesheet) => inject(withRowDirection(stylesheet));
+  collection.inject = (stylesheet) => inject(withFontWeight(withRowDirection(stylesheet)));
 }
 
 module.exports = upstream;
@@ -1773,8 +1774,10 @@ func nativeOverlayHas(overlay, name string) bool {
 
 const nativeLayoutBody = `import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { useFonts } from "expo-font";
 import { StyleSheet, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+import { fonts } from "./bifrost/fonts";
 
 function Shell() {
   const insets = useSafeAreaInsets();
@@ -1785,7 +1788,19 @@ function Shell() {
   );
 }
 
+// The stylesheet asks for a font by name -- --font-sans is 'Plus Jakarta Sans
+// Variable' -- and a native screen has no font to fall back to but the system
+// one, which is a different typeface with different widths: measured on the
+// landing, the same paragraph broke at a different word and every line below it
+// moved. So the fonts the app ships are loaded before the first screen, and the
+// screen waits: a frame of the wrong typeface is a frame of a different layout.
+//
+// An app that ships none gets an empty map and renders as before.
 export default function Layout() {
+  const [ready] = useFonts(fonts);
+  if (!ready) {
+    return null;
+  }
   return (
     <SafeAreaProvider>
       <StatusBar style="auto" />
@@ -2392,6 +2407,98 @@ function splitScroll(className) {
 module.exports = { scrollOf, splitScroll, VERTICAL, HORIZONTAL };
 `
 
+const nativeFontWeight = `// A font is asked for by name and a weight apart, and a native screen can only
+// load a file: the typeface a screen asks for is a family plus a bold flag, so a
+// variable font comes out at its default instance -- measured on Outfit, that is
+// 100, o sea Thin -- and a weight of 500 never reaches the file that has it.
+//
+// So the family a rule names becomes the family plus the weight it asked for,
+// which is how the app registers them (see bifrost/fonts.ts): a rule that says
+// 'Plus Jakarta Sans Variable' at 500 looks for the family of that name at 500.
+//
+// An app that registers no font is not worse off: the family it looks for is not
+// found either way, and the screen falls back to the system one, which is what it
+// did before this existed.
+const NAMED = /^(\d{3}|normal|bold)$/i;
+
+// The first family of a list, without the quotes: 'Plus Jakarta Sans Variable',
+// sans-serif is Plus Jakarta Sans Variable.
+//
+// Un valor que todavia es una variable no es una familia: el compilador resuelve
+// las variables antes de que esto lo vea -- medido en el transform de al lado,
+// que lee display ya resuelto -- pero si alguna llegara sin resolver, pegarle un
+// peso al lado arma un nombre que no existe en ningun lado.
+function firstFamily(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const first = value.split(",")[0].trim().replace(/^['"]|['"]$/g, "").trim();
+  if (first === "" || first.indexOf("var(") === 0) {
+    return null;
+  }
+  return first;
+}
+
+// The weight a rule asked for, as the number the family is named with. A weight
+// that arrives in a variable is a variable of its own and is left alone.
+function weightOf(value) {
+  if (typeof value === "number") {
+    return String(value);
+  }
+  if (typeof value !== "string" || !NAMED.test(value)) {
+    return null;
+  }
+  const said = value.toLowerCase();
+  if (said === "normal") {
+    return "400";
+  }
+  if (said === "bold") {
+    return "700";
+  }
+  return said;
+}
+
+function withFontWeight(stylesheet) {
+  for (const entry of (stylesheet && stylesheet.s) || []) {
+    for (const rule of entry[1] || []) {
+      const declarations = rule && rule.d;
+      if (!Array.isArray(declarations)) {
+        continue;
+      }
+      for (const group of declarations) {
+        if (Array.isArray(group) || !group) {
+          continue;
+        }
+        const family = firstFamily(group.fontFamily);
+        const weight = weightOf(group.fontWeight);
+        if (family === null || weight === null) {
+          continue;
+        }
+        // Un peso que ya esta en el nombre no se le agrega dos veces: correr esto
+        // dos veces es correrlo una.
+        if (family.endsWith(" " + weight)) {
+          continue;
+        }
+        group.fontFamily = family + " " + weight;
+        break;
+      }
+    }
+  }
+  return stylesheet;
+}
+
+module.exports = { withFontWeight, firstFamily, weightOf };
+`
+
+// The fonts the app ships, as the map expo-font wants: the family a rule asks for
+// -- which is the family plus the weight, see bifrost/font-weight.js -- against
+// the file. The generator writes it empty, so an app that ships no font renders
+// as before, and the app replaces it with its own.
+const nativeFonts = `import type { FontSource } from "expo-font";
+
+export const fonts: Record<string, FontSource> = {};
+`
+
 const nativeRuns = `// A block that holds a string has to become one Text, because only a Text may
 // hold a string -- and which strings are one text and which are boxes of their
 // own is not a detail of the target: a browser decides it the same way, and it
@@ -2602,19 +2709,30 @@ function Scroller({ className, contentContainerStyle, children, ...rest }: { cla
 // What wraps a run of text and what a flex container does with an element is not
 // decided here: see bifrost/runs.js.
 function Box({ children, className, ...rest }: { children?: ReactNode; className?: unknown } & Record<string, unknown>) {
-  const runs = runsOf(
+  return <Scroller className={className} {...rest}>{childRuns(children, className)}</Scroller>;
+}
+
+// The children of a button are the same problem Box has, and the answer is the
+// same one: a run of text becomes one Text, and anything else is an item of its
+// own. An icon is not part of the run -- measured on the login page of fonnso:
+// the mark of Google and the label went into one Text, and the mark, which is a
+// flex item once it is outside, took the whole width and pushed the label past
+// the box it draws in. The label was there and painted nothing, and the same
+// shape sat over the first letter of the send button.
+function childRuns(children: ReactNode, className: unknown): ReactNode[] {
+  return runsOf(
     Children.toArray(children),
     className,
     (child: unknown) => isValidElement(child) && child.type === Text,
     (run: ReactNode[], at: number) => <Text key={"text-" + at}>{run}</Text>,
   );
-  return <Scroller className={className} {...rest}>{runs}</Scroller>;
 }
 
-function Anchor({ href, children, onPress, ...rest }: { href?: string; children?: unknown; onPress?: unknown } & Record<string, unknown>) {
+function Anchor({ href, children, className, onPress, ...rest }: { href?: string; children?: unknown; className?: unknown; onPress?: unknown } & Record<string, unknown>) {
   return (
     <Pressable
       accessibilityRole="link"
+      className={className as string}
       onPress={() => {
         if (typeof onPress === "function") {
           (onPress as () => void)();
@@ -2630,13 +2748,13 @@ function Anchor({ href, children, onPress, ...rest }: { href?: string; children?
       }}
       {...rest}
     >
-      <Text>{children}</Text>
+      {childRuns(children, className)}
     </Pressable>
   );
 }
 
-function Button({ children, type, onPress, ...rest }: { children?: unknown; type?: unknown; onPress?: unknown } & Record<string, unknown>) {
-  return <Pressable accessibilityRole="button" onPress={usePress(type, onPress as (() => void) | undefined)} {...rest}><Text>{children}</Text></Pressable>;
+function Button({ children, type, className, onPress, ...rest }: { children?: unknown; type?: unknown; className?: unknown; onPress?: unknown } & Record<string, unknown>) {
+  return <Pressable accessibilityRole="button" className={className as string} onPress={usePress(type, onPress as (() => void) | undefined)} {...rest}>{childRuns(children, className)}</Pressable>;
 }
 
 // A form of the web app keeps its fields and submits them, because there is no
@@ -2949,6 +3067,10 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/css-warnings.js", nativeCSSWarnings},
 	{"bifrost/native-internal.js", nativeNativeInternal},
 	{"bifrost/row-direction.js", nativeRowDirection},
+	{"bifrost/font-weight.js", nativeFontWeight},
+	// Lo escribe el generador vacio y una app lo reemplaza con las fuentes que
+	// shippea: el bucle de arriba no pisa lo que el overlay trae.
+	{"bifrost/fonts.ts", nativeFonts},
 	{"bifrost/runs.js", nativeRuns},
 	{"bifrost/scroll.js", nativeScroll},
 	{"bifrost/selectors.js", nativeSelectors},
