@@ -1269,6 +1269,10 @@ func TestNativeShipsTheDocumentShimWithoutTurningItOn(t *testing.T) {
 		"target.KeyboardEvent ??=",
 		"target.FocusEvent ??=",
 		"target.MouseEvent ??=",
+		// The back button of the phone closes a dialog through the keydown the
+		// dialog listens for on the document, and the document has to answer
+		// whether anyone was listening.
+		"dispatchEvent: dispatch,",
 		"target.navigator.clipboard",
 	} {
 		if !strings.Contains(dom, said) {
@@ -1289,6 +1293,12 @@ func TestNativeShipsTheDocumentShimWithoutTurningItOn(t *testing.T) {
 	// document shim only when the app asks for it.
 	if strings.Contains(nativeLayout(""), "dom") {
 		t.Fatal("the document shim is turned on for every app")
+	}
+	// The back button is handed to whatever listens for Escape, and it stays with
+	// the dialog when there is one -- measured on the sidebar, where it took the
+	// app away with the sheet open.
+	if !strings.Contains(nativeLayout(""), "hardwareBackPress") {
+		t.Fatal("the back button of the phone leaves the app with a dialog open")
 	}
 }
 
