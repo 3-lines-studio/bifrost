@@ -1656,6 +1656,18 @@ const install = () => {
   // exist. Measured: the walk above of the tabbable of a dialog reached this
   // right after asking a node for its root, and the sheet did not open.
   target.ShadowRoot ??= class ShadowRoot {};
+  // The same throw waits behind a box of an event: a library that is handed one
+  // asks what kind it is with instanceof, and reads the constructor off the
+  // window -- "if (event instanceof win.KeyboardEvent)". Measured on the
+  // sidebar of fonnso: the X of the sheet answered "right operand of instanceof
+  // is not an object" and, in a release build, that same throw ends the app.
+  // Nothing here is one of those events, and for that to be the answer the
+  // names have to exist.
+  target.Event ??= class Event {};
+  target.KeyboardEvent ??= class KeyboardEvent {};
+  target.FocusEvent ??= class FocusEvent {};
+  target.MouseEvent ??= class MouseEvent {};
+  target.PointerEvent ??= class PointerEvent {};
   target.addEventListener ??= on;
   target.removeEventListener ??= off;
   target.dispatchEvent ??= () => true;

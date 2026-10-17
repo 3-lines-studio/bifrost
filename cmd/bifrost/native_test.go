@@ -1263,6 +1263,12 @@ func TestNativeShipsTheDocumentShimWithoutTurningItOn(t *testing.T) {
 		"target.matchMedia ??=",
 		"target.ResizeObserver ??= ResizeObserver",
 		"target.Node ??=",
+		// Closing a sheet through its X, the library that hands focus back asks
+		// "event instanceof win.KeyboardEvent": an instanceof whose right side is
+		// not there is a throw, and in a release build that throw ends the app.
+		"target.KeyboardEvent ??=",
+		"target.FocusEvent ??=",
+		"target.MouseEvent ??=",
 		"target.navigator.clipboard",
 	} {
 		if !strings.Contains(dom, said) {
