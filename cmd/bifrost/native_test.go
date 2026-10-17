@@ -1750,7 +1750,7 @@ func TestNativeTagMapKeepsTheValueOfEveryFieldOfAForm(t *testing.T) {
 	// document, so the answer has to come from the field itself: what the page
 	// set, and what somebody typed into a field the page let keep its own value.
 	host := nativeHost("")
-	if !strings.Contains(host, "function Field({ name, value, defaultValue, rows, onKeyDown, ...rest }") {
+	if !strings.Contains(host, "function Field({ name, value, defaultValue, rows, onKeyDown, onChange, ...rest }") {
 		t.Fatal("a field does not know its own name")
 	}
 	if !strings.Contains(host, `form.fields.set(name, held === undefined || held === null ? "" : String(held))`) {
@@ -1761,6 +1761,20 @@ func TestNativeTagMapKeepsTheValueOfEveryFieldOfAForm(t *testing.T) {
 	}
 	if !nativeTagIsNamed("input") || !nativeTagIsNamed("textarea") {
 		t.Fatal("a field of a form is not in the table")
+	}
+}
+
+func TestNativeTagMapAnswersTheChangeOfAField(t *testing.T) {
+	// A page that keeps the value in its own state asks for it with onChange.
+	// A field that only tells the form leaves the page's state empty, and the
+	// page paints the value it had: measured on the files panel of the app, the
+	// search box typed and the list never filtered.
+	host := nativeHost("")
+	if !strings.Contains(host, "function Field({ name, value, defaultValue, rows, onKeyDown, onChange, ...rest }") {
+		t.Fatal("a field does not listen to its change")
+	}
+	if !strings.Contains(host, "target: { value: text, name }") {
+		t.Fatal("the change of a field does not reach the page")
 	}
 }
 
