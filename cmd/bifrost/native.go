@@ -3070,9 +3070,15 @@ func nativePackageManifest() map[string]any {
 	}
 }
 
-func nativeAppManifest(projectRoot string) map[string]any {
+func nativeAppManifest(projectRoot, overlay string) (map[string]any, error) {
 	name, slug := nativeNames(projectRoot)
 	identifier := "com.bifrost." + strings.ReplaceAll(slug, "-", "")
+	plugins := []any{"expo-router"}
+	fonts, err := nativeFontsPlugin(overlay)
+	if err != nil {
+		return nil, err
+	}
+	plugins = append(plugins, fonts...)
 	return map[string]any{"expo": map[string]any{
 		"name":               name,
 		"slug":               slug,
@@ -3081,7 +3087,7 @@ func nativeAppManifest(projectRoot string) map[string]any {
 		"orientation":        "portrait",
 		"userInterfaceStyle": "automatic",
 		"newArchEnabled":     true,
-		"plugins":            []string{"expo-router"},
+		"plugins":            plugins,
 		"ios":                map[string]any{"bundleIdentifier": identifier},
 		"android":            map[string]any{"package": identifier},
 		// The runtime the app starts in installs a window.location of its own, and
@@ -3091,7 +3097,76 @@ func nativeAppManifest(projectRoot string) map[string]any {
 		// redefinition. False is the runtime's own switch for not installing one, so
 		// the address a page reads is the address of the page.
 		"extra": map[string]any{"router": map[string]any{"origin": false}},
-	}}
+	}}, nil
+}
+
+// The fonts an overlay ships, as the plugin of the target wants them: one family
+// and a file per weight, in `<overlay>/fonts.json`. It is the one seam an app
+// needs for the typefaces of its stylesheet, and it is data and not a plugin of
+// its own because what varies from app to app is the family and the files.
+//
+// Why a family per weight and not one file: a native screen loads a file, and it
+// picks it by family and by weight -- a variable font is asked for by name and
+// comes out at its default instance (measured on Outfit, that is 100, Thin), and
+// a weight of 500 never reaches the file that has it. expo-font writes the
+// `res/font` family of each one and registers it with ReactFontManager, which is
+// the side that applies the weight.
+//
+// Measured on the app of the case, before this existed: the stylesheet asked for
+// 'Plus Jakarta Sans Variable' and the screen fell back to the system one, which
+// is a different typeface with different widths -- the same text measured 398x47
+// px on the web and 418x51 px on the native target, and every line below it
+// moved with the difference.
+func nativeFontsPlugin(overlay string) ([]any, error) {
+	path := filepath.Join(overlay, "fonts.json")
+	content, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var families []struct {
+		FontFamily      string `json:"fontFamily"`
+		FontDefinitions []struct {
+			Path   string `json:"path"`
+			Weight int    `json:"weight"`
+		} `json:"fontDefinitions"`
+	}
+	if err := json.Unmarshal(content, &families); err != nil {
+		return nil, fmt.Errorf("bifrost: %s: %w", path, err)
+	}
+	if len(families) == 0 {
+		return nil, nil
+	}
+	fonts := make([]any, 0, len(families))
+	for _, family := range families {
+		if family.FontFamily == "" || len(family.FontDefinitions) == 0 {
+			return nil, fmt.Errorf("bifrost: %s: a family of the fonts has no name or no files", path)
+		}
+		definitions := make([]any, 0, len(family.FontDefinitions))
+		for _, definition := range family.FontDefinitions {
+			if definition.Path == "" || definition.Weight == 0 {
+				return nil, fmt.Errorf("bifrost: %s: a font of %s has no file or no weight", path, family.FontFamily)
+			}
+			// A file the app does not ship is a build that fails three minutes into
+			// prebuild; here it fails where the app can see it.
+			if !nativeOverlayHas(overlay, definition.Path) {
+				return nil, fmt.Errorf("bifrost: %s: the overlay does not ship %s", path, definition.Path)
+			}
+			definitions = append(definitions, map[string]any{
+				"path":   definition.Path,
+				"weight": definition.Weight,
+			})
+		}
+		fonts = append(fonts, map[string]any{
+			"fontFamily":      family.FontFamily,
+			"fontDefinitions": definitions,
+		})
+	}
+	return []any{[]any{"expo-font", map[string]any{
+		"android": map[string]any{"fonts": fonts},
+	}}}, nil
 }
 
 func runNative(args []string) error {
@@ -3194,7 +3269,11 @@ func writeNativeProject(native string, app appRouter, origin, overlay string) (b
 	if err := written.writeJSON(native, "package.json", manifest); err != nil {
 		return false, err
 	}
-	if err := written.writeJSON(native, "app.json", nativeAppManifest(app.ProjectRoot)); err != nil {
+	appManifest, err := nativeAppManifest(app.ProjectRoot, overlay)
+	if err != nil {
+		return false, err
+	}
+	if err := written.writeJSON(native, "app.json", appManifest); err != nil {
 		return false, err
 	}
 	if err := written.write(native, "bifrost/origin.ts", nativeOrigin(origin), 0o644); err != nil {

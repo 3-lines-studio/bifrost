@@ -1614,7 +1614,11 @@ func TestNativeAppManifestTurnsOffTheLocationOfTheRuntime(t *testing.T) {
 	// generated app.json is the only place that can turn it off: an app that ships
 	// an app.json of its own replaces the whole file, and then this is the first
 	// thing to go.
-	expo, ok := nativeAppManifest("/tmp/demo")["expo"].(map[string]any)
+	manifest, err := nativeAppManifest("/tmp/demo", "/tmp/native")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expo, ok := manifest["expo"].(map[string]any)
 	if !ok {
 		t.Fatal("the app manifest has no expo section")
 	}
@@ -1633,15 +1637,19 @@ func TestNativeAppManifestTurnsOffTheLocationOfTheRuntime(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	native := filepath.Join(projectRoot, ".bifrost", "native")
-	if err := writeNativeJSON(native, "app.json", nativeAppManifest(projectRoot)); err != nil {
-		t.Fatal(err)
-	}
-	written, err := os.ReadFile(filepath.Join(native, "app.json"))
+	written, err := nativeAppManifest(projectRoot, filepath.Join(projectRoot, "native"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(written), `"origin": false`) {
-		t.Fatalf("the generated app.json does not turn it off:\n%s", written)
+	if err := writeNativeJSON(native, "app.json", written); err != nil {
+		t.Fatal(err)
+	}
+	generated, err := os.ReadFile(filepath.Join(native, "app.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(generated), `"origin": false`) {
+		t.Fatalf("the generated app.json does not turn it off:\n%s", generated)
 	}
 }
 
@@ -2340,4 +2348,128 @@ func TestNativePaintsTheChildrenOfAButtonAsItemsOfTheirOwn(t *testing.T) {
 	if !strings.Contains(body, "className,") {
 		t.Errorf("textRuns does not hand the class to the rule:\n%s", body)
 	}
+}
+
+func TestNativeShipsTheFontsOfTheStylesheetWithTheirWeights(t *testing.T) {
+	// A native screen loads a file and picks it by family and by weight, and the
+	// stylesheet of an app asks for a variable font by name: without a family that
+	// holds every weight, 'Plus Jakarta Sans Variable' at 500 has nowhere to go and
+	// the screen falls back to the system typeface -- measured on the app of the
+	// case, the same text measured 398x47 px on the web and 418x51 px on the
+	// target, and every line below it moved with the difference.
+	//
+	// What the app ships it says in its overlay (`fonts.json`), and the generator
+	// puts it where expo-font wants it: the res/font family of each weight.
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	overlay := filepath.Join(projectRoot, "native")
+	ship := func(name, content string) {
+		t.Helper()
+		path := filepath.Join(overlay, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ship("fonts.json", `[
+		{"fontFamily": "Plus Jakarta Sans Variable", "fontDefinitions": [
+			{"path": "assets/fonts/PlusJakartaSansVariable-400.ttf", "weight": 400},
+			{"path": "assets/fonts/PlusJakartaSansVariable-600.ttf", "weight": 600}
+		]},
+		{"fontFamily": "Outfit Variable", "fontDefinitions": [
+			{"path": "assets/fonts/OutfitVariable-700.ttf", "weight": 700}
+		]}
+	]`)
+	for _, name := range []string{"PlusJakartaSansVariable-400.ttf", "PlusJakartaSansVariable-600.ttf", "OutfitVariable-700.ttf"} {
+		ship("assets/fonts/"+name, "not a font, and it does not need to be one here")
+	}
+	prepared, err := prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(projectRoot, ".bifrost", "native")
+	if _, err := writeNativeProject(native, prepared, "http://example.test", overlay); err != nil {
+		t.Fatal(err)
+	}
+
+	plugins := readPlugins(t, native)
+	if len(plugins) != 2 {
+		t.Fatalf("the manifest of the app has %d plugins: %v", len(plugins), plugins)
+	}
+	if plugins[0] != "expo-router" {
+		t.Fatalf("the app's own plugin went missing: %v", plugins[0])
+	}
+	entry, ok := plugins[1].([]any)
+	if !ok || len(entry) != 2 || entry[0] != "expo-font" {
+		t.Fatalf("the fonts are not where expo-font reads them: %v", plugins[1])
+	}
+	fonts := entry[1].(map[string]any)["android"].(map[string]any)["fonts"].([]any)
+	if len(fonts) != 2 {
+		t.Fatalf("the manifest names %d families: %v", len(fonts), fonts)
+	}
+	first := fonts[0].(map[string]any)
+	if first["fontFamily"] != "Plus Jakarta Sans Variable" {
+		t.Fatalf("the family of the fonts is %v", first["fontFamily"])
+	}
+	definitions := first["fontDefinitions"].([]any)
+	if len(definitions) != 2 {
+		t.Fatalf("the family has %d files: %v", len(definitions), definitions)
+	}
+	for at, want := range []float64{400, 600} {
+		definition := definitions[at].(map[string]any)
+		if definition["weight"] != want {
+			t.Fatalf("the file %d is at weight %v, and the app asked for %v", at, definition["weight"], want)
+		}
+		if !strings.HasPrefix(definition["path"].(string), "assets/fonts/") {
+			t.Fatalf("the file of the app is named %v", definition["path"])
+		}
+	}
+
+	// An app that ships no font is an app whose screen falls back to the system
+	// one, which is what it did before this existed -- and that is not a reason to
+	// fail the run.
+	if err := os.Remove(filepath.Join(overlay, "fonts.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeNativeProject(native, prepared, "http://example.test", overlay); err != nil {
+		t.Fatal(err)
+	}
+	if plugins := readPlugins(t, native); len(plugins) != 1 || plugins[0] != "expo-router" {
+		t.Fatalf("an app without fonts got plugins it did not ask for: %v", plugins)
+	}
+
+	// Y una familia que nombra un archivo que la app no shippea se dice en el
+	// momento, y no tres minutos adentro de un prebuild.
+	ship("fonts.json", `[{"fontFamily": "Outfit Variable", "fontDefinitions": [
+		{"path": "assets/fonts/OutfitVariable-500.ttf", "weight": 500}
+	]}]`)
+	if _, err := writeNativeProject(native, prepared, "http://example.test", overlay); err == nil {
+		t.Fatal("a font the overlay does not ship did not stop the run")
+	}
+}
+
+// The plugins of the generated manifest, which is where an app's fonts travel.
+func readPlugins(t *testing.T, native string) []any {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join(native, "app.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Expo struct {
+			Plugins []any `json:"plugins"`
+		} `json:"expo"`
+	}
+	if err := json.Unmarshal(content, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	return manifest.Expo.Plugins
 }
