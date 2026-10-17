@@ -684,6 +684,36 @@ func TestNativeMakesABlockThatScrollsAScrollView(t *testing.T) {
 	}
 }
 
+func TestNativeLeavesOutAPlaceThatIsNotANumber(t *testing.T) {
+	// A page that places a popup works out where it goes by measuring the page,
+	// and what it measured travels as a transform of the style:
+	// translate(8px, 284.952px) is where the user menu of fonnso lands. A target
+	// has no client rect to answer with, so the same menu arrives as
+	// translate(NaNpx, NaNpx), and react-native refuses it: measured on the
+	// emulator, opening the menu threw "Transform with key translate must be an
+	// string with 1 or 2 parameters, found 0" and the whole screen went black
+	// until the app was restarted.
+	if !strings.Contains(nativeHostBody, "function placed(style: unknown): unknown {") {
+		t.Fatal("a place that is not a number would reach the renderer")
+	}
+	if !strings.Contains(nativeHostBody, `if (typeof transform !== "string" || !/NaN|Infinity/.test(transform)) {`) {
+		t.Fatal("a place of the page is not told from one that is not a number")
+	}
+	if !strings.Contains(nativeHostBody, "given.style = placed(given.style);") {
+		t.Fatal("the style of an element does not go through it")
+	}
+	// A transform that is a real place stays: it is what a page that places
+	// something itself means, and react-native reads the same string.
+	if !strings.Contains(nativeHostBody, "const transform = (style as Record<string, unknown>).transform;") {
+		t.Fatal("the transform of every element would be stripped")
+	}
+	// The style of an element can be a list of styles, which is how a page
+	// merges its own with the one of the component it reuses.
+	if !strings.Contains(nativeHostBody, "return style.map(placed);") {
+		t.Fatal("a list of styles is not looked at")
+	}
+}
+
 func TestNativeASubmitButtonAnswersTheEnterOfAField(t *testing.T) {
 	// A page writes onKeyDown for the key that ends the typing, and it never
 	// fires here: measured on the app of the case, the composer of the chat
