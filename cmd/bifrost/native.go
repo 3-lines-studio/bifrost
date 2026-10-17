@@ -1813,8 +1813,8 @@ func nativeOverlayHas(overlay, name string) bool {
 
 const nativeLayoutBody = `import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
-import { BackHandler, StyleSheet, View } from "react-native";
+import { useEffect, useState } from "react";
+import { BackHandler, Keyboard, StyleSheet, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 // The back button of the phone, as the Escape of a browser: a dialog of the page
@@ -1838,10 +1838,27 @@ function Back() {
   return null;
 }
 
+// The keyboard takes the bottom of the screen, and with the phone on edge to edge
+// the window does not shrink for it: what is anchored to the bottom -- the field
+// of the chat -- stays under the keys. Measured on fonnso: the composer of a thread
+// was covered whole by the keyboard, and with the height the phone reports it was
+// still 24 dp under it, which is the bar of the system: the keyboard reports its
+// own height and not the bar it sits on, so the shell pads by both.
 function Shell() {
   const insets = useSafeAreaInsets();
+  const [keyboard, setKeyboard] = useState(0);
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardDidShow", (event) => {
+      setKeyboard(event.endCoordinates?.height ?? 0);
+    });
+    const hide = Keyboard.addListener("keyboardDidHide", () => setKeyboard(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   return (
-    <View style={[styles.shell, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+    <View style={[styles.shell, { paddingTop: insets.top, paddingBottom: keyboard > 0 ? keyboard + insets.bottom : insets.bottom }]}>
       <Back />
       <Stack screenOptions={{ headerShown: false }} />
     </View>
