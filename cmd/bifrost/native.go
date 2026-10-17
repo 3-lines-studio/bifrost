@@ -2709,7 +2709,7 @@ function FormTag({ onSubmit, children, ...rest }: { onSubmit?: unknown; children
 // The event a page reads is given the two things it uses: the key, and the form
 // it is inside, whose requestSubmit is the form of this map. That is why the
 // composer needs no change to send with Enter.
-function Field({ name, value, defaultValue, rows, onKeyDown, ...rest }: Record<string, unknown>) {
+function Field({ name, value, defaultValue, rows, onKeyDown, onChange, ...rest }: Record<string, unknown>) {
   const form = useForm();
   const held = value === undefined ? defaultValue : value;
   if (form && typeof name === "string") {
@@ -2745,6 +2745,19 @@ function Field({ name, value, defaultValue, rows, onKeyDown, ...rest }: Record<s
       onChangeText={(text) => {
         if (form && typeof name === "string") {
           form.fields.set(name, text);
+        }
+        // A page that keeps the value in its own state asks for it with
+        // onChange, and a field that never answers leaves the state empty: the
+        // page re-renders with the value it had, and the field looks dead --
+        // measured, the search box of the files panel of the app typed and the
+        // list never filtered. The event a page reads is the one it reads in a
+        // browser: target.value, and the name the field was written with.
+        if (typeof onChange === "function") {
+          (onChange as (event: unknown) => void)({
+            target: { value: text, name },
+            currentTarget: { value: text, name },
+            nativeEvent: { text },
+          });
         }
       }}
     />
