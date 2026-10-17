@@ -6,3 +6,4 @@ node_modules/
 /example/wails/frontend/bindings/
 /example/wails/frontend/node_modules/
 *.tmp
+/bifrost
