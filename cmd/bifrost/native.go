@@ -3391,11 +3391,13 @@ function Radio({ checked, defaultChecked, onChange, name, value, disabled, class
   return <Control type="radio" checked={on} className={className} disabled={disabled} onPress={press} {...rest} />;
 }
 
-// A browser draws a field of type="date" with a calendar and hands the page the
-// value as YYYY-MM-DD. Measured on the device: the field opened the keyboard and
-// painted the ISO string, which is not a date to pick. The calendar is the one of
-// the device, and the value the page reads is the one a browser gives it.
+// A browser draws a field of type="date" with a calendar and one of type="time"
+// with a clock; both hand the page a string, YYYY-MM-DD and HH:MM. Measured on
+// the device: each opened the keyboard and painted its own string. The calendar
+// and the clock are the ones of the device, and the value is the one a browser
+// gives it.
 const DATE_VALUE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const TIME_VALUE = /^(\d{2}):(\d{2})$/;
 
 function dateOf(value: unknown): Date | null {
   if (typeof value !== "string") {
@@ -3409,18 +3411,52 @@ function dateOf(value: unknown): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+// A clock has no date: the picker only needs one to carry the time, and today is
+// as good as any other day for that.
+function timeOf(value: unknown): Date | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const match = TIME_VALUE.exec(value);
+  if (match === null) {
+    return null;
+  }
+  const date = new Date();
+  date.setHours(Number(match[1]), Number(match[2]), 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function isoOf(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return date.getFullYear() + "-" + month + "-" + day;
 }
 
-function DateField({ value, defaultValue, onChange, name, min, max, disabled, className, ...rest }: Record<string, unknown>) {
+function hourOf(date: Date): string {
+  return String(date.getHours()).padStart(2, "0") + ":" + String(date.getMinutes()).padStart(2, "0");
+}
+
+function clockOf(mode: string, value: unknown): Date | null {
+  return mode === "time" ? timeOf(value) : dateOf(value);
+}
+
+function valueOf(mode: string, date: Date): string {
+  return mode === "time" ? hourOf(date) : isoOf(date);
+}
+
+// What the field paints: a browser shows the date and the clock of the locale,
+// not the string it hands the page.
+function labelOf(mode: string, date: Date): string {
+  return mode === "time" ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : date.toLocaleDateString();
+}
+
+function ClockField({ mode, type, value, defaultValue, onChange, name, min, max, disabled, className, ...rest }: Record<string, unknown>) {
+  const kind = mode === "time" ? "time" : "date";
   const form = useForm();
-  const [own, setOwn] = useState<Date | null>(() => dateOf(defaultValue));
+  const [own, setOwn] = useState<Date | null>(() => clockOf(kind, defaultValue));
   const [open, setOpen] = useState(false);
-  const current = value === undefined ? own : dateOf(value);
-  const sent = current === null ? "" : isoOf(current);
+  const current = value === undefined ? own : clockOf(kind, value);
+  const sent = current === null ? "" : valueOf(kind, current);
   if (form !== null && typeof name === "string") {
     form.fields.set(name, sent);
   }
@@ -3433,7 +3469,7 @@ function DateField({ value, defaultValue, onChange, name, min, max, disabled, cl
     if (value === undefined) {
       setOwn(date);
     }
-    const next = isoOf(date);
+    const next = valueOf(kind, date);
     if (form !== null && typeof name === "string") {
       form.fields.set(name, next);
     }
@@ -3441,17 +3477,17 @@ function DateField({ value, defaultValue, onChange, name, min, max, disabled, cl
       return;
     }
     (onChange as (event: unknown) => void)({
-      target: { value: next, name, type: "date" },
-      currentTarget: { value: next, name, type: "date" },
+      target: { value: next, name, type: kind },
+      currentTarget: { value: next, name, type: kind },
       nativeEvent: { text: next },
     });
   };
-  const calendar = (
+  const picker = (
     <DateTimePicker
       value={current === null ? new Date() : current}
-      mode="date"
-      minimumDate={dateOf(min) ?? undefined}
-      maximumDate={dateOf(max) ?? undefined}
+      mode={kind as "date" | "time"}
+      minimumDate={clockOf(kind, min) ?? undefined}
+      maximumDate={clockOf(kind, max) ?? undefined}
       onValueChange={picked}
       onDismiss={() => setOpen(false)}
     />
@@ -3464,15 +3500,15 @@ function DateField({ value, defaultValue, onChange, name, min, max, disabled, cl
         className={className as string}
         disabled={disabled === true}
         onPress={() => setOpen(true)}
-        style={className === undefined || className === null || className === "" ? styles.date : undefined}
+        style={className === undefined || className === null || className === "" ? styles.clock : undefined}
       >
-        <Text>{current === null ? " " : current.toLocaleDateString()}</Text>
+        <Text>{current === null ? " " : labelOf(kind, current)}</Text>
       </Pressable>
-      {open === false ? null : Platform.OS === "android" ? calendar : (
+      {open === false ? null : Platform.OS === "android" ? picker : (
         <Modal transparent animationType="fade" visible onRequestClose={() => setOpen(false)}>
           <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
             <View style={styles.sheet}>
-              {calendar}
+              {picker}
               <Pressable onPress={() => setOpen(false)}>
                 <Text>Done</Text>
               </Pressable>
@@ -3548,8 +3584,8 @@ function RangeField({ value, defaultValue, onChange, onInput, name, min, max, st
 // The type of the input decides which control it is; everything else is a field
 // of text.
 function InputTag(props: Record<string, unknown>) {
-  if (props.type === "date") {
-    return <DateField {...props} />;
+  if (props.type === "date" || props.type === "time") {
+    return <ClockField mode={props.type} {...props} />;
   }
   if (props.type === "range") {
     return <RangeField {...props} />;
@@ -3792,7 +3828,7 @@ const styles = StyleSheet.create({
   center: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
   check: { fontSize: 12, lineHeight: 14 },
   dot: { fontSize: 8, lineHeight: 10 },
-  date: { paddingHorizontal: 12, paddingVertical: 8 },
+  clock: { paddingHorizontal: 12, paddingVertical: 8 },
   slider: { width: "100%", height: 40 },
 });
 

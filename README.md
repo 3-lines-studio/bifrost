@@ -503,7 +503,7 @@ The `type` of a field is the browser's name for what the field is for, and the m
 
 A `checkbox` and a `radio` are the two types a browser draws instead of typing into, and the map paints them as the control they are: a box that fills with a check or a dot, an `onChange` whose event carries `target.checked` and `target.value`, and a `name` that travels with the form -- `on` for a checkbox without a value, and nothing for a radio without one. A radio group is the name its fields share, and the target turns the others off; a group a page controls through `checked` keeps the choice in the page, and one it does not keeps it in the target. A radio that is already chosen does nothing when pressed, as in a browser.
 
-A `date` is the calendar of the device. The field shows the date of the locale, and the value the page reads from `onChange` and the form sends is `YYYY-MM-DD`; `min` and `max` limit the calendar, and a dismissed dialog leaves the value as it was. A value that is not a date is empty rather than today.
+A `date` is the calendar of the device and a `time` is its clock: the field shows the date or the clock of the locale, and the value the page reads from `onChange` and the form sends is `YYYY-MM-DD` or `HH:MM`; `min` and `max` limit the picker, and a dismissed dialog leaves the value as it was. A value that is not one of those strings is empty rather than today's date or now.
 
 A `range` is the slider of the device. `min`, `max`, `step` and `value` are the ones of a browser, `step="any"` is continuous, and the page reads the value as the string a browser gives it, from `onChange` or `onInput`. A value the page writes after the fact moves the thumb, and a form carries the value it holds.
 
