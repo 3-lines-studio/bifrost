@@ -2915,8 +2915,8 @@ for (const [name, component] of Object.entries(extraTags)) {
 }
 `
 
-const nativeHostHead = `import { Children, Fragment, createElement, isValidElement, type ReactNode } from "react";
-import { Image, Linking, ScrollView } from "react-native";
+const nativeHostHead = `import { Children, Fragment, createElement, isValidElement, useState, type ReactNode } from "react";
+import { Image, Linking, Modal, ScrollView, StyleSheet } from "react-native";
 import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View } from "./text";
 import { scrollOf, splitScroll } from "./scroll";
 import { runsOf, asksForFlex } from "./runs";
@@ -3226,6 +3226,141 @@ function ImageTag({ src, alt, ...rest }: { src?: string; alt?: string } & Record
   return <Image source={{ uri: typeof src === "string" ? src : undefined }} accessibilityLabel={alt} {...rest} />;
 }
 
+// A browser opens a select and lists the options it holds; a native target has
+// neither, and a tag this table does not paint takes the whole screen down --
+// measured: one <select> in a form and the render stopped at "View config getter
+// callback for component option must be a function". The list is painted with
+// what every target has: the chosen option in a pressable, and the rest in a
+// sheet that covers the page while it is open.
+type Choice = { value: string; label: string; disabled: boolean };
+
+function textOf(children: ReactNode): string {
+  let text = "";
+  for (const child of Children.toArray(children)) {
+    if (typeof child === "string" || typeof child === "number") {
+      text += String(child);
+      continue;
+    }
+    if (isValidElement(child)) {
+      text += textOf((child.props as { children?: ReactNode }).children);
+    }
+  }
+  return text;
+}
+
+// An option without a value is worth its label, which is what a browser sends;
+// an option group is not an option, so its children are read as if they were
+// here.
+function choicesOf(children: ReactNode): Choice[] {
+  const choices: Choice[] = [];
+  for (const child of Children.toArray(children)) {
+    if (!isValidElement(child)) {
+      continue;
+    }
+    const props = child.props as { children?: ReactNode; value?: unknown; disabled?: unknown };
+    if (child.type === OptionGroup) {
+      choices.push(...choicesOf(props.children));
+      continue;
+    }
+    if (child.type !== Option) {
+      continue;
+    }
+    const label = textOf(props.children);
+    choices.push({
+      value: typeof props.value === "string" ? props.value : label,
+      label,
+      disabled: props.disabled === true,
+    });
+  }
+  return choices;
+}
+
+function Option() {
+  return null;
+}
+
+function OptionGroup() {
+  return null;
+}
+
+function Select({ children, className, value, defaultValue, onChange, name, disabled, multiple, ...rest }: { children?: ReactNode; className?: unknown; value?: unknown; defaultValue?: unknown; onChange?: unknown; name?: unknown; disabled?: unknown; multiple?: unknown } & Record<string, unknown>) {
+  const form = useForm();
+  const choices = choicesOf(children);
+  const first = choices.find((choice) => !choice.disabled);
+  // Without a value and without a default, a browser selects the first option
+  // that is not disabled, and a field that painted nothing would look empty
+  // where the web sends something.
+  const [own, setOwn] = useState(() => {
+    const initial = Array.isArray(defaultValue) ? defaultValue[0] : defaultValue;
+    if (initial !== undefined) {
+      return initial === null ? "" : String(initial);
+    }
+    return first === undefined ? "" : first.value;
+  });
+  const [open, setOpen] = useState(false);
+  const wanted = Array.isArray(value) ? value[0] : value;
+  const chosen = wanted === undefined ? own : wanted === null ? "" : String(wanted);
+  const current = choices.find((choice) => choice.value === chosen);
+  if (form !== null && typeof name === "string") {
+    form.fields.set(name, chosen);
+  }
+  if (multiple === true && __DEV__) {
+    console.warn("bifrost: <select multiple> chooses one option on a native target");
+  }
+  // The event is the one a page reads from a browser: target.value, the name the
+  // field was written with, and a list when the select takes more than one.
+  const pick = (choice: Choice) => {
+    setOpen(false);
+    if (value === undefined) {
+      setOwn(choice.value);
+    }
+    if (form !== null && typeof name === "string") {
+      form.fields.set(name, choice.value);
+    }
+    if (typeof onChange !== "function") {
+      return;
+    }
+    const selected = multiple === true ? [choice.value] : choice.value;
+    (onChange as (event: unknown) => void)({
+      target: { value: selected, name },
+      currentTarget: { value: selected, name },
+      nativeEvent: { text: choice.value },
+    });
+  };
+  return (
+    <>
+      <Pressable
+        {...rest}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: disabled === true, expanded: open }}
+        className={className as string}
+        disabled={disabled === true}
+        onPress={() => setOpen(true)}
+      >
+        <Text>{current === undefined ? "" : current.label}</Text>
+      </Pressable>
+      <Modal transparent animationType="fade" visible={open} onRequestClose={() => setOpen(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
+          <View style={styles.sheet}>
+            {choices.map((choice, at) => (
+              <Pressable
+                key={at}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: choice.disabled, selected: choice.value === chosen }}
+                disabled={choice.disabled}
+                onPress={() => pick(choice)}
+                style={styles.choice}
+              >
+                <Text>{choice.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
+    </>
+  );
+}
+
 function Rule() {
   return <View style={{ height: 1, backgroundColor: "#e9dfd2" }} />;
 }
@@ -3234,6 +3369,12 @@ function Nothing() {
   return null;
 }
 
+const styles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.4)", justifyContent: "flex-end" },
+  sheet: { backgroundColor: "#ffffff", borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingVertical: 8 },
+  choice: { paddingHorizontal: 20, paddingVertical: 14 },
+});
+
 const NAMED: Record<string, unknown> = {
   a: Anchor,
   button: Button,
@@ -3241,6 +3382,9 @@ const NAMED: Record<string, unknown> = {
   hr: Rule,
   img: ImageTag,
   input: Field,
+  optgroup: OptionGroup,
+  option: Option,
+  select: Select,
   textarea: Field,
 };
 for (const name of BOXES) {
