@@ -705,31 +705,40 @@ func TestNativeMakesABlockThatScrollsAScrollView(t *testing.T) {
 
 func TestNativeLeavesOutAPlaceThatIsNotANumber(t *testing.T) {
 	// A page that places a popup works out where it goes by measuring the page,
-	// and what it measured travels as a transform of the style:
-	// translate(8px, 284.952px) is where the user menu of fonnso lands. A target
-	// has no client rect to answer with, so the same menu arrives as
-	// translate(NaNpx, NaNpx), and react-native refuses it: measured on the
-	// emulator, opening the menu threw "Transform with key translate must be an
-	// string with 1 or 2 parameters, found 0" and the whole screen went black
-	// until the app was restarted.
-	if !strings.Contains(nativeHostBody, "function placed(style: unknown): unknown {") {
-		t.Fatal("a place that is not a number would reach the renderer")
-	}
-	if !strings.Contains(nativeHostBody, `if (typeof transform !== "string" || !/NaN|Infinity/.test(transform)) {`) {
-		t.Fatal("a place of the page is not told from one that is not a number")
+	// and what it measured travels as a style of a browser: a box fixed to the
+	// viewport and a transform of translate(544px, 130px). Measured on the menu of
+	// the language of the case: the box arrived fixed and the transform as a
+	// string, which react-native refuses -- "Transform with key translate must be
+	// an string with 1 or 2 parameters" -- and a place whose numbers are not
+	// numbers has no answer at all.
+	for _, said := range []string{
+		"export function placed(style: unknown): unknown {",
+		`if (given.position === "fixed")`,
+		"given.transform = [{ translateX: Number(translate[1]) }, { translateY: Number(translate[2]) }];",
+		"const transform = given.transform;",
+		"return style.map(placed);",
+	} {
+		if !strings.Contains(nativePlace, said) {
+			t.Fatalf("the place of the page is not read: %q", said)
+		}
 	}
 	if !strings.Contains(nativeHostBody, "given.style = placed(given.style);") {
 		t.Fatal("the style of an element does not go through it")
 	}
-	// A transform that is a real place stays: it is what a page that places
-	// something itself means, and react-native reads the same string.
-	if !strings.Contains(nativeHostBody, "const transform = (style as Record<string, unknown>).transform;") {
-		t.Fatal("the transform of every element would be stripped")
+	// A menu of the web opens when the pointer goes down, and a target has only a
+	// press: a trigger that listened to onPointerDown never opened.
+	if !strings.Contains(nativeHostBody, `given.onPress === undefined && typeof given.onPointerDown === "function"`) {
+		t.Fatal("a menu that opens on a pointer never opens")
 	}
-	// The style of an element can be a list of styles, which is how a page
-	// merges its own with the one of the component it reuses.
-	if !strings.Contains(nativeHostBody, "return style.map(placed);") {
-		t.Fatal("a list of styles is not looked at")
+	// Every box of the target goes through it too: the wrapper of a popup is a
+	// div, and its style is the one a browser placed.
+	for _, said := range []string{
+		`style={placed(style) as StyleProp<ViewStyle>}`,
+		`[placed(style), textStyle(own, families)]`,
+	} {
+		if !strings.Contains(nativeTextModule, said) {
+			t.Fatalf("a box of the target does not read the place of its style: %q", said)
+		}
 	}
 }
 
@@ -1424,8 +1433,21 @@ func TestNativeARefIsAnElementOfTheDocument(t *testing.T) {
 			t.Fatalf("the map does not carry %q", said)
 		}
 	}
+	for _, said := range []string{"insertAdjacentElement: () => null", "remove: () => undefined"} {
+		if !strings.Contains(nativeDOM, said) {
+			t.Fatalf("a focus guard has no place in the body: %q", said)
+		}
+	}
+	if !strings.Contains(nativeDOM, `target.MutationObserver ??= class MutationObserver {`) {
+		t.Fatal("a focus scope that observes a box has no observer to ask for")
+	}
 	if !strings.Contains(nativeDOM, "node.ownerDocument = target.document;") {
 		t.Fatal("an element made by the document does not know its document")
+	}
+	for _, said := range []string{"measureInWindow", "__rect = { x, y, width, height"} {
+		if !strings.Contains(nativeHostHead, said) {
+			t.Fatalf("a ref does not carry the box of its view: %q", said)
+		}
 	}
 }
 
@@ -2793,7 +2815,12 @@ func TestNativeAPageThatPaintsThroughAPortalStillPaints(t *testing.T) {
 		"contains: () => false",
 		"children: [],",
 		"getRootNode() {",
-		"dom.createPortal = (children) => children;",
+		// A portal into the body of the page paints, and a portal into a fragment
+		// does not: a component collects in a fragment the nodes it does not want
+		// painted, and the items of a closed select were landing over the page.
+		"dom.createPortal = (children, container) => {",
+		"return children;",
+		"return null;",
 	} {
 		if !strings.Contains(nativeDOM, wanted) {
 			t.Fatalf("the document of the shim does not carry %q", wanted)

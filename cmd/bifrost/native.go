@@ -466,6 +466,7 @@ import { styled } from "react-native-css/native";
 import * as declaredFonts from "./fonts";
 import { useDocumentScroll } from "./document-scroll";
 import { inheritedText, textStyle } from "./text-style";
+import { placed } from "./place";
 
 // The weights of each family the app ships, if it ships any: a project that
 // keeps a module of its own here declares no families, and every name is left
@@ -491,7 +492,7 @@ function TextView({ style, children, ...rest }: HostProps) {
   const own = inheritedText(carried, style);
   return (
     <Carried.Provider value={own}>
-      <Text {...withoutClass(rest)} style={[style, textStyle(own, families)]}>{children}</Text>
+      <Text {...withoutClass(rest)} style={[placed(style), textStyle(own, families)]}>{children}</Text>
     </Carried.Provider>
   );
 }
@@ -500,7 +501,7 @@ function ViewBox({ style, children, ...rest }: HostProps) {
   const carried = useContext(Carried);
   return (
     <Carried.Provider value={inheritedText(carried, style)}>
-      <View {...withoutClass(rest)} style={style as StyleProp<ViewStyle>}>{children}</View>
+      <View {...withoutClass(rest)} style={placed(style) as StyleProp<ViewStyle>}>{children}</View>
     </Carried.Provider>
   );
 }
@@ -510,7 +511,7 @@ function AnimatedViewBox({ style, bottomAnchored, children, ...rest }: HostProps
   const document = useDocumentScroll();
   const anchored = document !== null && document.viewport > 0 && bottomAnchored === true;
   const correction = document === null || !anchored ? 0 : document.viewport - document.content;
-  const painted = document === null ? style : [style, { transform: [{ translateY: Animated.add(document.y, correction) }] }];
+  const painted = document === null ? placed(style) : [placed(style), { transform: [{ translateY: Animated.add(document.y, correction) }] }];
   return (
     <Carried.Provider value={inheritedText(carried, style)}>
       <Animated.View {...withoutClass(rest)} style={painted as StyleProp<ViewStyle>}>{children}</Animated.View>
@@ -546,7 +547,7 @@ function StickyViewBox({ style, children, ...rest }: HostProps) {
     : top <= 0
       ? document.y
       : document.y.interpolate({ inputRange: [-1, 0, top, top + 1, 1e9], outputRange: [0, 0, 0, 1, 1e9] });
-  const painted = shift === null ? style : [style, { transform: [{ translateY: shift }] }];
+  const painted = shift === null ? placed(style) : [placed(style), { transform: [{ translateY: shift }] }];
   return (
     <Carried.Provider value={inheritedText(carried, style)}>
       <Animated.View ref={view as never} {...withoutClass(rest)} style={painted as StyleProp<ViewStyle>}>{children}</Animated.View>
@@ -559,7 +560,7 @@ function InputBox({ style, children, ...rest }: HostProps) {
   const own = inheritedText(carried, style);
   return (
     <Carried.Provider value={own}>
-      <TextInput {...withoutClass(rest)} style={[style, textStyle(own, families)]}>{children}</TextInput>
+      <TextInput {...withoutClass(rest)} style={[placed(style), textStyle(own, families)]}>{children}</TextInput>
     </Carried.Provider>
   );
 }
@@ -568,7 +569,7 @@ function PressBox({ style, children, ...rest }: HostProps) {
   const carried = useContext(Carried);
   return (
     <Carried.Provider value={inheritedText(carried, style)}>
-      <Pressable {...withoutClass(rest)} style={style as StyleProp<ViewStyle>}>{children}</Pressable>
+      <Pressable {...withoutClass(rest)} style={placed(style) as StyleProp<ViewStyle>}>{children}</Pressable>
     </Carried.Provider>
   );
 }
@@ -1736,8 +1737,19 @@ const element = () => ({
   getRootNode() {
     return this;
   },
+  // A focus scope keeps guards at the ends of the body by inserting them next to
+  // the first and last child, and a node that cannot be inserted leaves the
+  // scope with nothing to put there: measured on the first menu the app opened,
+  // "document.body.insertAdjacentElement is not a function" stopped its render.
+  insertAdjacentElement: () => null,
+  remove: () => undefined,
   compareDocumentPosition: () => 0,
-  getBoundingClientRect: () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 }),
+  // A node of this target has no box of its own until a view is behind it: the
+  // host puts the box a native view measured on the element it hands to a ref,
+  // and a popover asks for it to place its content.
+  getBoundingClientRect() {
+    return this.__rect ?? { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 };
+  },
   getClientRects: () => [],
   focus() {},
   blur() {},
@@ -2289,6 +2301,17 @@ const install = () => {
     dispatchEvent: dispatch,
   };
   target.matchMedia ??= query;
+  // A focus scope walks the nodes of the box it guards by observing them, and a
+  // name that does not exist is a throw: measured on the first menu the app
+  // opened, "Property 'MutationObserver' doesn't exist" stopped its render. The
+  // target has no tree to mutate, so there is nothing to report.
+  target.MutationObserver ??= class MutationObserver {
+    observe() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  };
   target.ResizeObserver ??= ResizeObserver;
   target.Node ??= Object.assign(class Node {}, {
     ELEMENT_NODE: 1,
@@ -2395,7 +2418,19 @@ const portalless = () => {
     return;
   }
   try {
-    dom.createPortal = (children) => children;
+    // A portal is a place of the document: the body of a page, or a container the
+    // page named. A fragment is where a component collects nodes it does not want
+    // painted -- the items of a select that is closed, the text of a label off to
+    // the side -- and a browser keeps them out of the page. Painting them here put
+    // the items of a closed select over the first screen: measured on the language
+    // toggle of the app of the case.
+    dom.createPortal = (children, container) => {
+      const document = globalThis.document;
+      if (container === undefined || container === null || container === document || container === document?.body || container === document?.documentElement) {
+        return children;
+      }
+      return null;
+    };
   } catch {
     console.warn("bifrost: react-dom does not let its createPortal be replaced, so a portal of the page will throw");
   }
@@ -3327,6 +3362,48 @@ for (const [name, component] of Object.entries(extraTags)) {
 }
 `
 
+const nativePlace = `// A page that places a popup works out where it goes by measuring the page, and
+// what it measured travels as a style of a browser: a box fixed to the viewport
+// and a transform of translate(544px, 130px). react-native has neither -- an
+// absolute box stands for the fixed one, and a list of transforms stands for the
+// translate -- and a translate whose numbers are not numbers is no place at all.
+// The same mapping answers a box of the app that places itself, and the style a
+// list of styles holds.
+export function placed(style: unknown): unknown {
+  if (Array.isArray(style)) {
+    return style.map(placed);
+  }
+  if (style === null || typeof style !== "object") {
+    return style;
+  }
+  const given = { ...(style as Record<string, unknown>) };
+  if (given.position === "fixed") {
+    given.position = "absolute";
+  }
+  for (const name of Object.keys(given)) {
+    if (name.startsWith("--") || (name === "minWidth" && given[name] === "max-content")) {
+      delete given[name];
+    }
+  }
+  if (given.visibility === "hidden") {
+    delete given.visibility;
+    given.opacity = 0;
+  } else if (given.visibility === "visible") {
+    delete given.visibility;
+  }
+  const transform = given.transform;
+  if (typeof transform === "string") {
+    const translate = /^translate\(\s*(-?[\d.]+)px\s*,\s*(-?[\d.]+)px\s*\)$/.exec(transform.trim());
+    if (translate === null) {
+      delete given.transform;
+    } else {
+      given.transform = [{ translateX: Number(translate[1]) }, { translateY: Number(translate[2]) }];
+    }
+  }
+  return given;
+}
+`
+
 const nativeHostHead = `import { Children, Fragment, cloneElement, createElement, isValidElement, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Image, Linking, Modal, Platform, ScrollView, StyleSheet } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -3339,6 +3416,7 @@ import { ORIGIN } from "./origin";
 import { isBottomAnchored, isFixed, isSticky, scrollOf, splitScroll } from "./scroll";
 import { runsOf, asksForFlex } from "./runs";
 import { FormProvider, useForm, usePress, type Upload } from "./form";
+import { placed } from "./place";
 
 // A link asks the router when it is pressed, and not when this file is read: the
 // map of tags is loaded from the JSX runtime the first time a page paints a
@@ -3387,6 +3465,13 @@ function useElementRef(ref: unknown) {
       element.current = document === undefined || document.createElement === undefined ? {} : document.createElement("div");
     }
     (element.current as { native?: unknown }).native = node;
+    const measured = element.current;
+    const measure = (node as { measureInWindow?: (callback: (x: number, y: number, width: number, height: number) => void) => void }).measureInWindow;
+    if (typeof measure === "function") {
+      measure.call(node, (x: number, y: number, width: number, height: number) => {
+        (measured as { __rect?: unknown }).__rect = { x, y, width, height, top: y, left: x, right: x + width, bottom: y + height };
+      });
+    }
     if (typeof current === "function") {
       (current as (value: unknown) => void)(element.current);
       return;
@@ -4582,22 +4667,6 @@ NAMED.summary = Summary;
 //
 // And the place of an element that a page worked out by measuring the page: see
 // placed, below.
-function placed(style: unknown): unknown {
-  if (Array.isArray(style)) {
-    return style.map(placed);
-  }
-  if (style === null || typeof style !== "object") {
-    return style;
-  }
-  const transform = (style as Record<string, unknown>).transform;
-  if (typeof transform !== "string" || !/NaN|Infinity/.test(transform)) {
-    return style;
-  }
-  const rest = { ...(style as Record<string, unknown>) };
-  delete rest.transform;
-  return rest;
-}
-
 export function nativeProps(props: unknown, tag?: string): unknown {
   if (props === null || typeof props !== "object") {
     return props;
@@ -4625,6 +4694,20 @@ export function nativeProps(props: unknown, tag?: string): unknown {
     delete given.onClick;
     const pressed = given.onPress as (() => void) | undefined;
     given.onPress = pressed === undefined ? click : () => { pressed(); click(); };
+  }
+  // A menu of the web opens on the pointer going down, not on the click that
+  // follows: the trigger of a select listens to onPointerDown, and a press that
+  // only answered onClick left the menu closed. Measured on the language toggle
+  // of the app of the case. The event a browser hands it is one the trigger can
+  // read -- the left button, no ctrl -- and the press of a target stands for it.
+  if (given.onPress === undefined && typeof given.onPointerDown === "function") {
+    const down = given.onPointerDown as (event: unknown) => void;
+    delete given.onPointerDown;
+    given.onPress = () => {
+      down({ button: 0, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, pointerType: "touch", preventDefault: () => undefined, stopPropagation: () => undefined });
+    };
+  } else {
+    delete given.onPointerDown;
   }
   // A page places a popup by measuring the page, and what it measured arrives as
   // a transform of the style: react-native reads that string too, and refuses one
@@ -4827,6 +4910,7 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/navigation.tsx", nativeNavigation},
 	{"bifrost/screen.tsx", nativeScreen},
 	{"bifrost/text-style.js", nativeTextStyle},
+	{"bifrost/place.ts", nativePlace},
 	{"bifrost/text.tsx", nativeTextModule},
 	{"bifrost/types.d.ts", nativeTypes},
 }
