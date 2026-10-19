@@ -1,6 +1,6 @@
-.PHONY: check test race vet gate demo native-html native-row native-selectors native-events native-scroll native-intent bench fuzz throughput integration dev-integration reproducible
+.PHONY: check test race vet gate demo native-html native-row native-selectors native-events native-scroll native-intent native-text-style bench fuzz throughput integration dev-integration reproducible
 
-check: test race vet gate native-html native-row native-selectors native-events native-scroll native-intent demo
+check: test race vet gate native-html native-row native-selectors native-events native-scroll native-intent native-text-style demo
 
 test:
 	@test -z "$$(gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'))" || (gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'); exit 1)
@@ -50,6 +50,11 @@ native-scroll:
 native-intent:
 	bun ./scripts/native-intent.mjs
 
+# What a browser hands down to the text inside a box, and which font file has the
+# weight a rule asked for, which is a string of Go too.
+native-text-style:
+	bun ./scripts/native-text-style.mjs
+
 bench:
 	go test -run '^$$' -bench . -benchmem ./...
 
@@ -76,6 +81,7 @@ integration:
 	bun ./scripts/native-events.mjs
 	bun ./scripts/native-scroll.mjs
 	bun ./scripts/native-intent.mjs
+	bun ./scripts/native-text-style.mjs
 
 dev-integration:
 	bash ./scripts/dev-integration.sh

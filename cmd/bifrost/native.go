@@ -309,6 +309,171 @@ function withRowDirection(stylesheet) {
 module.exports = { withRowDirection };
 `
 
+// A browser hands the typeface, the size, the weight and the colour of a box to
+// every word inside it. A native view hands nothing: react-native passes text
+// styles from a Text to the Text inside it and stops at a View, so a size
+// written on a wrapper reaches the browser and no screen. The properties a
+// browser inherits are collected on the way down here, and folded in where the
+// words are.
+//
+// The other half is the typeface. A native screen picks a font by family and
+// loads it as a file, so an app that ships one file per weight gets a family of
+// its own for each one, and the weight a rule asked for has to become part of
+// the name it looks for. The files are declared by the app and loaded by the
+// generated layout; see ./fonts.
+const nativeTextStyle = `// A browser hands these down, so a box keeps them for what it holds. Only these
+// keys travel: a margin is the box's own and is not inherited anywhere.
+const INHERITED = ["color", "fontFamily", "fontSize", "fontStyle", "fontWeight", "letterSpacing", "lineHeight", "textAlign", "textTransform"];
+
+// The two weights a stylesheet may spell, and the number a font file is named
+// with.
+const NAMED = { normal: 400, bold: 700 };
+
+function weightOf(value) {
+  if (typeof value === "number") {
+    return value > 0 ? value : null;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+  const said = value.trim().toLowerCase();
+  if (said === "") {
+    return null;
+  }
+  if (NAMED[said]) {
+    return NAMED[said];
+  }
+  const number = Number(said);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+// The weight of the files the app ships that is closest to the one asked for,
+// which is how a browser matches a weight it has no file for. A tie goes to the
+// heavier one.
+function nearest(weights, want) {
+  let best = weights[0];
+  for (const weight of weights) {
+    const distance = Math.abs(weight - want);
+    const winning = Math.abs(best - want);
+    if (distance < winning || (distance === winning && weight > best)) {
+      best = weight;
+    }
+  }
+  return best;
+}
+
+// What a box hands to what it holds: the text properties of its own style, over
+// the ones it was handed.
+function inheritedText(carried, style) {
+  const out = { ...(carried || {}) };
+  for (const one of Array.isArray(style) ? style : [style]) {
+    if (!one || typeof one !== "object") {
+      continue;
+    }
+    for (const key of INHERITED) {
+      if (one[key] !== undefined) {
+        out[key] = one[key];
+      }
+    }
+  }
+  return out;
+}
+
+// The text properties of one element, with the family it names turned into the
+// file that carries the weight it asks for. A family the app does not ship, or a
+// weight that arrives as something else, is left exactly as it was, and a
+// browser's initial weight is 400.
+function textStyle(carried, families) {
+  const out = { ...(carried || {}) };
+  const family = out.fontFamily;
+  const weights = typeof family === "string" ? (families || {})[family] : undefined;
+  if (!Array.isArray(weights) || weights.length === 0) {
+    return out;
+  }
+  const weight = weightOf(out.fontWeight);
+  out.fontFamily = family + " " + nearest(weights, weight === null ? 400 : weight);
+  delete out.fontWeight;
+  return out;
+}
+
+module.exports = { inheritedText, textStyle };
+`
+
+// The components the tag map paints with, wrapped so that what a browser
+// inherits keeps travelling down the tree and a weight reaches the file that has
+// it. Each wrapper is styled by the style runtime first -- that is the only
+// place where the rules of an element are already merged into one style -- and
+// then hands that style on: a Text folds what it carries into what it paints,
+// and a box keeps what the words inside it should inherit.
+const nativeTextModule = `import { createContext, useContext, type ReactNode } from "react";
+import { Pressable, Text, TextInput, View } from "react-native";
+import { styled } from "react-native-css/native";
+import * as declaredFonts from "./fonts";
+import { inheritedText, textStyle } from "./text-style";
+
+// The weights of each family the app ships, if it ships any: a project that
+// keeps a module of its own here declares no families, and every name is left
+// exactly as the app wrote it.
+const families = (declaredFonts.families ?? {}) as Record<string, number[]>;
+
+// What a box hands to the text inside it. Empty until a box sets something, so
+// an app that inherits nothing pays a context read and no style.
+const Carried = createContext<Record<string, unknown>>({});
+
+type HostProps = { style?: unknown; children?: ReactNode } & Record<string, unknown>;
+
+// The class of an element is the style it resolved to, and handing it on would
+// resolve it a second time.
+function withoutClass(rest: Record<string, unknown>) {
+  const painted = { ...rest };
+  delete painted.className;
+  return painted;
+}
+
+function TextView({ style, children, ...rest }: HostProps) {
+  const carried = useContext(Carried);
+  const own = inheritedText(carried, style);
+  return (
+    <Carried.Provider value={own}>
+      <Text {...withoutClass(rest)} style={[style, textStyle(own, families)]}>{children}</Text>
+    </Carried.Provider>
+  );
+}
+
+function ViewBox({ style, children, ...rest }: HostProps) {
+  const carried = useContext(Carried);
+  return (
+    <Carried.Provider value={inheritedText(carried, style)}>
+      <View {...withoutClass(rest)} style={style}>{children}</View>
+    </Carried.Provider>
+  );
+}
+
+function InputBox({ style, children, ...rest }: HostProps) {
+  const carried = useContext(Carried);
+  const own = inheritedText(carried, style);
+  return (
+    <Carried.Provider value={own}>
+      <TextInput {...withoutClass(rest)} style={[style, textStyle(own, families)]}>{children}</TextInput>
+    </Carried.Provider>
+  );
+}
+
+function PressBox({ style, children, ...rest }: HostProps) {
+  const carried = useContext(Carried);
+  return (
+    <Carried.Provider value={inheritedText(carried, style)}>
+      <Pressable {...withoutClass(rest)} style={style}>{children}</Pressable>
+    </Carried.Provider>
+  );
+}
+
+export const StyledText = styled(TextView);
+export const StyledView = styled(ViewBox);
+export const StyledPressable = styled(PressBox);
+export const StyledTextInput = styled(InputBox);
+`
+
 // A flex container means a row to a browser and a column to a native view, and
 // the collection of styles is the last place where a rule still says what it
 // asked for, before another rule for the same element is merged into it. The
@@ -1892,7 +2057,9 @@ func nativeLayout(overlay string) string {
 	if setup := nativeOverlayModule(overlay, "bifrost/setup"); setup != "" {
 		fmt.Fprintf(&imports, "import \"../%s\";\n", setup)
 	}
-	imports.WriteString("import \"../bifrost/net\";\n\n")
+	imports.WriteString("import \"../bifrost/net\";\n")
+	imports.WriteString("import * as declaredFonts from \"../bifrost/fonts\";\n")
+	imports.WriteString("import { useFonts } from \"expo-font\";\n\n")
 	return imports.String() + nativeLayoutBody
 }
 
@@ -1967,7 +2134,20 @@ function Shell() {
   );
 }
 
+// The typeface of the app is a file a screen has to load, and a native screen
+// has no font to fall back to but the one of the system, which is another
+// typeface with other widths. Measured on the app of the case, before this
+// existed: with the system font the same paragraph of the landing broke at
+// another word. So nothing is painted until the fonts of the app are in, and an
+// app that ships none is in on the first frame.
+const FONTS = declaredFonts.fonts ?? {};
+const NONE = Object.keys(FONTS).length === 0;
+
 export default function Layout() {
+  const [ready] = useFonts(FONTS);
+  if (!NONE && !ready) {
+    return null;
+  }
   return (
     <SafeAreaProvider>
       <StatusBar style="auto" />
@@ -2306,7 +2486,8 @@ export function useRouter() {
 
 const nativeScreen = `import { router, useIsFocused, useLocalSearchParams, usePathname } from "expo-router";
 import { Component, useEffect, useState, type ReactNode } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text } from "react-native";
+import { StyledView as View } from "./text";
 import { loadPage, type PageData } from "./data";
 import { onRefresh } from "./refresh";
 import { setAddress } from "./route";
@@ -2697,7 +2878,8 @@ for (const [name, component] of Object.entries(extraTags)) {
 `
 
 const nativeHostHead = `import { Children, Fragment, createElement, isValidElement, type ReactNode } from "react";
-import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Image, Linking, ScrollView } from "react-native";
+import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View } from "./text";
 import { scrollOf, splitScroll } from "./scroll";
 import { runsOf } from "./runs";
 import { navigate } from "virtual:bifrost/navigation";
@@ -3230,6 +3412,109 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/refresh.ts", nativeRefresh},
 	{"bifrost/navigation.tsx", nativeNavigation},
 	{"bifrost/screen.tsx", nativeScreen},
+	{"bifrost/text-style.js", nativeTextStyle},
+	{"bifrost/text.tsx", nativeTextModule},
+}
+
+// The fonts an app ships, as its overlay declares them: `<overlay>/fonts.json`
+// holds one family and a file per weight. A native screen loads a font as a
+// file and picks it by family, so a weight is a family of its own -- the layout
+// loads every file under the name a rule looks for, and ./text-style folds the
+// weight a rule asked for into that name.
+type nativeFont struct {
+	Family string
+	Weight int
+	File   string
+}
+
+func nativeFonts(overlay string) ([]nativeFont, error) {
+	path := filepath.Join(overlay, "fonts.json")
+	content, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var declared []struct {
+		Family string `json:"fontFamily"`
+		Fonts  []struct {
+			Path   string `json:"path"`
+			Weight int    `json:"weight"`
+		} `json:"fonts"`
+	}
+	if err := json.Unmarshal(content, &declared); err != nil {
+		return nil, fmt.Errorf("bifrost: %s: %w", path, err)
+	}
+	seen := map[nativeFont]bool{}
+	fonts := make([]nativeFont, 0, len(declared))
+	for _, family := range declared {
+		if family.Family == "" || len(family.Fonts) == 0 {
+			return nil, fmt.Errorf("bifrost: %s: a family has no name or no files", path)
+		}
+		for _, font := range family.Fonts {
+			if font.Path == "" || font.Weight <= 0 {
+				return nil, fmt.Errorf("bifrost: %s: a file of %s has no path or no weight", path, family.Family)
+			}
+			// A file the app does not ship is a bundle that fails minutes into a
+			// build; here it fails where the app can see it.
+			if !nativeOverlayHas(overlay, font.Path) {
+				return nil, fmt.Errorf("bifrost: %s: the overlay does not ship %s", path, font.Path)
+			}
+			one := nativeFont{Family: family.Family, Weight: font.Weight, File: font.Path}
+			if seen[one] {
+				return nil, fmt.Errorf("bifrost: %s: %s names weight %d twice", path, family.Family, font.Weight)
+			}
+			seen[one] = true
+			fonts = append(fonts, one)
+		}
+	}
+	sort.SliceStable(fonts, func(i, j int) bool {
+		if fonts[i].Family != fonts[j].Family {
+			return fonts[i].Family < fonts[j].Family
+		}
+		return fonts[i].Weight < fonts[j].Weight
+	})
+	return fonts, nil
+}
+
+// The module the layout loads: the name of each file, and the weights each
+// family ships, so the text of a page finds the file for the weight a rule asked
+// for. An app that declares no font gets both maps empty and renders exactly as
+// it did before.
+func nativeFontsModule(fonts []nativeFont) string {
+	weights := map[string][]int{}
+	order := []string{}
+	files := make([]string, 0, len(fonts))
+	for _, font := range fonts {
+		if _, known := weights[font.Family]; !known {
+			order = append(order, font.Family)
+		}
+		weights[font.Family] = append(weights[font.Family], font.Weight)
+		name := strconv.Quote(font.Family + " " + strconv.Itoa(font.Weight))
+		files = append(files, fmt.Sprintf("  %s: require(%s),", name, strconv.Quote("../"+filepath.ToSlash(font.File))))
+	}
+	var families strings.Builder
+	for _, family := range order {
+		named := make([]string, 0, len(weights[family]))
+		for _, weight := range weights[family] {
+			named = append(named, strconv.Itoa(weight))
+		}
+		fmt.Fprintf(&families, "  %s: [%s],\n", strconv.Quote(family), strings.Join(named, ", "))
+	}
+	var module strings.Builder
+	module.WriteString("// The fonts the app ships, as its overlay declares them, and as the generated\n")
+	module.WriteString("// layout loads them: one file per weight, under the name a rule looks for -- the\n")
+	module.WriteString("// family the stylesheet names, and the weight it asked for.\n")
+	module.WriteString("export const families: Record<string, number[]> = {\n")
+	module.WriteString(families.String())
+	module.WriteString("};\n\nexport const fonts: Record<string, number> = {\n")
+	module.WriteString(strings.Join(files, "\n"))
+	if len(files) > 0 {
+		module.WriteString("\n")
+	}
+	module.WriteString("};\n")
+	return module.String()
 }
 
 func nativePackageManifest() map[string]any {
@@ -3239,6 +3524,7 @@ func nativePackageManifest() map[string]any {
 		"dependencies": map[string]any{
 			"expo":                           "~57.0.28",
 			"expo-constants":                 "~57.0.21",
+			"expo-font":                      "~57.0.4",
 			"expo-linking":                   "~57.0.12",
 			"expo-router":                    "~57.0.26",
 			"expo-status-bar":                "~57.0.1",
@@ -3361,6 +3647,15 @@ func writeNativeProject(native string, app appRouter, origin, overlay string) (b
 			return false, err
 		}
 	}
+	// The fonts the app declares, read before the project is written: a file the
+	// overlay does not ship is an error here and not a bundle that fails later.
+	fonts, err := nativeFonts(overlay)
+	if err != nil {
+		return false, err
+	}
+	if err := written.write(native, "bifrost/fonts.ts", nativeFontsModule(fonts), 0o644); err != nil {
+		return false, err
+	}
 	// The layout and the tag map are written with the overlay in hand, because
 	// what they contain depends on what the app ships next to them.
 	for name, content := range map[string]string{
@@ -3446,7 +3741,10 @@ func copyNativeOverlay(native, overlay string, screens map[string]appRoute, writ
 		if err := checkNativeOverlayRoute(name, screens); err != nil {
 			return err
 		}
-		if name == "package.json" {
+		// The two files of the overlay the generator reads instead of copying:
+		// the manifest, which is merged, and the fonts, which are written into
+		// bifrost/fonts.ts.
+		if name == "package.json" || name == "fonts.json" {
 			continue
 		}
 		content, err := os.ReadFile(filepath.Join(overlay, filepath.FromSlash(name)))

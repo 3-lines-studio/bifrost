@@ -278,7 +278,7 @@ Run `bash scripts/navigation-integration.sh` for production and development brow
 
 The generated project is a build artifact. Every run rewrites `app/` and `bifrost/`, so a screen the route table no longer has disappears, and nothing written there is worth keeping.
 
-An app keeps its own files in a directory next to `app/`: `native/` by default, `--from` to move it. They are copied over the generated project after everything else, so they win, and `bifrost native` never writes them. A session store, a login screen, the client the app talks to the server with: all of it goes there and survives every regeneration. When the directory exists, the command prints where it read them from.
+An app keeps its own files in a directory next to `app/`: `native/` by default, `--from` to move it. They are copied over the generated project after everything else, so they win, and `bifrost native` never writes them. A session store, a login screen, the client the app talks to the server with: all of it goes there and survives every regeneration. When the directory exists, the command prints where it read them from. Two files of that directory are read and not copied: `fonts.json`, which declares the typefaces and is written into `bifrost/fonts.ts`, and `package.json`, which is merged into the generated one.
 
 A resolver belongs to that directory too. The two seams a native target needs, the navigation module and the jsx runtime, live in `bifrost/metro.js` as `withBifrost`, and the generated `metro.config.js` is the three lines that install them. An app that needs a resolver of its own replaces `metro.config.js` whole and wraps the helper, so nothing has to be written twice:
 
@@ -385,6 +385,58 @@ Tailwind 4 finds its own candidates in every file it can reach, and the generate
 The scan is the only thing that ever finds a class, and a class that is not scanned is not reported anywhere: it compiles to nothing and the view is quietly missing its styles. So the list has to be complete, and that is the trap. `../../app` and `../../components` reach the web app's tree; every file the overlay ships is under `./`, including the generated `app/` and whatever else the overlay puts beside it. Measured on a real overlay: with the first two lines alone, a class written only in `app-components/` is absent from the stylesheet; with all four it is there.
 
 The gain is small enough that leaving `source(none)` out is the better default. Measured on that same overlay, the whole stylesheet: 25560 bytes and eight dropped-value warnings with automatic detection, 24947 and six with `source(none)`, and the two that go are the ones the generated file produced. A couple hundred bytes is not worth a list that silently costs a class the day somebody adds a directory.
+
+### Fonts
+
+A native screen picks a font by family and loads it as a file; a web page picks
+one out of a stack and the browser finds it. The app declares the typeface its
+stylesheet names in `native/fonts.json`, with the file of each weight:
+
+```json
+[
+  {
+    "fontFamily": "Plus Jakarta Sans Variable",
+    "fonts": [
+      { "path": "assets/fonts/jakarta-400.ttf", "weight": 400 },
+      { "path": "assets/fonts/jakarta-500.ttf", "weight": 500 }
+    ]
+  }
+]
+```
+
+The file of a weight the app does not ship is a file the target does not have,
+and a variable font asked for by name comes out at its default instance --
+measured on Outfit, that is 100, Thin -- so one file per weight is the shape that
+works. A weight that is asked for and not declared resolves to the closest one,
+which is how a browser matches a weight it has no file for, and 400 when the rule
+names none.
+
+The generator writes the map to `bifrost/fonts.ts`, the layout loads it with
+`useFonts` before it paints the first frame, and a rule that asks for the family
+at a weight looks for `Plus Jakarta Sans Variable 500`: the file is loaded under
+that name because a native screen has no weight to pick from a family. The
+config plugin of `expo-font` was tried before this and does not serve: measured
+on the emulator, the family it registers with `ReactFontManager.addCustomFont`
+leaves a `Text` that names it painting in the system font, while the same name
+loaded from the JS side does change the typeface. So the fonts are loaded from
+there, and the file is generated: declaring it in the overlay would replace the
+name every rule looks for.
+
+A browser also hands the typeface, the size, the weight and the colour of a box
+to every word inside it, and a native view hands nothing: react-native passes
+those from a `Text` to the `Text` inside it and stops at a `View`. The tags the
+map paints go through the wrappers of `bifrost/text.tsx`, which carry the
+properties a browser inherits down the tree -- `color`, `fontFamily`, `fontSize`,
+`fontStyle`, `fontWeight`, `letterSpacing`, `lineHeight`, `textAlign`,
+`textTransform` -- and fold the weight a rule asked for into the family where the
+words are. Only these travel; a margin stays the box's own, as it does on the
+web.
+
+The fold happens where a browser merges, not on the stylesheet: the family may be
+one rule (`font-sans` on a wrapper) and the weight another (`font-medium` on the
+paragraph), and the wrappers see the style of an element after the compiler has
+merged every rule that reaches it. A family the app does not declare is left
+exactly as it was.
 
 ### One page, two targets
 
