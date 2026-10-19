@@ -1334,6 +1334,11 @@ func TestNativeShipsTheDocumentShimWithoutTurningItOn(t *testing.T) {
 		"target.matchMedia ??=",
 		"target.ResizeObserver ??= ResizeObserver",
 		"target.Node ??=",
+		// A control asks what an element is with instanceof, and a name that does
+		// not exist is a ReferenceError and not a false.
+		`"HTMLFormElement"`,
+		// A control writes a native element through the descriptor of its prototype.
+		`property("HTMLInputElement", "checked");`,
 		// Closing a sheet through its X, the library that hands focus back asks
 		// "event instanceof win.KeyboardEvent": an instanceof whose right side is
 		// not there is a throw, and in a release build that throw ends the app.
@@ -1350,10 +1355,11 @@ func TestNativeShipsTheDocumentShimWithoutTurningItOn(t *testing.T) {
 			t.Fatalf("the shim does not answer %s", said)
 		}
 	}
-	// A shim that lied about the cookie it hands back is worse than one that says
-	// there is none.
-	if !strings.Contains(dom, "get cookie() {") || !strings.Contains(dom, "return String();") {
-		t.Fatal("the shim hands back a cookie that is not there")
+	// A cookie a page writes is one it reads again: the theme of the app is set
+	// through document.cookie, and a getter with no setter stops the effect that
+	// sets it.
+	if !strings.Contains(dom, "set cookie(value) {") || !strings.Contains(dom, "return cookieText();") || !strings.Contains(dom, "function writeCookie(text) {") {
+		t.Fatal("the shim does not answer the cookie a page wrote")
 	}
 	// Nothing of it is installed at the cost of what is already there: every
 	// assignment is a fallback, so an app that filled one in keeps its own.
@@ -1384,6 +1390,24 @@ func TestNativeEveryGeneratedJavaScriptIsJavaScript(t *testing.T) {
 		}
 		if at := annotation.FindStringIndex(file.Content); at != nil {
 			t.Fatalf("%s carries a type annotation: %q", file.Name, file.Content[at[0]:at[1]])
+		}
+	}
+}
+
+func TestNativeTheMapAsksTheRouterWhenALinkIsPressed(t *testing.T) {
+	// Measured on the app of the case: the map of tags is loaded from the JSX
+	// runtime while expo-router may still be evaluating, and an import of the
+	// router there was a cycle -- expo-router came back half built, the map
+	// stopped halfway, and the first screen painted an Image that was undefined.
+	if strings.Contains(nativeHostHead, `import { navigate } from "virtual:bifrost/navigation"`) {
+		t.Fatal("the map imports the router while the page graph is still loading")
+	}
+	for _, said := range []string{
+		"function navigate(href: string): void {",
+		`require("virtual:bifrost/navigation")`,
+	} {
+		if !strings.Contains(nativeHostHead, said) {
+			t.Fatalf("the map does not carry %q", said)
 		}
 	}
 }
