@@ -379,14 +379,32 @@ function inheritedText(carried, style) {
   return out;
 }
 
+// The family the app declared, by the name a stylesheet wrote. The compiler
+// writes one as a single token -- measured, 'DejaVu Serif' reaches the style as
+// 'DejaVuSerif' -- and a family of the web is case-insensitive, so the name is
+// compared with its spaces and its case folded away. What comes back is the
+// declared spelling, which is the one the layout loaded.
+function declaredFamily(name, families) {
+  if (typeof name !== "string") {
+    return null;
+  }
+  const said = name.replace(/\s+/g, "").toLowerCase();
+  for (const family of Object.keys(families || {})) {
+    if (family.replace(/\s+/g, "").toLowerCase() === said) {
+      return family;
+    }
+  }
+  return null;
+}
+
 // The text properties of one element, with the family it names turned into the
 // file that carries the weight it asks for. A family the app does not ship, or a
 // weight that arrives as something else, is left exactly as it was, and a
 // browser's initial weight is 400.
 function textStyle(carried, families) {
   const out = { ...(carried || {}) };
-  const family = out.fontFamily;
-  const weights = typeof family === "string" ? (families || {})[family] : undefined;
+  const family = declaredFamily(out.fontFamily, families);
+  const weights = family === null ? undefined : families[family];
   if (!Array.isArray(weights) || weights.length === 0) {
     return out;
   }
@@ -512,10 +530,14 @@ module.exports = upstream;
 // is expanded instead, because its alternatives are selectors in their own
 // right.
 //
-// It runs over the stylesheet the app wrote, before the pipeline that turns
-// Tailwind's directives into rules: measured, a rule of the app's own survives
-// that pipeline whole -- only the utilities Tailwind generates afterwards are
-// out of reach, and none of them names a tag.
+// It runs over the stylesheet the pipeline produced, and not over the file the
+// app wrote: the rules that name a tag are the ones Tailwind and its plugins
+// generate -- the preflight of v4 puts the default typeface of the stylesheet on
+// `html`, every reset puts a margin on `p` -- and rewriting the file before the
+// directives are expanded left all of them in place and dropped. Measured on a
+// stylesheet whose only source was `@import "tailwindcss"`: expanded first, the
+// `html, :host` rule becomes the class the screen paints, and the typeface of
+// the theme reaches the text.
 const nativeSelectors = `// The class an element carries because of the tag it was written as.
 function classOf(tag) {
   return "native-" + tag;
@@ -630,10 +652,14 @@ function withTagClasses(css, onLost) {
 module.exports = { withTagClasses, classOf };
 `
 
-// Runs in the transformer, in place of whatever react-native-css installed, and
-// hands every file to it unchanged. What it adds is a second look at a
-// stylesheet, because the compiler collects the values it cannot express and the
-// transformer never asks for them.
+// Runs in the transformer, in place of whatever react-native-css installed.
+// Every file but a stylesheet is handed on unchanged. A stylesheet is the one
+// thing it does itself, because the order of the steps is the whole point: the
+// web pipeline expands Tailwind, the selectors that name a tag become classes on
+// what comes out, and only then is it compiled for the target. The runtime the
+// app installed compiles the stylesheet as it gets it, which is before the
+// directives are expanded, so the rules the pipeline generates were never
+// rewritten and every one of them was dropped.
 const nativeCSSWarnings = `const path = require("node:path");
 const { unstable_transformerPath } = require("@expo/metro-config");
 const { compile } = require("react-native-css/compiler");
@@ -705,17 +731,8 @@ function className(selector) {
   );
 }
 
-async function report(config, projectRoot, filePath, data, options) {
-  let css;
-  try {
-    const web = await worker.transform(config, projectRoot, filePath, data, { ...options, platform: "web" });
-    css = web.output[0].data.css.code.toString();
-  } catch {
-    // A stylesheet that does not survive the web pipeline has nothing to say.
-    return;
-  }
+function report(projectRoot, filePath, css, warnings) {
   const where = path.relative(projectRoot, filePath) || filePath;
-  const warnings = compile(css, { ...config.reactNativeCSS, filename: filePath, projectRoot }).warnings();
   for (const one of dropped(css, warnings)) {
     const said = "bifrost: " + where + (one.at === "" ? "" : ": " + one.at) + ": " + one.property + ": " + one.value + " has no native counterpart";
     if (reported.has(said)) {
@@ -752,9 +769,23 @@ function lostSelectors(config, projectRoot, filePath, options) {
   };
 }
 
-// Whatever transformer the app installed, handed every file unchanged. What this
-// adds is a second look at a stylesheet, which is the only thing the compiler
-// does not already do.
+// The module Metro bundles for a stylesheet on a native target: one that injects
+// the compiled sheet into the collection the whole app reads. It is what the
+// runtime the app installed writes, spelled here because this file is the one
+// that compiles now.
+function injected(stylesheet) {
+  return Buffer.from(
+    'import { StyleCollection } from "react-native-css/native-internal";\n' +
+      "StyleCollection.inject(" + JSON.stringify(stylesheet) + ");export {};",
+  );
+}
+
+// Whatever transformer the app installed, handed every file unchanged. A
+// stylesheet is compiled here, and in this order: the web pipeline expands
+// Tailwind, the selectors that name a tag become the classes the map paints, and
+// the result is what the target compiles. The step that would otherwise be
+// missing is the second one, and without it the preflight of the theme and the
+// rules of a plugin compile to nothing.
 //
 // Metro does not hand a transformer the config the app wrote: it hands it
 // config.transformer on its own, flattened, minus the three keys it keeps for
@@ -766,27 +797,28 @@ function lostSelectors(config, projectRoot, filePath, options) {
 module.exports.transform = async (config, projectRoot, filePath, data, options) => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const upstream = require(config.bifrostUpstreamTransformer ?? config.transformer?.bifrostUpstreamTransformer ?? unstable_transformerPath);
-  // A selector that names a tag is a rule a native view cannot answer, and the
-  // compiler drops it in silence. What a native view has is a class, and the map
-  // paints every element with one named after its tag, so the element selectors
-  // are rewritten before the pipeline that builds the utilities: measured, a rule
-  // of the app's own survives that pipeline whole, and only what Tailwind
-  // generates afterwards is out of reach -- and none of that names a tag. It is
-  // not a diagnostic, so it goes in on every native platform and in a build as
-  // well.
-  const css = options.type !== "asset" && isStylesheet(filePath);
-  const source =
-    css && options.platform !== "web"
-      ? withTagClasses(data, lostSelectors(config, projectRoot, filePath, options))
-      : data;
-  const result = await upstream.transform(config, projectRoot, filePath, source, options);
-  // The report costs a second pass over the stylesheet -- the web pipeline the
-  // native one already ran -- and it is a development diagnostic, so a build
-  // does not pay for it. A stylesheet the app did not write is one it cannot
-  // fix, and a node_modules tree has hundreds of them.
-  if (options.dev !== false && options.platform !== "web" && css && !filePath.includes("node_modules")) {
-    await report(config, projectRoot, filePath, source, options);
+  if (options.type === "asset" || options.platform === "web" || !isStylesheet(filePath)) {
+    return upstream.transform(config, projectRoot, filePath, data, options);
   }
+  const web = await worker.transform(config, projectRoot, filePath, data, { ...options, platform: "web" });
+  const produced = web.output[0]?.data?.css?.code;
+  const expanded = produced === undefined ? data.toString("utf8") : produced.toString();
+  const source = withTagClasses(expanded, lostSelectors(config, projectRoot, filePath, options));
+  const compiled = compile(source, {
+    ...(config.reactNativeCSS ?? options.reactNativeCSS),
+    filename: filePath,
+    projectRoot,
+  });
+  // The report is a development diagnostic, so a build does not pay for it. A
+  // stylesheet the app did not write is one it cannot fix, and a node_modules
+  // tree has hundreds of them.
+  if (options.dev !== false && !filePath.includes("node_modules")) {
+    report(projectRoot, filePath, source, compiled.warnings());
+  }
+  const result = await upstream.transform(config, projectRoot, filePath + ".js", injected(compiled.stylesheet()), options);
+  // Metro asked this file for its CSS and got a module: the sheet is inside it,
+  // and a second copy of it as an asset is a file nothing reads.
+  result.output[0].data.css = { skipCache: true, code: "" };
   return result;
 };
 `
@@ -2600,11 +2632,17 @@ export function Screen({ render, params }: ScreenProps) {
   // document carries them. A class is the theme the whole tree reads, and the
   // direction is the writing direction of the tree; a language has no native
   // counterpart, because a text node here inherits no language to read from.
+  //
+  // The root of a browser is here too, and not as decoration: the stylesheet of
+  // the app still writes the typeface, the line height and the colours of html
+  // and body, and the selector rewrite names those two tags with a class. A
+  // screen is the document of this page, so it paints them. Measured: with the
+  // preflight of Tailwind expanded, the default typeface of the theme is a rule
+  // of html, and a screen without this painted every text with the font of the
+  // system.
   const direction = document.dir === "rtl" || document.dir === "ltr" ? document.dir : undefined;
-  if (document.class === undefined && direction === undefined) {
-    return content;
-  }
-  return <View className={document.class} style={direction === undefined ? undefined : { direction }}>{content}</View>;
+  const root = ["native-html", "native-body", document.class].filter((one) => typeof one === "string" && one !== "").join(" ");
+  return <View className={root} style={direction === undefined ? undefined : { direction }}>{content}</View>;
 }
 
 // The boundary hands the failure up instead of painting it: what replaces the
@@ -3522,12 +3560,18 @@ func nativePackageManifest() map[string]any {
 		"private": true,
 		"main":    "expo-router/entry",
 		"dependencies": map[string]any{
-			"expo":                           "~57.0.28",
-			"expo-constants":                 "~57.0.21",
-			"expo-font":                      "~57.0.4",
-			"expo-linking":                   "~57.0.12",
-			"expo-router":                    "~57.0.26",
-			"expo-status-bar":                "~57.0.1",
+			"expo":            "~57.0.28",
+			"expo-constants":  "~57.0.21",
+			"expo-font":       "~57.0.4",
+			"expo-linking":    "~57.0.12",
+			"expo-router":     "~57.0.26",
+			"expo-status-bar": "~57.0.1",
+			// The transformer of this target reads a stylesheet and rewrites its
+			// selectors, which takes a parser: Metro resolves it from the project,
+			// and without it every element selector is left as it was and dropped by
+			// the compiler in silence.
+			"postcss":                        "8.5.31",
+			"postcss-selector-parser":        "7.1.6",
 			"react":                          "19.2.3",
 			"react-native":                   "0.86.3",
 			"react-native-safe-area-context": "5.10.1",

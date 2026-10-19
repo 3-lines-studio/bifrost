@@ -89,6 +89,16 @@ const cases = [
     (out) => out.fontSize === 12 && out.color === "blue",
   ],
   [
+    "el compilador escribe la familia sin espacios, y se reconoce igual",
+    () => textStyle({ fontFamily: "DejaVuSerif", fontWeight: 500 }, { "DejaVu Serif": [400, 500] }),
+    (out) => out.fontFamily === "DejaVu Serif 500" && out.fontWeight === undefined,
+  ],
+  [
+    "una familia de la web no distingue mayusculas",
+    () => textStyle({ fontFamily: "dejavu serif" }, { "DejaVu Serif": [400] }),
+    (out) => out.fontFamily === "DejaVu Serif 400",
+  ],
+  [
     "correrlo dos veces es correrlo una",
     () => {
       const once = textStyle({ fontFamily: "Plus Jakarta Sans Variable", fontWeight: 500 }, families);

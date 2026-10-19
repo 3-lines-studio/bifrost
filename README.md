@@ -386,6 +386,30 @@ The scan is the only thing that ever finds a class, and a class that is not scan
 
 The gain is small enough that leaving `source(none)` out is the better default. Measured on that same overlay, the whole stylesheet: 25560 bytes and eight dropped-value warnings with automatic detection, 24947 and six with `source(none)`, and the two that go are the ones the generated file produced. A couple hundred bytes is not worth a list that silently costs a class the day somebody adds a directory.
 
+#### The order of the pipeline
+
+A stylesheet is compiled for the target here, and in the order a browser settles
+it: the web pipeline expands Tailwind, the selectors that name a tag become the
+classes the map paints (`p` becomes `.native-p`), and only what comes out is
+compiled into the module that injects it. The step in the middle is the one that
+was missing. The runtime that compiles a stylesheet as it gets it does so before
+a directive is expanded, so the rules Tailwind generates were never rewritten and
+every one of them was dropped in silence. Measured: the preflight of v4 puts the
+default typeface of the theme on `html`, and with the rewrite before the pipeline
+that rule compiled to nothing.
+
+The root of the document is a screen, so a screen paints `native-html` and
+`native-body`, which is what those two selectors are rewritten to. That is how
+the typeface, the line height and the colours the app writes for the document
+reach the text. Measured on a device: a page whose stylesheet declares its
+typeface in `@theme` and whose markup names no font at all painted with the
+typeface of the app.
+
+Two packages are part of the project because of that middle step:
+`postcss-selector-parser` rewrites a selector and `postcss` names the class a
+dropped value came from. Measured: without the parser the rewrite answers nothing,
+and every rule that names a tag compiles to nothing while nothing is said.
+
 ### Fonts
 
 A native screen picks a font by family and loads it as a file; a web page picks
@@ -446,6 +470,10 @@ painted the monospace file, a `font-semibold` paragraph with no file of its own
 painted the 700 one, and `font-mono`, a family the app does not declare, kept the
 system font. The layout holds the screen until the files are in, so the first
 painted frame was already the app's typeface.
+
+The name is matched with its spaces folded away, because the compiler writes one
+as a single token: measured, `"DejaVu Serif"` from the theme reaches the style as
+`DejaVuSerif`, and a family is case-insensitive on the web besides.
 
 ### One page, two targets
 
