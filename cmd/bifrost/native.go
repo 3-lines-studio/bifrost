@@ -25,9 +25,18 @@ type nativeFile struct {
 const nativeTSConfig = `{
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "virtual:bifrost/navigation": ["./bifrost/navigation"]
+    }
   }
 }
+`
+
+// Metro resolves the virtual module and a stylesheet; tsc does not, and both are
+// written by this generator or asked for by the layout it writes.
+const nativeTypes = `declare module "*.css";
 `
 
 const nativeMetroConfig = `const { getDefaultConfig } = require("expo/metro-config");
@@ -424,7 +433,7 @@ module.exports = { inheritedText, textStyle };
 // then hands that style on: a Text folds what it carries into what it paints,
 // and a box keeps what the words inside it should inherit.
 const nativeTextModule = `import { createContext, useContext, type ReactNode } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, Text, TextInput, View, type StyleProp, type ViewStyle } from "react-native";
 import { styled } from "react-native-css/native";
 import * as declaredFonts from "./fonts";
 import { inheritedText, textStyle } from "./text-style";
@@ -462,7 +471,7 @@ function ViewBox({ style, children, ...rest }: HostProps) {
   const carried = useContext(Carried);
   return (
     <Carried.Provider value={inheritedText(carried, style)}>
-      <View {...withoutClass(rest)} style={style}>{children}</View>
+      <View {...withoutClass(rest)} style={style as StyleProp<ViewStyle>}>{children}</View>
     </Carried.Provider>
   );
 }
@@ -481,7 +490,7 @@ function PressBox({ style, children, ...rest }: HostProps) {
   const carried = useContext(Carried);
   return (
     <Carried.Provider value={inheritedText(carried, style)}>
-      <Pressable {...withoutClass(rest)} style={style}>{children}</Pressable>
+      <Pressable {...withoutClass(rest)} style={style as StyleProp<ViewStyle>}>{children}</Pressable>
     </Carried.Provider>
   );
 }
@@ -1254,11 +1263,19 @@ export const CLOSED = 2;
 const FIRST = 1000;
 const MOST = 8000;
 
+export type StreamEvent = { type: string; data?: string; lastEventId?: string };
+type Handler = (this: EventSource, event: StreamEvent) => void;
+
 // One chunk of the protocol. An event ends at a blank line, a line that starts
 // with a colon carries nothing, and the three fields that matter are "data",
 // "id" and "event". The text arrives in pieces that cut anywhere, including the
 // middle of a line, so what is not a whole line waits for the next piece.
 export class Messages {
+  rest: string;
+  data: string[];
+  id: string | null;
+  event: string;
+
   constructor() {
     this.rest = "";
     this.data = [];
@@ -1266,7 +1283,7 @@ export class Messages {
     this.event = "";
   }
 
-  push(text) {
+  push(text: string) {
     this.rest += text;
     const out = [];
     let cut = this.rest.indexOf("\n");
@@ -1306,7 +1323,7 @@ export class Messages {
   }
 }
 
-function absolute(url) {
+function absolute(url: string | URL): string {
   if (typeof url !== "string") {
     return String(url);
   }
@@ -1317,7 +1334,22 @@ function absolute(url) {
 }
 
 export class EventSource {
-  constructor(url, options) {
+  url: string;
+  withCredentials: boolean;
+  readyState: number;
+  onopen: Handler | null;
+  onmessage: Handler | null;
+  onerror: Handler | null;
+  lastEventId: string;
+  asked: number;
+  done: boolean;
+  waiting: ReturnType<typeof setTimeout> | null;
+  request: XMLHttpRequest | null;
+  read: number;
+  messages: Messages;
+  handlers: Map<string, Handler[]>;
+
+  constructor(url: string | URL, options?: { withCredentials?: boolean }) {
     this.url = absolute(url);
     this.withCredentials = Boolean(options && options.withCredentials);
     this.readyState = CONNECTING;
@@ -1337,7 +1369,7 @@ export class EventSource {
     this.connect();
   }
 
-  addEventListener(name, handler) {
+  addEventListener(name: string, handler: Handler) {
     const list = this.handlers.get(name);
     if (list === undefined) {
       this.handlers.set(name, [handler]);
@@ -1346,7 +1378,7 @@ export class EventSource {
     list.push(handler);
   }
 
-  removeEventListener(name, handler) {
+  removeEventListener(name: string, handler: Handler) {
     const list = this.handlers.get(name);
     if (list === undefined) {
       return;
@@ -1354,14 +1386,14 @@ export class EventSource {
     this.handlers.set(name, list.filter((one) => one !== handler));
   }
 
-  dispatch(name, event) {
+  dispatch(name: string, event: StreamEvent) {
     const list = this.handlers.get(name);
     if (list !== undefined) {
       for (const handler of list.slice()) {
         handler.call(this, event);
       }
     }
-    const own = this["on" + name];
+    const own = name === "open" ? this.onopen : name === "message" ? this.onmessage : name === "error" ? this.onerror : null;
     if (typeof own === "function") {
       own.call(this, event);
     }
@@ -1404,7 +1436,7 @@ export class EventSource {
     request.send();
   }
 
-  receive(request) {
+  receive(request: XMLHttpRequest) {
     if (this.done || request !== this.request) {
       return;
     }
@@ -1775,7 +1807,7 @@ const Linking = () => require("react-native").Linking;
 const ELSEWHERE = new Map();
 const ELSEWHERE_WHILE = 10000;
 
-function openElsewhere(target: string): void {
+function openElsewhere(target) {
   const url = absolute(String(target));
   if (url.indexOf(ORIGIN) === 0) {
     console.warn(
@@ -2599,7 +2631,7 @@ export function useRouter() {
     replace,
     refresh,
     back: () => { router.back(); },
-    forward: () => { router.forward(); },
+    forward: () => { console.warn("bifrost: a screen has no forward history to go to; the app stays where it is"); },
   };
 }
 `
@@ -2622,7 +2654,7 @@ type State =
 type Fallback = { level: number; message: string };
 
 export type ScreenProps = {
-  render: (props: Record<string, unknown>, pageKey?: string) => unknown;
+  render: (props: Record<string, unknown>, pageKey?: string) => ReactNode;
   params: string[];
 };
 
@@ -3102,7 +3134,7 @@ export function droppedProps(name: string, props: unknown): string[] {
 function Scroller({ className, contentContainerStyle, children, ...rest }: { className?: unknown; contentContainerStyle?: unknown; children?: ReactNode } & Record<string, unknown>) {
   const scroll = scrollOf(className);
   if (scroll === null) {
-    return <View className={className} {...rest}>{children}</View>;
+    return <View className={className as string} {...rest}>{children}</View>;
   }
   const split = splitScroll(className);
   const content =
@@ -3159,7 +3191,7 @@ function Inline({ className, children, ...rest }: { className?: unknown; childre
   return <Text className={className as string} {...rest}>{children}</Text>;
 }
 
-function Anchor({ href, children, className, onPress, ...rest }: { href?: string; children?: unknown; className?: unknown; onPress?: unknown } & Record<string, unknown>) {
+function Anchor({ href, children, className, onPress, ...rest }: { href?: string; children?: ReactNode; className?: unknown; onPress?: unknown } & Record<string, unknown>) {
   return (
     <Pressable
       accessibilityRole="link"
@@ -3184,7 +3216,7 @@ function Anchor({ href, children, className, onPress, ...rest }: { href?: string
   );
 }
 
-function Button({ children, type, className, onPress, ...rest }: { children?: unknown; type?: unknown; className?: unknown; onPress?: unknown } & Record<string, unknown>) {
+function Button({ children, type, className, onPress, ...rest }: { children?: ReactNode; type?: unknown; className?: unknown; onPress?: unknown } & Record<string, unknown>) {
   return <Pressable accessibilityRole="button" className={className as string} onPress={usePress(type, onPress as (() => void) | undefined)} {...rest}>{textRuns(children, className)}</Pressable>;
 }
 
@@ -3294,7 +3326,7 @@ function Field({ name, value, defaultValue, rows, type, inputMode, onKeyDown, on
       onSubmitEditing={onKeyDown === undefined ? undefined : enter}
       {...fieldControl(type, inputMode)}
       {...rest}
-      onChangeText={(text) => {
+      onChangeText={(text: string) => {
         if (form && typeof name === "string") {
           form.fields.set(name, text);
         }
@@ -3903,7 +3935,7 @@ function selectedOf(value: unknown, choices: Choice[]): string[] {
   return choices.filter((choice) => said.indexOf(choice.value) >= 0).map((choice) => choice.value);
 }
 
-function MultipleSelect({ children, className, value, defaultValue, onChange, name, disabled, ...rest }: Record<string, unknown>) {
+function MultipleSelect({ children, className, value, defaultValue, onChange, name, disabled, ...rest }: { children?: ReactNode } & Record<string, unknown>) {
   const form = useForm();
   const choices = choicesOf(children);
   const [own, setOwn] = useState<string[]>(() => selectedOf(defaultValue, choices));
@@ -3969,7 +4001,7 @@ function Summary({ children, className }: { children?: ReactNode; className?: un
   return <Inline className={className}>{children}</Inline>;
 }
 
-function Details({ children, open, defaultOpen, onToggle, className, ...rest }: Record<string, unknown>) {
+function Details({ children, open, defaultOpen, onToggle, className, ...rest }: { children?: ReactNode } & Record<string, unknown>) {
   const [own, setOwn] = useState(defaultOpen === true);
   const shown = open === undefined ? own : open === true;
   const parts = Children.toArray(children);
@@ -4099,7 +4131,7 @@ const styles = StyleSheet.create({
   sheet: { backgroundColor: "#ffffff", borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingVertical: 8 },
   choice: { paddingHorizontal: 20, paddingVertical: 14 },
   control: { width: 18, height: 18 },
-  center: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  center: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center" },
   check: { fontSize: 12, lineHeight: 14 },
   dot: { fontSize: 8, lineHeight: 10 },
   clock: { paddingHorizontal: 12, paddingVertical: 8 },
@@ -4398,7 +4430,7 @@ const wrap = (create: unknown) =>
 
 export const jsx = wrap(runtime.jsx);
 export const jsxs = wrap(runtime.jsxs);
-export const jsxDEV = wrap(runtime.jsxDEV);
+export const jsxDEV = wrap((runtime as unknown as { jsxDEV: unknown }).jsxDEV);
 export const Fragment = runtime.Fragment;
 `
 
@@ -4426,6 +4458,7 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/screen.tsx", nativeScreen},
 	{"bifrost/text-style.js", nativeTextStyle},
 	{"bifrost/text.tsx", nativeTextModule},
+	{"bifrost/types.d.ts", nativeTypes},
 }
 
 // The fonts an app ships, as its overlay declares them: `<overlay>/fonts.json`
