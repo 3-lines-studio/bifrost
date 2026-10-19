@@ -144,6 +144,21 @@ const cases = [
     ({ out }) => out === "@media (min-width: 768px) { .md .native-table { font-size: 12px } }",
   ],
   [
+    "el preflight, que es lo que el pipeline genera",
+    "html, :host { font-family: var(--default-font-family) }",
+    ({ out }) => out === ".native-html, :host { font-family: var(--default-font-family) }",
+  ],
+  [
+    "el reset que nombra un tag llega al elemento",
+    "p, h1 { margin: 0 }",
+    ({ out }) => out === ".native-p, .native-h1 { margin: 0 }",
+  ],
+  [
+    "body tambien es una clase",
+    "body { line-height: inherit }",
+    ({ out }) => out === ".native-body { line-height: inherit }",
+  ],
+  [
     "una regla sin tags vuelve igual",
     ".flex-1 { flex: 1 1 auto }",
     ({ out, lost }) => out === ".flex-1 { flex: 1 1 auto }" && lost.length === 0,

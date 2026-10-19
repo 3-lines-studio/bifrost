@@ -581,10 +581,10 @@ func TestNativeTakesTheTagOfASelectorDownToAClass(t *testing.T) {
 	if !strings.Contains(nativeReact, "component === undefined ? undefined : type") {
 		t.Fatal("the road through React.createElement does not pass the tag")
 	}
-	if !strings.Contains(nativeCSSWarnings, `withTagClasses(data, lostSelectors(config, projectRoot, filePath, options))`) {
-		t.Fatal("the transformer does not run the rewrite")
+	if !strings.Contains(nativeCSSWarnings, `withTagClasses(expanded, lostSelectors(config, projectRoot, filePath, options))`) {
+		t.Fatal("the transformer does not run the rewrite on what the pipeline produced")
 	}
-	if !strings.Contains(nativeCSSWarnings, `css && options.platform !== "web"`) {
+	if !strings.Contains(nativeCSSWarnings, `options.platform === "web" || !isStylesheet(filePath)`) {
 		t.Fatal("the rewrite runs on the web target too")
 	}
 }
@@ -825,15 +825,28 @@ func TestNativeWarningsGoInFrontOfTheCompilerTheAppInstalled(t *testing.T) {
 	if !strings.Contains(nativeCSSWarnings, "config.bifrostUpstreamTransformer ?? config.transformer?.bifrostUpstreamTransformer ?? unstable_transformerPath") {
 		t.Fatal("the wrapper does not read the transformer the app installed")
 	}
-	if !strings.Contains(nativeCSSWarnings, "upstream.transform(config, projectRoot, filePath, source, options)") {
-		t.Fatal("the wrapper does not hand the file on")
+	// A file that is not a stylesheet is handed on with the same data and the
+	// same options, and so is the web target.
+	if !strings.Contains(nativeCSSWarnings, "if (options.type === \"asset\" || options.platform === \"web\" || !isStylesheet(filePath)) {") {
+		t.Fatal("a file that is not a stylesheet is not handed on unchanged")
 	}
-	// What is handed on is the stylesheet with the element selectors written as
-	// the classes the map paints, which is the whole of what this adds.
-	if !strings.Contains(nativeCSSWarnings, "const source =") {
-		t.Fatal("the file is handed on without the rewrite")
+	// The stylesheet is compiled here and in this order: the web pipeline
+	// expands it, the selectors that name a tag become classes, and the result is
+	// compiled. The runtime the app installed would compile the file as it is,
+	// before Tailwind has expanded a directive.
+	if !strings.Contains(nativeCSSWarnings, `const web = await worker.transform(config, projectRoot, filePath, data, { ...options, platform: "web" });`) {
+		t.Fatal("the stylesheet is not expanded by the web pipeline first")
 	}
-	if !strings.Contains(nativeCSSWarnings, "compile(css, { ...config.reactNativeCSS, filename: filePath, projectRoot }).warnings()") {
+	if !strings.Contains(nativeCSSWarnings, "const compiled = compile(source, {") {
+		t.Fatal("the expanded and rewritten stylesheet is not the one compiled")
+	}
+	if !strings.Contains(nativeCSSWarnings, "upstream.transform(config, projectRoot, filePath + \".js\", injected(compiled.stylesheet()), options)") {
+		t.Fatal("the compiled module does not reach the transformer the app installed")
+	}
+	if !strings.Contains(nativeCSSWarnings, `import { StyleCollection } from "react-native-css/native-internal";`) {
+		t.Fatal("the module does not inject the compiled sheet into the collection")
+	}
+	if !strings.Contains(nativeCSSWarnings, "report(projectRoot, filePath, source, compiled.warnings())") {
 		t.Fatal("the wrapper does not read the warnings it exists for")
 	}
 	// The warning is only actionable if it names the class the app wrote, which
@@ -860,7 +873,7 @@ func TestNativeWarningsGoInFrontOfTheCompilerTheAppInstalled(t *testing.T) {
 	if !strings.Contains(nativeCSSWarnings, `options.dev !== false`) {
 		t.Fatal("the report runs in a build too")
 	}
-	if !strings.Contains(nativeCSSWarnings, `options.type !== "asset"`) {
+	if !strings.Contains(nativeCSSWarnings, `options.type === "asset"`) {
 		t.Fatal("a stylesheet asked for as an asset is read as one")
 	}
 	// Without the compiler there is no stylesheet to drop anything from, and
@@ -926,7 +939,7 @@ func TestNativeFlexContainersGetTheRowABrowserGivesThem(t *testing.T) {
 	}
 }
 
-func TestNativeWarningsHandTheFileToTheTransformerTheAppInstalled(t *testing.T) {
+func TestNativeWarningsCompileWhatThePipelineProduced(t *testing.T) {
 	// Metro does not call a transformer with the config the app wrote: it hands it
 	// `config.transformer` on its own, flattened, minus the three keys it keeps for
 	// itself. Reading the kept path anywhere but the top of that object finds
@@ -934,6 +947,12 @@ func TestNativeWarningsHandTheFileToTheTransformerTheAppInstalled(t *testing.T) 
 	// for a stylesheet on a native target is an empty module. Measured against a
 	// real app: the whole stylesheet went out, the app painted unstyled, and
 	// nothing in the log said so.
+	//
+	// What the wrapper does with a stylesheet is the order of the steps: the web
+	// pipeline expands Tailwind, and only what comes out is compiled. The runtime
+	// the app installed would compile the file as it is, so the preflight -- the
+	// rule that puts the typeface of the theme on html, every reset that names a
+	// tag -- reached the target as a selector no view answers and was dropped.
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is not installed")
@@ -956,9 +975,7 @@ func TestNativeWarningsHandTheFileToTheTransformerTheAppInstalled(t *testing.T) 
 	}
 
 	// The compiler the helper looks for when it decides whether to install the
-	// wrapper, and the two modules the wrapper requires at the top of itself. The
-	// stub the wrapper would fall back to answers with a name of its own, so a
-	// fallback is a readable failure and not a missing module.
+	// wrapper, and the modules the wrapper requires at the top of itself.
 	stub := func(module, source string) {
 		dir := filepath.Join(native, "node_modules", module)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -971,30 +988,41 @@ func TestNativeWarningsHandTheFileToTheTransformerTheAppInstalled(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	stub("react-native-css", "module.exports = { compile: () => ({ warnings: () => ({}) }) };\n")
+	stub("react-native-css", `module.exports = {
+  compile: (css) => ({ warnings: () => ({}), stylesheet: () => ({ compiled: css }) }),
+};
+`)
 	if err := os.WriteFile(filepath.Join(native, "node_modules", "react-native-css", "compiler.js"), []byte("module.exports = require(\"./index.js\");\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stub("@expo/metro-config", "module.exports = { unstable_transformerPath: require.resolve(\"./index.js\") };\n")
+	// The transformer Metro would run if this one were not installed: the web
+	// pass answers with a stylesheet of its own, and any other pass is the one the
+	// app installed answering with what it was given.
+	stub("@expo/metro-config", `module.exports = {
+  unstable_transformerPath: require.resolve("./index.js"),
+  transform: async (config, root, filePath, data, options) => {
+    if (options.platform === "web") {
+      return { output: [{ data: { css: { code: "html { font-family: serif }" } } }] };
+    }
+    return { output: [{ data: { code: "UPSTREAM " + filePath + " " + data.toString() } }] };
+  },
+};
+`)
 
 	probe := `import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const path = require("node:path");
 const fs = require("node:fs");
 const { withBifrostWarnings } = require("./bifrost/metro.js");
-// What the app wrote, and what its transformer answers with.
 const upstream = path.join(process.cwd(), "upstream.js");
-fs.writeFileSync(upstream, "module.exports.transform = async () => ({ output: [{ data: { code: \"UPSTREAM\" } }] });\n");
+fs.writeFileSync(upstream, "module.exports.transform = async (config, root, filePath, data) => ({ output: [{ data: { code: \"APP \" + filePath + \" \" + data.toString() } }] });\n");
 const warned = withBifrostWarnings({ transformerPath: upstream, transformer: { reactNativeCSS: {} } });
-// What Metro does with that config before it calls the transformer: the three
-// keys it keeps for itself come out, and the rest is the config.
 const { getTransformOptions, transformVariants, unstable_workerThreads, ...transformerConfig } = warned.transformer;
 const wrapper = require(warned.transformerPath);
-wrapper
-  .transform(transformerConfig, process.cwd(), path.join(process.cwd(), "global.css"), Buffer.from(""), {
-    platform: "android", dev: false, type: "module", minify: false, customTransformOptions: {},
-  })
-  .then((result) => console.log(JSON.stringify({ code: result.output[0].data.code })));
+const options = { platform: "android", dev: false, type: "module", minify: false, customTransformOptions: {} };
+const sheet = await wrapper.transform(transformerConfig, process.cwd(), path.join(process.cwd(), "global.css"), Buffer.from("@import \"tailwindcss\";"), options);
+const other = await wrapper.transform(transformerConfig, process.cwd(), path.join(process.cwd(), "bifrost", "net.ts"), Buffer.from("export const net = 1;"), options);
+console.log(JSON.stringify({ sheet: sheet.output[0].data, other: other.output[0].data }));
 `
 	if err := os.WriteFile(filepath.Join(native, "probe.mjs"), []byte(probe), 0o644); err != nil {
 		t.Fatal(err)
@@ -1008,13 +1036,39 @@ wrapper
 		t.Fatalf("the warnings wrapper failed: %v: %s", err, output)
 	}
 	var got struct {
-		Code string `json:"code"`
+		Sheet struct {
+			Code string `json:"code"`
+			CSS  struct {
+				Code string `json:"code"`
+			} `json:"css"`
+		} `json:"sheet"`
+		Other struct {
+			Code string `json:"code"`
+		} `json:"other"`
 	}
 	if err := json.Unmarshal([]byte(strings.TrimSpace(string(output))), &got); err != nil {
 		t.Fatalf("%v: %s", err, output)
 	}
-	if got.Code != "UPSTREAM" {
-		t.Fatalf("the file did not reach the transformer the app installed: it answered %q", got.Code)
+	// The stylesheet the app installed got is the compiled one, and what was
+	// compiled is what the web pipeline produced.
+	if !strings.Contains(got.Sheet.Code, `StyleCollection.inject({"compiled":"html { font-family: serif }"})`) {
+		t.Fatalf("the compiled sheet is not the one injected: %s", got.Sheet.Code)
+	}
+	if !strings.HasSuffix(strings.Fields(got.Sheet.Code)[1], "global.css.js") {
+		t.Fatalf("the module was not handed on as a module: %s", got.Sheet.Code)
+	}
+	if strings.Contains(got.Sheet.Code, `@import \"tailwindcss\"`) {
+		t.Fatalf("the stylesheet was compiled before the pipeline expanded it: %s", got.Sheet.Code)
+	}
+	// Metro asked for the CSS of this file and got a module: what it keeps as an
+	// asset is empty.
+	if got.Sheet.CSS.Code != "" {
+		t.Fatalf("the sheet is also emitted as an asset: %q", got.Sheet.CSS.Code)
+	}
+	// A file that is not a stylesheet reaches the app's transformer unchanged, with
+	// its path and its bytes.
+	if !strings.Contains(got.Other.Code, "APP "+filepath.Join(native, "bifrost", "net.ts")+" export const net = 1;") {
+		t.Fatalf("a file that is not a stylesheet did not reach the app's transformer: %s", got.Other.Code)
 	}
 }
 
@@ -1915,8 +1969,8 @@ func TestNativeScreenAppliesTheDocumentAttributes(t *testing.T) {
 	// attributes of the root element of the document. A class is the theme the
 	// tree reads and a direction is how the tree is laid out; a language has no
 	// counterpart here, because a text node inherits none to read from.
-	if !strings.Contains(nativeScreen, "className={document.class}") {
-		t.Fatal("the screen drops the document class")
+	if !strings.Contains(nativeScreen, `"native-html", "native-body", document.class`) {
+		t.Fatal("the screen drops the document class, or the root of the stylesheet")
 	}
 	if !strings.Contains(nativeScreen, "{ direction }") {
 		t.Fatal("the screen drops the document direction")
@@ -1924,10 +1978,12 @@ func TestNativeScreenAppliesTheDocumentAttributes(t *testing.T) {
 	if !strings.Contains(nativeScreen, `document.dir === "rtl" || document.dir === "ltr"`) {
 		t.Fatal("the screen forwards a direction react-native cannot take")
 	}
-	// The wrapper is only there when there is something to put on it, so a page
-	// whose document carries neither is mounted exactly where it was.
-	if !strings.Contains(nativeScreen, "if (document.class === undefined && direction === undefined)") {
-		t.Fatal("the screen wraps every page whether or not the document says anything")
+	// The root of the stylesheet is painted whether or not the document says
+	// anything: the typeface and the line height of a browser live on html and
+	// body, and a screen that painted none of it painted the font of the system.
+	// Measured on the device with the preflight of Tailwind expanded.
+	if !strings.Contains(nativeScreen, "const root = ") {
+		t.Fatal("the screen does not paint the root of the stylesheet")
 	}
 }
 
