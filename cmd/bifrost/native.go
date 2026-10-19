@@ -3808,6 +3808,53 @@ function Select(props: Record<string, unknown>) {
   return props.multiple === true ? <MultipleSelect {...props} /> : <SingleSelect {...props} />;
 }
 
+// A details is a box that folds: a browser paints its summary as the handle and
+// hides the rest until it is opened. Measured on the device: the body was always
+// painted while the page said it was closed. The summary is the first child that
+// is one, and everything else is the body; the marker is the one of the browser.
+function Summary({ children, className }: { children?: ReactNode; className?: unknown }) {
+  return <Inline className={className}>{children}</Inline>;
+}
+
+function Details({ children, open, defaultOpen, onToggle, className, ...rest }: Record<string, unknown>) {
+  const [own, setOwn] = useState(defaultOpen === true);
+  const shown = open === undefined ? own : open === true;
+  const parts = Children.toArray(children);
+  const head = parts.find((child) => isValidElement(child) && child.type === Summary);
+  const body = parts.filter((child) => child !== head);
+  const headProps = head !== undefined && isValidElement(head) ? (head.props as { children?: ReactNode; className?: unknown }) : undefined;
+  const summary = headProps === undefined ? "Details" : headProps.children;
+  const summaryClass = headProps === undefined ? undefined : headProps.className;
+  const toggle = () => {
+    const next = !shown;
+    if (open === undefined) {
+      setOwn(next);
+    }
+    if (typeof onToggle !== "function") {
+      return;
+    }
+    (onToggle as (event: unknown) => void)({
+      target: { open: next },
+      currentTarget: { open: next },
+      nativeEvent: { open: next },
+    });
+  };
+  return (
+    <View {...rest} className={className as string}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: shown }}
+        className={summaryClass as string}
+        onPress={toggle}
+        style={summaryClass === undefined || summaryClass === null || summaryClass === "" ? styles.summary : undefined}
+      >
+        {textRuns([shown ? "▾ " : "▸ ", summary], summaryClass)}
+      </Pressable>
+      {shown ? textRuns(body, undefined) : null}
+    </View>
+  );
+}
+
 function Rule() {
   return <View style={{ height: 1, backgroundColor: "#e9dfd2" }} />;
 }
@@ -3907,6 +3954,7 @@ const styles = StyleSheet.create({
   list: { borderWidth: 1, borderColor: "#d4d4d4", borderRadius: 6 },
   option: { paddingHorizontal: 12, paddingVertical: 8 },
   optionOn: { backgroundColor: "#dbeafe" },
+  summary: { paddingVertical: 6 },
 });
 
 const NAMED: Record<string, unknown> = {
@@ -3953,6 +4001,10 @@ for (const [name, component] of Object.entries({
 })) {
   NAMED[name] = component;
 }
+// A details and its summary are one control, and the box of each is not what the
+// page meant: the summary is the handle and the rest waits.
+NAMED.details = Details;
+NAMED.summary = Summary;
 
 // The interaction of a page is written the way a browser writes it: onClick. A
 // native view is pressed, and React Native answers onPress -- the browser's name

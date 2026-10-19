@@ -483,6 +483,8 @@ An `svg` is a drawing, not a tag of the document: `svg`, `path`, `circle`, `rect
 
 An `img` is the asset it names: a module the page imported, which the bundler hands over as an asset, or a url the server answers. A rooted url is asked for at the origin of the app, because a native client has no document to resolve it against; a protocol-relative url is not one of ours. The class of the element is the box of the image, and `alt` is its accessibility label. A `srcSet` is not part of the map.
 
+A `details` folds. Its `summary` is the handle, the marker is the one of a browser, and the rest of the tree waits until it is opened: `open` controls it from the page, `defaultOpen` is where an uncontrolled one starts, and `onToggle` reads the new state from `target.open`.
+
 The vocabulary is the set of tags a native target supports. A lowercase tag outside it is one the map is missing: it warns in development with its own name, and the element is left exactly as it was, so the failure is loud instead of a paragraph that quietly disappears. Anything that is not a lowercase tag is untouched too, because React Native builds its own views out of strings and replacing one would tear them apart.
 
 An app always has a tag the generator does not know, or one it wants painted its own way, so it ships `bifrost/host-extra.tsx` in its overlay and the map takes it:
