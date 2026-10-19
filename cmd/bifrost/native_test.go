@@ -1906,6 +1906,54 @@ func TestNativeInlineElementThatAsksForFlexIsABox(t *testing.T) {
 	}
 }
 
+func TestNativeSelectIsAListTheTargetCanPaint(t *testing.T) {
+	// A select is a list of options in a browser, and the tag map had neither:
+	// measured on the device, one <select> in a form took the whole screen down
+	// with "View config getter callback for component `option` must be a
+	// function". The list is the chosen option in a pressable and the rest in a
+	// sheet, built from the elements every target has.
+	host := nativeHost("")
+	for _, wanted := range []string{
+		"select: Select,",
+		"option: Option,",
+		"optgroup: OptionGroup,",
+		"function Select(",
+		"function choicesOf(",
+		"if (child.type === OptionGroup) {",
+		"value: typeof props.value === \"string\" ? props.value : label,",
+		"const chosen = wanted === undefined ? own : wanted === null ? \"\" : String(wanted);",
+		// A page that keeps the value in its own state reads the event a browser
+		// gives it.
+		"target: { value: selected, name },",
+		// A field of a form travels with the form even when it is not typed.
+		"form.fields.set(name, chosen);",
+		// Without a value and without a default, a browser selects the first
+		// option that is not disabled.
+		"const first = choices.find((choice) => !choice.disabled);",
+		"return first === undefined ? \"\" : first.value;",
+		// The sheet is what a browser opens, and the back button closes it.
+		"onRequestClose={() => setOpen(false)}",
+		// What the target cannot do is said, instead of being a single value that
+		// looks like the whole answer.
+		"bifrost: <select multiple> chooses one option on a native target",
+	} {
+		if !strings.Contains(host, wanted) {
+			t.Fatalf("the select does not answer %q", wanted)
+		}
+	}
+	// An option is read by the select that holds it and never painted on its own,
+	// wherever it is met.
+	for _, name := range []string{"Option", "OptionGroup"} {
+		body, err := nativeFunctionBody(host, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(body, "return null;") {
+			t.Fatalf("%s paints something of its own:\n%s", name, body)
+		}
+	}
+}
+
 func TestNativeRuntimeLeavesNamesItDoesNotKnowAlone(t *testing.T) {
 	// react-native builds its own views out of strings (`codegenNativeComponent`
 	// returns "RCTView"), so replacing an unknown name would tear them apart.
