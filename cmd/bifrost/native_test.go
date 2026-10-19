@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -1369,6 +1370,57 @@ func TestNativeShipsTheDocumentShimWithoutTurningItOn(t *testing.T) {
 	// app away with the sheet open.
 	if !strings.Contains(nativeLayout(""), "hardwareBackPress") {
 		t.Fatal("the back button of the phone leaves the app with a dialog open")
+	}
+}
+
+func TestNativeEveryGeneratedJavaScriptIsJavaScript(t *testing.T) {
+	// Measured: one type annotation left in a generated .js file stops tsc on
+	// the whole generated project before it reads a line of the app, and a
+	// project that does not typecheck is a project no editor will help with.
+	annotation := regexp.MustCompile(`\)\s*:\s*(string|number|boolean|void|any|unknown)\b|\(\s*[A-Za-z_$][A-Za-z0-9_$]*\s*:\s*(string|number|boolean|void|any|unknown)\b`)
+	for _, file := range nativeProjectFiles {
+		if !strings.HasSuffix(file.Name, ".js") {
+			continue
+		}
+		if at := annotation.FindStringIndex(file.Content); at != nil {
+			t.Fatalf("%s carries a type annotation: %q", file.Name, file.Content[at[0]:at[1]])
+		}
+	}
+}
+
+func TestNativeTheGeneratedProjectTypechecksAsItIsWritten(t *testing.T) {
+	// Measured, with the TypeScript the project installs: the project had a
+	// hundred errors, most of them one cause -- a class whose state was only
+	// assigned in its constructor is not a class to tsc. What is checked here is
+	// what an editor needs to see the project whole.
+	files := map[string]string{}
+	for _, file := range nativeProjectFiles {
+		files[file.Name] = file.Content
+	}
+	tsconfig := files["tsconfig.json"]
+	for _, declared := range []string{
+		`"strict": true`,
+		`"allowImportingTsExtensions": true`,
+		`"virtual:bifrost/navigation": ["./bifrost/navigation"]`,
+	} {
+		if !strings.Contains(tsconfig, declared) {
+			t.Fatalf("the project does not declare %s", declared)
+		}
+	}
+	if !strings.Contains(files["bifrost/types.d.ts"], `declare module "*.css"`) {
+		t.Fatal("the layout imports a stylesheet nothing declares")
+	}
+	for _, field := range []string{
+		"rest: string;",
+		"data: string[];",
+		"id: string | null;",
+		"event: string;",
+		"request: XMLHttpRequest | null;",
+		"handlers: Map<string, Handler[]>;",
+	} {
+		if !strings.Contains(files["bifrost/events.ts"], field) {
+			t.Fatalf("the stream does not declare %q", field)
+		}
 	}
 }
 

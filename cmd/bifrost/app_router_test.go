@@ -341,6 +341,9 @@ func TestAppRouterViewsWrapTheTreeInTheRouteProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(view)
+	if !strings.HasPrefix(text, "// @ts-nocheck\n") {
+		t.Fatal("a view hands props to components it did not write, and tsc cannot describe them")
+	}
 	for _, expected := range []string{
 		"import { RouteProvider } from 'virtual:bifrost/navigation';",
 		"return <RouteProvider pathname={props.pathname} params={props.params} searchParams={props.searchParams}><Layout0 key={\"layout.tsx\"}",

@@ -566,7 +566,7 @@ func writeViews(projectRoot, routeRoot string, routes []appRoute) error {
 		case !routes[index].NotFoundPage:
 			head = "export * from " + strconv.Quote(pageView) + ";\n"
 		}
-		source := imports.String() + head + "export function renderPage(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + wrap(body) + ";\n}\nexport function Page(props: Record<string, unknown>) {\n  return renderPage(props);\n}\n"
+		source := "// @ts-nocheck\n" + imports.String() + head + "export function renderPage(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + wrap(body) + ";\n}\nexport function Page(props: Record<string, unknown>) {\n  return renderPage(props);\n}\n"
 		if routes[index].LoadingView != "" {
 			source += "export function renderPending(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + wrap("<RouteLoading />") + ";\n}\n"
 		}
