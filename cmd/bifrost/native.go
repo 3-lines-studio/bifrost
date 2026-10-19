@@ -2682,7 +2682,7 @@ export function useRouter() {
 
 const nativeScreen = `import { router, useIsFocused, useLocalSearchParams, usePathname } from "expo-router";
 import { Component, useEffect, useState, type ReactNode } from "react";
-import { ActivityIndicator, StyleSheet, Text } from "react-native";
+import { ActivityIndicator, ScrollView, StyleSheet, Text } from "react-native";
 import { StyledView as View } from "./text";
 import { loadPage, type PageData } from "./data";
 import { onRefresh } from "./refresh";
@@ -2806,7 +2806,21 @@ export function Screen({ render, params }: ScreenProps) {
   // system.
   const direction = document.dir === "rtl" || document.dir === "ltr" ? document.dir : undefined;
   const root = ["native-html", "native-body", document.class].filter((one) => typeof one === "string" && one !== "").join(" ");
-  return <View className={root} style={direction === undefined ? undefined : { direction }}>{content}</View>;
+  // The document of a browser scrolls, and a screen of this target is its own
+  // document: measured on the device, a page taller than the screen without a
+  // class that scrolls painted the first rows and nothing else, with no way to
+  // reach the rest. The box that scrolls is the screen itself and never a class
+  // of the page, like the document on the web, and a page that names its own
+  // scroll box, by h-screen with overflow, is a box that fits and leaves this one
+  // with nothing to scroll.
+  const documentStyle = direction === undefined ? styles.screen : [styles.screen, { direction }];
+  return (
+    <View className={root} style={documentStyle}>
+      <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" style={styles.pageScroll}>
+        {content}
+      </ScrollView>
+    </View>
+  );
 }
 
 // The boundary hands the failure up instead of painting it: what replaces the
@@ -2845,6 +2859,9 @@ function query(search: Record<string, unknown>, params: string[]): string {
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1 },
+  pageScroll: { flex: 1 },
+  page: { flexGrow: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   error: { color: "crimson", fontSize: 12, textAlign: "center" },
 });

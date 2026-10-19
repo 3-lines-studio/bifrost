@@ -1462,6 +1462,27 @@ func TestNativeTheBoxAPagePinsKeepsItsPlace(t *testing.T) {
 	}
 }
 
+func TestNativeThePageScrollsAsItsDocument(t *testing.T) {
+	// Measured on the device: a page taller than the screen painted its first rows
+	// and nothing else, with no way to reach the rest, because a native view does
+	// not scroll unless it is a ScrollView. On the web the document is what
+	// scrolls, and here the screen is the document.
+	for _, said := range []string{
+		`import { ActivityIndicator, ScrollView, StyleSheet, Text } from "react-native";`,
+		`<ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" style={styles.pageScroll}>`,
+		"screen: { flex: 1 }",
+		"pageScroll: { flex: 1 }",
+		"page: { flexGrow: 1 }",
+	} {
+		if !strings.Contains(nativeScreen, said) {
+			t.Fatalf("the screen does not carry %q", said)
+		}
+	}
+	if !strings.Contains(nativeScreen, "<View className={root} style={documentStyle}>") {
+		t.Fatal("the document root does not hold the box that scrolls")
+	}
+}
+
 func TestNativePageTableFollowsTheRouteTable(t *testing.T) {
 	// What the app does not own is not a screen the router can paint, and on the
 	// web the server answers a url like that -- an api route that redirects to a
