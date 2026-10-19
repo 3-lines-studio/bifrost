@@ -509,6 +509,8 @@ A `date` is the calendar of the device and a `time` is its clock: the field show
 
 A `range` is the slider of the device. `min`, `max`, `step` and `value` are the ones of a browser, `step="any"` is continuous, and the page reads the value as the string a browser gives it, from `onChange` or `onInput`. A value the page writes after the fact moves the thumb, and a form carries the value it holds.
 
+A `file` opens the picker of the device: `accept` is the type the picker offers, `multiple` chooses more than one, and the event carries `target.files` with the `uri`, `name`, `type` and `size` of each one. The form keeps the picked files and sends them with the values, and a multipart request with one is sent by the `XMLHttpRequest` of the target: the `fetch` of the runtime turns every part into bytes and refuses the path of a file. The class sizes the control, and it paints the names it holds.
+
 A `select` is painted from the options it holds: the chosen one in a pressable, and the rest in a sheet that opens on a press. It reads `value`, `defaultValue`, `onChange` and `name` the way a browser does, an option without a value is worth its label, and an option group is read as the options it holds. A `select multiple` is the list itself, painted in place with every option toggled on its own: the event carries the selected values as an array, in document order, in `target.value` and `target.selectedOptions`, and the form sends one entry per value.
 
 A form is submitted by its own `onSubmit` when a `button type="submit"` is pressed, and the fields answer with what they hold. Its `method` and `action` are still the browser's: the request a form makes is the app's to make.
