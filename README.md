@@ -438,6 +438,15 @@ paragraph), and the wrappers see the style of an element after the compiler has
 merged every rule that reaches it. A family the app does not declare is left
 exactly as it was.
 
+Measured on a device -- Android 14, Expo Go 57.0.9, the bundle over a tunnel --
+with an app whose stylesheet names one family at 400, 500 and 700 and whose
+`fonts.json` puts a monospace file in the 500 slot: the text inside a plain
+`<div className="font-sans">` painted that family, a `font-medium` paragraph
+painted the monospace file, a `font-semibold` paragraph with no file of its own
+painted the 700 one, and `font-mono`, a family the app does not declare, kept the
+system font. The layout holds the screen until the files are in, so the first
+painted frame was already the app's typeface.
+
 ### One page, two targets
 
 A page is written once, for the browser, and the tags in it are what the native screen paints. Metro resolves `react/jsx-runtime` to a wrapper that turns a lowercase tag into the component that draws it: `div` and the other blocks become a `View` that groups any text inside it into a `Text`, `p`, `h1`, `span` and the rest become `Text`, `a` becomes a `Pressable` that navigates a path and opens a url, `button`, `input`, `textarea` and `img` become their controls. Sheet links, metadata and scripts have nothing to paint, so they render nothing.
