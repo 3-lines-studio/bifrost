@@ -668,11 +668,48 @@ function withTagClasses(css, onLost) {
 module.exports = { withTagClasses, classOf };
 `
 
+const nativePosition = `// A box a page pins to the viewport -- position: fixed -- is a box the browser
+// paints over everything and never scrolls away. A native view has no viewport to
+// pin to; the closest thing it has is a box laid out against the box that holds
+// it, which is what a fixed header or a fixed bar is asking for. Measured on the
+// app of the case: the header of the shell was a fixed box and the scroll view
+// was its sibling, and the header was painted nowhere at all, because the
+// compiler drops a position it cannot express and a box with no position stays
+// in the flow the scroll view covers.
+//
+// The rewrite happens before the compiler, because after it the declaration is
+// gone: a value the compiler does not know is a value it dropped.
+function withFixed(css) {
+  const text = typeof css === "string" ? css : css.toString("utf8");
+  let postcss;
+  try {
+    postcss = require("postcss");
+  } catch {
+    return text;
+  }
+  let root;
+  try {
+    root = postcss.parse(text);
+  } catch {
+    return text;
+  }
+  root.walkDecls("position", (declaration) => {
+    if (declaration.value.trim() === "fixed") {
+      declaration.value = "absolute";
+    }
+  });
+  return root.toString();
+}
+
+module.exports = { withFixed };
+`
+
 // Runs in the transformer, in place of whatever react-native-css installed.
 // Every file but a stylesheet is handed on unchanged. A stylesheet is the one
 // thing it does itself, because the order of the steps is the whole point: the
 // web pipeline expands Tailwind, the selectors that name a tag become classes on
-// what comes out, and only then is it compiled for the target. The runtime the
+// what comes out, a position the target cannot express becomes the one it can,
+// and only then is it compiled for the target. The runtime the
 // app installed compiles the stylesheet as it gets it, which is before the
 // directives are expanded, so the rules the pipeline generates were never
 // rewritten and every one of them was dropped.
@@ -680,6 +717,7 @@ const nativeCSSWarnings = `const path = require("node:path");
 const { unstable_transformerPath } = require("@expo/metro-config");
 const { compile } = require("react-native-css/compiler");
 const { withTagClasses } = require("./selectors");
+const { withFixed } = require("./position");
 const { scrollOf } = require("./scroll");
 
 const worker = require(unstable_transformerPath);
@@ -698,9 +736,9 @@ const isStylesheet = (filePath) => /\.(s?css|sass)$/.test(filePath);
 // the reset Tailwind ships is full of them.
 function dropped(css, warnings) {
   const values = warnings.values ?? {};
-  // A class the map answers with a ScrollView is not a class this target
-  // dropped, and reporting it would be a line in the log about something that
-  // works.
+  // A class the map answers with a ScrollView, or with a child of one, is not a
+  // class this target dropped, and reporting it would be a line in the log about
+  // something that works.
   const found = [];
   let parse;
   try {
@@ -720,13 +758,19 @@ function dropped(css, warnings) {
       if (selector.charAt(0) !== "." || selector.includes(" ") || selector.includes("::")) {
         continue;
       }
+      const at = className(selector);
+      const name = at.charAt(0) === "." ? at.slice(1) : at;
       rule.walkDecls((declaration) => {
         for (const value of values[declaration.prop] ?? []) {
           if (!declaration.value.includes(String(value))) {
             continue;
           }
-          const at = className(selector);
-          if (scrollOf(at) !== null) {
+          if (scrollOf(name) !== null) {
+            continue;
+          }
+          // A sticky child is pinned by the scroll view that holds it, not by a
+          // position: the class works and has no counterpart to warn about.
+          if (name === "sticky" && declaration.prop === "position" && String(value) === "sticky") {
             continue;
           }
           found.push({ at, property: declaration.prop, value: declaration.value.trim() });
@@ -819,7 +863,7 @@ module.exports.transform = async (config, projectRoot, filePath, data, options) 
   const web = await worker.transform(config, projectRoot, filePath, data, { ...options, platform: "web" });
   const produced = web.output[0]?.data?.css?.code;
   const expanded = produced === undefined ? data.toString("utf8") : produced.toString();
-  const source = withTagClasses(expanded, lostSelectors(config, projectRoot, filePath, options));
+  const source = withFixed(withTagClasses(expanded, lostSelectors(config, projectRoot, filePath, options)));
   const compiled = compile(source, {
     ...(config.reactNativeCSS ?? options.reactNativeCSS),
     filename: filePath,
@@ -2910,7 +2954,15 @@ function splitScroll(className) {
   return { className: box.join(" "), content };
 }
 
-module.exports = { scrollOf, splitScroll, VERTICAL, HORIZONTAL };
+// A child a scroll view can pin: position: sticky is no style a native view has,
+// and the scroll view is what answers it, by holding the child it was asked to
+// stick. The class is the only handle there is, because the compiler drops the
+// position and the view never reads it.
+function isSticky(className) {
+  return typeof className === "string" && className.split(/\s+/).indexOf("sticky") >= 0;
+}
+
+module.exports = { scrollOf, splitScroll, isSticky, VERTICAL, HORIZONTAL };
 `
 
 const nativeRuns = `// A block that holds a string has to become one Text, because only a Text may
@@ -3044,7 +3096,7 @@ import Svg, { Circle, ClipPath, Defs, Ellipse, G, Line, LinearGradient, Mask, Pa
 import { styled } from "react-native-css/native";
 import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";
 import { ORIGIN } from "./origin";
-import { scrollOf, splitScroll } from "./scroll";
+import { isSticky, scrollOf, splitScroll } from "./scroll";
 import { runsOf, asksForFlex } from "./runs";
 import { navigate } from "virtual:bifrost/navigation";
 import { FormProvider, useForm, usePress, type Upload } from "./form";
@@ -3141,15 +3193,22 @@ function Scroller({ className, contentContainerStyle, children, ...rest }: { cla
     Object.keys(split.content).length === 0
       ? contentContainerStyle
       : [contentContainerStyle, split.content];
+  // A child the page wrote as sticky is a child the scroll view has to hold: the
+  // browser pins it to the edge of the box that scrolls, and the scroll view does
+  // the same for the children it is told about. Only a child of the box itself can
+  // be one -- the index is the one of the ScrollView, not one of the tree.
+  const parts = Children.toArray(children);
+  const pinned = parts.flatMap((child, at) => (isValidElement(child) && isSticky((child.props as { className?: unknown }).className) ? [at] : []));
   return (
     <View className={split.className} {...rest}>
       <ScrollView
         contentContainerStyle={content as never}
         horizontal={scroll === "horizontal"}
         keyboardShouldPersistTaps="handled"
+        stickyHeaderIndices={scroll === "vertical" && pinned.length > 0 ? pinned : undefined}
         style={SCROLL_FILLS}
       >
-        {children}
+        {parts}
       </ScrollView>
     </View>
   );
@@ -4442,6 +4501,7 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/row-direction.js", nativeRowDirection},
 	{"bifrost/runs.js", nativeRuns},
 	{"bifrost/scroll.js", nativeScroll},
+	{"bifrost/position.js", nativePosition},
 	{"bifrost/selectors.js", nativeSelectors},
 	{"bifrost/data.ts", nativeData},
 	{"bifrost/dom.js", nativeDOM},

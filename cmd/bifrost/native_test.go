@@ -629,7 +629,7 @@ func TestNativeMakesABlockThatScrollsAScrollView(t *testing.T) {
 	if !shipped {
 		t.Fatal("the decision of what scrolls is not part of the generated project")
 	}
-	if !strings.Contains(nativeHostHead, `import { scrollOf, splitScroll } from "./scroll";`) {
+	if !strings.Contains(nativeHostHead, `import { isSticky, scrollOf, splitScroll } from "./scroll";`) {
 		t.Fatal("the map does not read the decision")
 	}
 	if !strings.Contains(nativeHostBody, "function Scroller({ className, contentContainerStyle, children, ...rest }") {
@@ -680,7 +680,7 @@ func TestNativeMakesABlockThatScrollsAScrollView(t *testing.T) {
 	if !strings.Contains(nativeCSSWarnings, `const { scrollOf } = require("./scroll");`) {
 		t.Fatal("the report does not know what the map paints")
 	}
-	if !strings.Contains(nativeCSSWarnings, "if (scrollOf(at) !== null) {") {
+	if !strings.Contains(nativeCSSWarnings, "const name = at.charAt(0) === \".\" ? at.slice(1) : at;") || !strings.Contains(nativeCSSWarnings, "if (scrollOf(name) !== null) {") {
 		t.Fatal("the report would call a class the map paints a dropped one")
 	}
 }
@@ -1421,6 +1421,44 @@ func TestNativeTheGeneratedProjectTypechecksAsItIsWritten(t *testing.T) {
 		if !strings.Contains(files["bifrost/events.ts"], field) {
 			t.Fatalf("the stream does not declare %q", field)
 		}
+	}
+}
+
+func TestNativeTheBoxAPagePinsKeepsItsPlace(t *testing.T) {
+	// Measured on the device: position: fixed compiled to nothing and the header
+	// of the shell was painted nowhere; position: sticky was a value the compiler
+	// dropped and the box scrolled away with the content below it.
+	files := map[string]string{}
+	for _, file := range nativeProjectFiles {
+		files[file.Name] = file.Content
+	}
+	position := files["bifrost/position.js"]
+	if position == "" {
+		t.Fatal("a fixed box has no rewrite of its position")
+	}
+	for _, said := range []string{
+		`root.walkDecls("position"`,
+		`declaration.value.trim() === "fixed"`,
+		`declaration.value = "absolute"`,
+	} {
+		if !strings.Contains(position, said) {
+			t.Fatalf("the rewrite does not carry %q", said)
+		}
+	}
+	transform := files["bifrost/css-warnings.js"]
+	if !strings.Contains(transform, "withFixed(withTagClasses(") {
+		t.Fatal("the stylesheet is compiled before the fixed position is rewritten")
+	}
+	if !strings.Contains(transform, `name === "sticky"`) {
+		t.Fatal("a sticky box that the scroll view pins is reported as dropped")
+	}
+	scroll := files["bifrost/scroll.js"]
+	if !strings.Contains(scroll, "function isSticky(") {
+		t.Fatal("nothing names the class of a child a scroll view can pin")
+	}
+	host := nativeHost("")
+	if !strings.Contains(host, "stickyHeaderIndices=") || !strings.Contains(host, "isSticky(") {
+		t.Fatal("a sticky child of a box that scrolls is not pinned")
 	}
 }
 

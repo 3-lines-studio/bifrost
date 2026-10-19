@@ -2,7 +2,8 @@
 // string of Go and so is executed by no other test. The module is cut out of the
 // generator and fed the classes a stylesheet really has: the one that scrolls
 // down, the one that scrolls across, the one that asks for both, the one that
-// only clips, the ones with variants, and what is not a class at all.
+// only clips, the ones with variants, what is not a class at all, and the class
+// of a child the scroll view has to pin.
 //
 // Run it with `make native-scroll`.
 
@@ -27,7 +28,7 @@ if (module.includes("\\\\s")) throw new Error("a regex of the module carries an 
 const directory = await mkdtemp(path.join(tmpdir(), "bifrost-scroll-"));
 const file = path.join(directory, "scroll.js");
 await writeFile(file, module);
-const { scrollOf } = require(file);
+const { isSticky, scrollOf } = require(file);
 
 const cases = [
   ["nada que scrollee", "flex-1 min-h-0", null],
@@ -45,6 +46,16 @@ const cases = [
   ["una cadena vacia no scrollea", "", null],
   ["lo que no es cadena no scrollea", null, null],
   ["un numero no scrollea", 7, null],
+];
+
+const stickyCases = [
+  ["la clase de un hijo que la vista que scrollea tiene que clavar", "sticky top-0 z-40 bg-white", true],
+  ["el nombre solo", "sticky", true],
+  ["una clase con variante no es la clase", "md:sticky", false],
+  ["una clase parecida no alcanza", "stickyy", false],
+  ["no esta", "relative top-0", false],
+  ["una cadena vacia no se clava", "", false],
+  ["lo que no es cadena no se clava", null, false],
 ];
 
 let failed = 0;
@@ -66,5 +77,24 @@ for (const [name, className, wanted] of cases) {
   }
 }
 
-console.log(failed === 0 ? cases.length + " casos, todos bien" : failed + " de " + cases.length + " fallan");
+for (const [name, className, wanted] of stickyCases) {
+  let got;
+  try {
+    got = isSticky(className);
+  } catch (error) {
+    failed += 1;
+    console.log("FALLA " + name + ": tiró " + error.message);
+    continue;
+  }
+  if (got !== wanted) {
+    failed += 1;
+    console.log("FALLA " + name);
+    console.log("  entrada  " + JSON.stringify(className));
+    console.log("  esperado " + JSON.stringify(wanted));
+    console.log("  obtenido " + JSON.stringify(got));
+  }
+}
+
+const total = cases.length + stickyCases.length;
+console.log(failed === 0 ? total + " casos, todos bien" : failed + " de " + total + " fallan");
 process.exit(failed === 0 ? 0 : 1);

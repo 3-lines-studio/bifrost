@@ -1,6 +1,6 @@
-.PHONY: check test race vet gate demo native-html native-row native-selectors native-events native-scroll native-intent native-text-style bench fuzz throughput integration dev-integration reproducible
+.PHONY: check test race vet gate demo native-html native-row native-selectors native-position native-events native-scroll native-intent native-text-style bench fuzz throughput integration dev-integration reproducible
 
-check: test race vet gate native-html native-row native-selectors native-events native-scroll native-intent native-text-style demo
+check: test race vet gate native-html native-row native-selectors native-position native-events native-scroll native-intent native-text-style demo
 
 test:
 	@test -z "$$(gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'))" || (gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'); exit 1)
@@ -34,6 +34,12 @@ native-row:
 # means on a native view.
 native-selectors:
 	bun ./scripts/native-selectors.mjs
+
+# The pass that turns a position a native view cannot express into the one it
+# can is a string of Go too, and it is the one that decides whether a fixed
+# header of the shell is painted at all.
+native-position:
+	bun ./scripts/native-position.mjs
 
 # The reader of a stream is a string of Go too, and it is the one that decides
 # what a page that watches its own server sees and when.
@@ -78,6 +84,7 @@ integration:
 	bun ./scripts/native-html.mjs
 	bun ./scripts/native-row.mjs
 	bun ./scripts/native-selectors.mjs
+	bun ./scripts/native-position.mjs
 	bun ./scripts/native-events.mjs
 	bun ./scripts/native-scroll.mjs
 	bun ./scripts/native-intent.mjs
