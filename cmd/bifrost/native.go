@@ -911,6 +911,10 @@ const nativeForm = `import { createContext, useContext, useMemo, useState, type 
 
 export type Form = {
   fields: Map<string, string>;
+  // A select that takes more than one value is the only control that answers
+  // with more than one value for a name, so it keeps its list apart: the fields
+  // of every other control stay one value per name.
+  lists: Map<string, string[]>;
   submit: () => void;
 };
 
@@ -930,9 +934,11 @@ globalThis.FormData = function FormData(source?: unknown) {
 
 export function FormProvider({ onSubmit, children }: { onSubmit?: unknown; children?: ReactNode }) {
   const [fields] = useState(() => new Map<string, string>());
+  const [lists] = useState(() => new Map<string, string[]>());
   const form = useMemo<Form>(
     () => ({
       fields,
+      lists,
       submit: () => {
         if (typeof onSubmit !== "function") {
           return;
@@ -941,10 +947,15 @@ export function FormProvider({ onSubmit, children }: { onSubmit?: unknown; child
         for (const [name, value] of fields) {
           body.append(name, value);
         }
+        for (const [name, values] of lists) {
+          for (const value of values) {
+            body.append(name, value);
+          }
+        }
         (onSubmit as (event: unknown) => void)({ preventDefault() {}, currentTarget: body, target: body });
       },
     }),
-    [fields, onSubmit],
+    [fields, lists, onSubmit],
   );
   return <FormContext.Provider value={form}>{children}</FormContext.Provider>;
 }
@@ -3656,7 +3667,7 @@ function OptionGroup() {
   return null;
 }
 
-function Select({ children, className, value, defaultValue, onChange, name, disabled, multiple, ...rest }: { children?: ReactNode; className?: unknown; value?: unknown; defaultValue?: unknown; onChange?: unknown; name?: unknown; disabled?: unknown; multiple?: unknown } & Record<string, unknown>) {
+function SingleSelect({ children, className, value, defaultValue, onChange, name, disabled, multiple, ...rest }: { children?: ReactNode; className?: unknown; value?: unknown; defaultValue?: unknown; onChange?: unknown; name?: unknown; disabled?: unknown; multiple?: unknown } & Record<string, unknown>) {
   const form = useForm();
   const choices = choicesOf(children);
   const first = choices.find((choice) => !choice.disabled);
@@ -3677,11 +3688,8 @@ function Select({ children, className, value, defaultValue, onChange, name, disa
   if (form !== null && typeof name === "string") {
     form.fields.set(name, chosen);
   }
-  if (multiple === true && __DEV__) {
-    console.warn("bifrost: <select multiple> chooses one option on a native target");
-  }
-  // The event is the one a page reads from a browser: target.value, the name the
-  // field was written with, and a list when the select takes more than one.
+  // The event is the one a page reads from a browser: target.value and the name
+  // the field was written with.
   const pick = (choice: Choice) => {
     setOpen(false);
     if (value === undefined) {
@@ -3693,10 +3701,9 @@ function Select({ children, className, value, defaultValue, onChange, name, disa
     if (typeof onChange !== "function") {
       return;
     }
-    const selected = multiple === true ? [choice.value] : choice.value;
     (onChange as (event: unknown) => void)({
-      target: { value: selected, name },
-      currentTarget: { value: selected, name },
+      target: { value: choice.value, name },
+      currentTarget: { value: choice.value, name },
       nativeEvent: { text: choice.value },
     });
   };
@@ -3732,6 +3739,73 @@ function Select({ children, className, value, defaultValue, onChange, name, disa
       </Modal>
     </>
   );
+}
+
+// A select that takes more than one value is a list a browser paints in place,
+// with every option visible and each one toggled on its own; there is no sheet to
+// open. The form carries a list per name, because this is the only control whose
+// name can answer with more than one value.
+function selectedOf(value: unknown, choices: Choice[]): string[] {
+  const said = Array.isArray(value) ? value.map((one) => String(one)) : typeof value === "string" ? value.split(",") : [];
+  return choices.filter((choice) => said.indexOf(choice.value) >= 0).map((choice) => choice.value);
+}
+
+function MultipleSelect({ children, className, value, defaultValue, onChange, name, disabled, ...rest }: Record<string, unknown>) {
+  const form = useForm();
+  const choices = choicesOf(children);
+  const [own, setOwn] = useState<string[]>(() => selectedOf(defaultValue, choices));
+  const chosen = value === undefined ? own : selectedOf(value, choices);
+  if (form !== null && typeof name === "string") {
+    form.lists.set(name, chosen);
+  }
+  // What a browser sends is a list in the order the options are written, and the
+  // page reads it as the value of the event.
+  const toggle = (choice: Choice) => {
+    const on = chosen.indexOf(choice.value) >= 0;
+    const next = choices
+      .filter((one) => (one.value === choice.value ? !on : chosen.indexOf(one.value) >= 0))
+      .map((one) => one.value);
+    if (value === undefined) {
+      setOwn(next);
+    }
+    if (form !== null && typeof name === "string") {
+      form.lists.set(name, next);
+    }
+    if (typeof onChange !== "function") {
+      return;
+    }
+    const selectedOptions = next.map((one) => ({ value: one, selected: true }));
+    (onChange as (event: unknown) => void)({
+      target: { value: next, selectedOptions, name, type: "select-multiple" },
+      currentTarget: { value: next, selectedOptions, name, type: "select-multiple" },
+      nativeEvent: { text: next.join(",") },
+    });
+  };
+  return (
+    <View {...rest} className={className as string} style={className === undefined || className === null || className === "" ? styles.list : undefined}>
+      {choices.map((choice, at) => {
+        const on = chosen.indexOf(choice.value) >= 0;
+        return (
+          <Pressable
+            key={at}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: on, disabled: choice.disabled || disabled === true }}
+            disabled={choice.disabled || disabled === true}
+            onPress={() => toggle(choice)}
+            style={[styles.option, on ? styles.optionOn : undefined]}
+          >
+            <Text>{choice.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+// The two selects are different controls, not one with a flag, so the tag picks
+// the one the page asked for.
+function Select(props: Record<string, unknown>) {
+  return props.multiple === true ? <MultipleSelect {...props} /> : <SingleSelect {...props} />;
 }
 
 function Rule() {
@@ -3830,6 +3904,9 @@ const styles = StyleSheet.create({
   dot: { fontSize: 8, lineHeight: 10 },
   clock: { paddingHorizontal: 12, paddingVertical: 8 },
   slider: { width: "100%", height: 40 },
+  list: { borderWidth: 1, borderColor: "#d4d4d4", borderRadius: 6 },
+  option: { paddingHorizontal: 12, paddingVertical: 8 },
+  optionOn: { backgroundColor: "#dbeafe" },
 });
 
 const NAMED: Record<string, unknown> = {

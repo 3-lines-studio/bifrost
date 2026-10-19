@@ -1809,6 +1809,9 @@ func TestNativeTagMapSubmitsAFormTheWayABrowserDoes(t *testing.T) {
 		// of its own, so that a button the app paints itself still submits.
 		"const [fields] = useState(() => new Map<string, string>());",
 		"body.append(name, value)",
+		// A select of more than one value answers with a list for its name.
+		"const [lists] = useState(() => new Map<string, string[]>());",
+		"for (const [name, values] of lists) {",
 		// What the page reads out of the event is the FormData the form built.
 		"source instanceof NativeFormData",
 	} {
@@ -1918,13 +1921,16 @@ func TestNativeSelectIsAListTheTargetCanPaint(t *testing.T) {
 		"option: Option,",
 		"optgroup: OptionGroup,",
 		"function Select(",
+		"function SingleSelect(",
+		"function MultipleSelect(",
+		"props.multiple === true ? <MultipleSelect {...props} /> : <SingleSelect {...props} />",
 		"function choicesOf(",
 		"if (child.type === OptionGroup) {",
 		"value: typeof props.value === \"string\" ? props.value : label,",
 		"const chosen = wanted === undefined ? own : wanted === null ? \"\" : String(wanted);",
 		// A page that keeps the value in its own state reads the event a browser
 		// gives it.
-		"target: { value: selected, name },",
+		"target: { value: choice.value, name },",
 		// A field of a form travels with the form even when it is not typed.
 		"form.fields.set(name, chosen);",
 		// Without a value and without a default, a browser selects the first
@@ -1933,9 +1939,12 @@ func TestNativeSelectIsAListTheTargetCanPaint(t *testing.T) {
 		"return first === undefined ? \"\" : first.value;",
 		// The sheet is what a browser opens, and the back button closes it.
 		"onRequestClose={() => setOpen(false)}",
-		// What the target cannot do is said, instead of being a single value that
-		// looks like the whole answer.
-		"bifrost: <select multiple> chooses one option on a native target",
+		// A select of more than one value is a list in place, and its name
+		// carries every value that is on.
+		"form.lists.set(name, chosen);",
+		"target: { value: next, selectedOptions, name, type: \"select-multiple\" },",
+		"const selectedOptions = next.map((one) => ({ value: one, selected: true }));",
+		"accessibilityRole=\"checkbox\"",
 	} {
 		if !strings.Contains(host, wanted) {
 			t.Fatalf("the select does not answer %q", wanted)
