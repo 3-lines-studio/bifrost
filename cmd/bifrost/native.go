@@ -151,6 +151,34 @@ function underAlias(alias, moduleName) {
 // resolver of its own, and keep that one: this runs first and hands over
 // everything it does not own. Metro gives the last resolver only the default, so
 // one that called that instead would drop whoever was there before.
+// An app written for the NodeNext rules spells an import with the extension the
+// file will have once compiled -- "./dayjs.js" for dayjs.ts -- and the web
+// bundler reads the TypeScript file behind it. Metro looks for the .js file that
+// is not there and stops. Measured on the app of the case: the whole bundle
+// stopped at the first of two hundred imports written that way.
+function typescriptOf(moduleName) {
+  if (!moduleName.endsWith(".js")) {
+    return [];
+  }
+  const base = moduleName.slice(0, -3);
+  return [base + ".ts", base + ".tsx"];
+}
+
+function resolveWithTypescript(inherited, context, moduleName, platform) {
+  try {
+    return inherited(context, moduleName, platform);
+  } catch (error) {
+    for (const one of typescriptOf(moduleName)) {
+      try {
+        return inherited(context, one, platform);
+      } catch {
+        // The next candidate, and the error of the .js file at the end.
+      }
+    }
+    throw error;
+  }
+}
+
 function withBifrost(config) {
   const projectRoot = config.projectRoot;
   const bifrost = path.join(projectRoot, "bifrost");
@@ -225,10 +253,10 @@ function withBifrost(config) {
     for (const alias of aliases) {
       const under = underAlias(alias, moduleName);
       if (under !== null) {
-        return inherited(context, path.join(alias.to, under + alias.after), platform);
+        return resolveWithTypescript(inherited, context, path.join(alias.to, under + alias.after), platform);
       }
     }
-    return inherited(context, moduleName, platform);
+    return resolveWithTypescript(inherited, context, moduleName, platform);
   };
 
   return config;
@@ -257,7 +285,7 @@ function withBifrostWarnings(config) {
   return config;
 }
 
-module.exports = { withBifrost, withBifrostWarnings, pathAliases };
+module.exports = { withBifrost, withBifrostWarnings, pathAliases, resolveWithTypescript, typescriptOf };
 `
 
 // A browser lays a flex container out along the row; a native view lays its
@@ -655,8 +683,28 @@ function written(selector) {
 
 // The tags of a selector become the classes the map paints them with, and what
 // is left that a native view cannot express is answered to the caller.
+// The pseudos whose argument is a selector of its own: a tag inside :not(p) is
+// an element and becomes a class, while the "2" of :nth-child(2) and the "ar" of
+// :lang(ar) are not elements. Renaming those leaves CSS no compiler can read --
+// measured on the stylesheet of the app of the case: :nth-child(2) came out as
+// :nth-child(.native-2), and the whole stylesheet stopped with "Unexpected token
+// Delim('.')".
+const SELECTOR_ARGUMENT = /^:(where|is|not|has|host|host-context|matches|any|-moz-any|-webkit-any|slotted)$/;
+
+function namesAnElement(tag) {
+  for (let parent = tag.parent; parent !== undefined && parent !== null; parent = parent.parent) {
+    if (parent.type === "pseudo") {
+      return SELECTOR_ARGUMENT.test(parent.value);
+    }
+  }
+  return true;
+}
+
 function renamed(selector, onLost) {
   selector.walkTags((tag) => {
+    if (!namesAnElement(tag)) {
+      return;
+    }
     tag.replaceWith(parser().className({ value: classOf(tag.value) }));
   });
   selector.walkPseudos((pseudo) => {
@@ -1697,6 +1745,29 @@ const element = () => ({
   scrollIntoView() {},
 });
 
+// The cookies a page writes through the document, kept for the page itself: one
+// assignment is one cookie, and everything after the first semicolon is an
+// attribute of it -- expires, path, SameSite -- and not another cookie.
+const cookies = new Map();
+
+function cookieText() {
+  return Array.from(cookies.entries())
+    .map(([name, value]) => name + "=" + value)
+    .join("; ");
+}
+
+function writeCookie(text) {
+  const pair = String(text).split(";")[0] ?? "";
+  const at = pair.indexOf("=");
+  if (at < 0) {
+    return;
+  }
+  const name = pair.slice(0, at).trim();
+  if (name !== "") {
+    cookies.set(name, pair.slice(at + 1).trim());
+  }
+}
+
 const root = element();
 root.ownerDocument = root;
 
@@ -2127,6 +2198,39 @@ onAddressChange(() => {
 const install = () => {
   const target = globalThis;
   target.window ??= target;
+  // A control asks what a node is with instanceof -- the slider of a page asks
+  // whether its form is an HTMLFormElement -- and a name that does not exist is a
+  // ReferenceError and not a false. Measured on the app of the case: the first
+  // screen stopped its render with "Property 'HTMLFormElement' doesn't exist".
+  // Nothing here is an element of a browser, so every answer is no.
+  for (const name of ["Element", "HTMLElement", "HTMLFormElement", "HTMLInputElement", "HTMLButtonElement", "HTMLSelectElement", "HTMLTextAreaElement", "HTMLLabelElement", "HTMLAnchorElement", "HTMLImageElement", "HTMLCanvasElement", "HTMLVideoElement", "HTMLAudioElement", "HTMLDivElement", "HTMLSpanElement", "HTMLParagraphElement", "HTMLTableElement", "HTMLTableRowElement", "HTMLTableCellElement", "HTMLUListElement", "HTMLLIElement", "HTMLHeadingElement", "HTMLStyleElement", "HTMLScriptElement", "HTMLLinkElement", "HTMLMetaElement", "HTMLIFrameElement", "HTMLDialogElement", "HTMLDetailsElement", "SVGElement", "Document", "HTMLDocument", "DocumentFragment"]) {
+    target[name] ??= class {};
+  }
+  // A control keeps a native element in step with its own state by writing
+  // through the property descriptor of the prototype -- the select of a language
+  // toggle writes its value that way -- and a prototype with no descriptor is a
+  // crash: measured, "Cannot read property 'set' of undefined" stopped the first
+  // screen that held a select. The setter keeps what it is given on the object
+  // it is called on, which is what the control then reads back.
+  const property = (name, key) => {
+    const ctor = target[name];
+    if (ctor === undefined || Object.getOwnPropertyDescriptor(ctor.prototype, key) !== undefined) {
+      return;
+    }
+    Object.defineProperty(ctor.prototype, key, {
+      configurable: true,
+      get() {
+        return this["_" + key];
+      },
+      set(next) {
+        this["_" + key] = next;
+      },
+    });
+  };
+  for (const name of ["HTMLInputElement", "HTMLTextAreaElement", "HTMLSelectElement"]) {
+    property(name, "value");
+  }
+  property("HTMLInputElement", "checked");
   // The target installs a location and a history of its own when the app does not
   // ask it not to, and theirs answer the url of the bundler that served the
   // bundle, which is where the page is not: a page that asks where it is would be
@@ -2152,13 +2256,18 @@ const install = () => {
     // ends where the root answers that it is not a shadow root. This document is
     // that root and this is a node that cannot be asked for one.
     getRootNode: () => root,
-    // There is no document to hold a cookie here, so a read answers that there
-    // is none. A session that has to survive belongs in a store of the app's
-    // own; the client already sends its cookie jar with every request.
-    // A read answers that there is none, and a getter is not a value being
-    // handed out.
+    // A cookie the page writes -- a theme, a locale, an anonymous id -- is kept
+    // and answered back, because the library that writes it reads it again. It
+    // cannot reach the requests of the target: those carry the jar of the target,
+    // and a cookie the server has to see is one the server sets. Measured on the
+    // app of the case: assigning document.cookie threw "Cannot assign to property
+    // 'cookie' which has only a getter", and the first effect of its layout
+    // stopped there.
     get cookie() {
-      return String();
+      return cookieText();
+    },
+    set cookie(value) {
+      writeCookie(value);
     },
     visibilityState: "visible",
     createElement: () => element(),
@@ -3221,8 +3330,19 @@ import { StyledAnimatedView as AnimatedView, StyledPressable as Pressable, Style
 import { ORIGIN } from "./origin";
 import { isBottomAnchored, isFixed, isSticky, scrollOf, splitScroll } from "./scroll";
 import { runsOf, asksForFlex } from "./runs";
-import { navigate } from "virtual:bifrost/navigation";
 import { FormProvider, useForm, usePress, type Upload } from "./form";
+
+// A link asks the router when it is pressed, and not when this file is read: the
+// map of tags is loaded from the JSX runtime the first time a page paints a
+// string tag, and that can be while expo-router is still evaluating. Measured on
+// the app of the case: the import was a cycle, expo-router came back half built,
+// the map stopped halfway, and the first screen painted an Image that was
+// undefined.
+function navigate(href: string): void {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const router = require("virtual:bifrost/navigation") as { navigate: (href: string) => unknown };
+  void router.navigate(href);
+}
 
 // The scroll view of a box that scrolls fills the box, which is what its content
 // did in a browser: the box has the size the page gave it and clips what goes

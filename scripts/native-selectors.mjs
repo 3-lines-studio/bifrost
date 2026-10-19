@@ -104,6 +104,26 @@ const cases = [
     ({ out, lost }) => out === ":root { --x: 1 }" && lost.length === 0,
   ],
   [
+    "el numero de un nth-child no es un tag",
+    "li:nth-child(2) { color: red }",
+    ({ out }) => out === ".native-li:nth-child(2) { color: red }",
+  ],
+  [
+    "la cuenta de un nth-child no es un tag",
+    "tr:nth-child(2n+1) { color: red }",
+    ({ out }) => out === ".native-tr:nth-child(2n+1) { color: red }",
+  ],
+  [
+    "el idioma de un lang no es un tag",
+    "p:lang(ar) { color: red }",
+    ({ out }) => out === ".native-p:lang(ar) { color: red }",
+  ],
+  [
+    "un not con un tag adentro si lo es",
+    "li:not(p) { color: red }",
+    ({ out }) => out === ".native-li:not(.native-p) { color: red }",
+  ],
+  [
     "un hover no se avisa: el compilador lo expresa",
     ".md .code-copy:hover { opacity: 1 }",
     ({ out, lost }) => out === ".md .code-copy:hover { opacity: 1 }" && lost.length === 0,
