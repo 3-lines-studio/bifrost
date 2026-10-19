@@ -505,6 +505,8 @@ A `checkbox` and a `radio` are the two types a browser draws instead of typing i
 
 A `date` is the calendar of the device. The field shows the date of the locale, and the value the page reads from `onChange` and the form sends is `YYYY-MM-DD`; `min` and `max` limit the calendar, and a dismissed dialog leaves the value as it was. A value that is not a date is empty rather than today.
 
+A `range` is the slider of the device. `min`, `max`, `step` and `value` are the ones of a browser, `step="any"` is continuous, and the page reads the value as the string a browser gives it, from `onChange` or `onInput`. A value the page writes after the fact moves the thumb, and a form carries the value it holds.
+
 A `select` is painted from the options it holds: the chosen one in a pressable, and the rest in a sheet that opens on a press. It reads `value`, `defaultValue`, `onChange` and `name` the way a browser does, an option without a value is worth its label, and an option group is read as the options it holds. A `select multiple` chooses one option and says so in development, because a form of this target carries one value per name.
 
 A form is submitted by its own `onSubmit` when a `button type="submit"` is pressed, and the fields answer with what they hold. Its `method` and `action` are still the browser's: the request a form makes is the app's to make.
