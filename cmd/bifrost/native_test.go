@@ -2167,6 +2167,37 @@ func TestNativeARangeIsTheSliderOfTheDevice(t *testing.T) {
 	}
 }
 
+func TestNativeDetailsOpensAndCloses(t *testing.T) {
+	// Measured on the device: a details painted the body always, while its page
+	// said it was closed. A browser paints the summary as the handle and hides
+	// the rest until it is opened, and that is the box that folds here.
+	host := nativeHost("")
+	for _, wanted := range []string{
+		"NAMED.details = Details;",
+		"NAMED.summary = Summary;",
+		"function Details(",
+		"function Summary(",
+		// The state is the page's when it writes open, and the target's when it
+		// does not.
+		"const shown = open === undefined ? own : open === true;",
+		"const [own, setOwn] = useState(defaultOpen === true);",
+		// The first summary is the handle; everything else waits.
+		"const head = parts.find((child) => isValidElement(child) && child.type === Summary);",
+		"const body = parts.filter((child) => child !== head);",
+		// The event a page reads is the one of a browser.
+		"target: { open: next },",
+		// A closed details does not paint its body, and the marker says where it
+		// is.
+		"shown ? textRuns(body, undefined) : null",
+		"shown ? \"▾ \" : \"▸ \"",
+		"accessibilityState={{ expanded: shown }}",
+	} {
+		if !strings.Contains(host, wanted) {
+			t.Fatalf("the details does not answer %q", wanted)
+		}
+	}
+}
+
 func TestNativeRuntimeLeavesNamesItDoesNotKnowAlone(t *testing.T) {
 	// react-native builds its own views out of strings (`codegenNativeComponent`
 	// returns "RCTView"), so replacing an unknown name would tear them apart.
