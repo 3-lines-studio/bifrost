@@ -463,6 +463,24 @@ func TestNativeRuntimeSaysWhatTheTargetCannotPaint(t *testing.T) {
 	}
 }
 
+func TestNativeAnElementOfTheDevelopmentRuntimeIsBuiltByTheRealOne(t *testing.T) {
+	// Measured on the app of the case: the language select of the navbar stopped
+	// the first screen with "undefined is not a function". The development runtime
+	// is a module of its own -- react/jsx-runtime has no jsxDEV -- so wrapping the
+	// one that is not there builds an element with a function that does not exist.
+	if strings.Contains(nativeJSXRuntime, "runtime.jsxDEV") {
+		t.Fatal("the development runtime is read from the production module")
+	}
+	for _, said := range []string{
+		`import * as devRuntime from "react/jsx-dev-runtime";`,
+		"export const jsxDEV = wrap(devRuntime.jsxDEV);",
+	} {
+		if !strings.Contains(nativeJSXRuntime, said) {
+			t.Fatalf("the runtime does not carry %q", said)
+		}
+	}
+}
+
 func TestNativeHTMLIsReadIntoTheTagsTheMapPaints(t *testing.T) {
 	// A page that hands HTML to a target with no document: the prop is a string of
 	// tags and the only reader of it is a browser. Measured on fonnso, the body of
@@ -632,7 +650,7 @@ func TestNativeMakesABlockThatScrollsAScrollView(t *testing.T) {
 	if !strings.Contains(nativeHostHead, `import { isBottomAnchored, isFixed, isSticky, scrollOf, splitScroll } from "./scroll";`) {
 		t.Fatal("the map does not read the decision")
 	}
-	if !strings.Contains(nativeHostBody, "function Scroller({ className, contentContainerStyle, pinnedInScroller, children, ...rest }") {
+	if !strings.Contains(nativeHostBody, "function Scroller({ className, contentContainerStyle, pinnedInScroller, ref, children, ...rest }") {
 		t.Fatal("the map does not paint a block that scrolls")
 	}
 	if !strings.Contains(nativeHostBody, "<ScrollView") {
@@ -643,7 +661,7 @@ func TestNativeMakesABlockThatScrollsAScrollView(t *testing.T) {
 	// ~25 warnings a second from react-native-css against 5 in 30 s without it --
 	// because the height a ScrollView reports is not the height the parent
 	// measured from, so the measurement feeds the layout back.
-	if !strings.Contains(nativeHostBody, "<View className={split.className} {...rest}>") {
+	if !strings.Contains(nativeHostBody, "<View ref={node} className={split.className} {...rest}>") {
 		t.Fatal("the block that scrolls is not wrapped by the box it was")
 	}
 	if !strings.Contains(nativeHostBody, "style={SCROLL_FILLS}") {
@@ -1394,6 +1412,23 @@ func TestNativeEveryGeneratedJavaScriptIsJavaScript(t *testing.T) {
 	}
 }
 
+func TestNativeARefIsAnElementOfTheDocument(t *testing.T) {
+	// Measured on the app of the case: the select of a language toggle asks its
+	// trigger for the closest form, and a native view has no closest; the content
+	// of the same select reaches its window through node.ownerDocument.defaultView.
+	if !strings.Contains(nativeHostHead, "function useElementRef(ref: unknown)") {
+		t.Fatal("the map hands the native view to a ref instead of an element")
+	}
+	for _, said := range []string{"ref={node}", "ref={useElementRef(ref)}"} {
+		if !strings.Contains(nativeHostBody, said) {
+			t.Fatalf("the map does not carry %q", said)
+		}
+	}
+	if !strings.Contains(nativeDOM, "node.ownerDocument = target.document;") {
+		t.Fatal("an element made by the document does not know its document")
+	}
+}
+
 func TestNativeTheMapAsksTheRouterWhenALinkIsPressed(t *testing.T) {
 	// Measured on the app of the case: the map of tags is loaded from the JSX
 	// runtime while expo-router may still be evaluating, and an import of the
@@ -1570,7 +1605,7 @@ func TestNativeAStickyBoxOfTheDocumentKeepsItsEdge(t *testing.T) {
 	}
 	host := nativeHost("")
 	for _, said := range []string{
-		`<StickyView className={className as string} {...rest}>`,
+		`<StickyView ref={node} className={className as string} {...rest}>`,
 		"pinnedInScroller !== true",
 		"cloneElement(child as never, { pinnedInScroller: true } as never)",
 	} {

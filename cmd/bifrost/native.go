@@ -2270,8 +2270,16 @@ const install = () => {
       writeCookie(value);
     },
     visibilityState: "visible",
-    createElement: () => element(),
-    createElementNS: () => element(),
+    createElement: () => {
+      const node = element();
+      node.ownerDocument = target.document;
+      return node;
+    },
+    createElementNS: () => {
+      const node = element();
+      node.ownerDocument = target.document;
+      return node;
+    },
     createTextNode: () => ({}),
     getElementById: () => null,
     querySelector: () => null,
@@ -3319,7 +3327,7 @@ for (const [name, component] of Object.entries(extraTags)) {
 }
 `
 
-const nativeHostHead = `import { Children, Fragment, cloneElement, createElement, isValidElement, useState, useSyncExternalStore, type ReactNode } from "react";
+const nativeHostHead = `import { Children, Fragment, cloneElement, createElement, isValidElement, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Image, Linking, Modal, Platform, ScrollView, StyleSheet } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import Slider from "@react-native-community/slider";
@@ -3348,6 +3356,47 @@ function navigate(href: string): void {
 // did in a browser: the box has the size the page gave it and clips what goes
 // past it.
 const SCROLL_FILLS = { flex: 1 };
+
+// A component of the web asks a React ref for a node of the document: a trigger
+// asks its closest form, a popover measures the trigger, focus guards walk the
+// tree. A native view is not a node, so the ref hands back the element of the
+// document shim, with the native view kept on it. The element and the callback
+// are stable for the life of the component: a ref that is a new function on
+// every render is detached and attached again, and the library that owns it
+// answers with a state of its own -- measured, the language select of the app
+// went into "Maximum update depth exceeded".
+function useElementRef(ref: unknown) {
+  const latest = useRef(ref);
+  latest.current = ref;
+  const element = useRef<Record<string, unknown> | null>(null);
+  const callback = useRef((node: unknown) => {
+    const current = latest.current;
+    if (node === null || node === undefined) {
+      element.current = null;
+      if (typeof current === "function") {
+        (current as (value: unknown) => void)(null);
+        return;
+      }
+      if (current !== null && typeof current === "object") {
+        (current as { current: unknown }).current = null;
+      }
+      return;
+    }
+    if (element.current === null) {
+      const document = (globalThis as { document?: { createElement?: (tag: string) => Record<string, unknown> } }).document;
+      element.current = document === undefined || document.createElement === undefined ? {} : document.createElement("div");
+    }
+    (element.current as { native?: unknown }).native = node;
+    if (typeof current === "function") {
+      (current as (value: unknown) => void)(element.current);
+      return;
+    }
+    if (current !== null && typeof current === "object") {
+      (current as { current: unknown }).current = element.current;
+    }
+  }).current;
+  return callback;
+}
 `
 
 const nativeHostBody = `
@@ -3426,16 +3475,17 @@ export function droppedProps(name: string, props: unknown): string[] {
 // in 30 s without it -- because the height a ScrollView reports is not the height
 // the parent measured from, and the measurement feeds the layout back. The View
 // on the outside reports what it always reported.
-function Scroller({ className, contentContainerStyle, pinnedInScroller, children, ...rest }: { className?: unknown; contentContainerStyle?: unknown; pinnedInScroller?: unknown; children?: ReactNode } & Record<string, unknown>) {
+function Scroller({ className, contentContainerStyle, pinnedInScroller, ref, children, ...rest }: { className?: unknown; contentContainerStyle?: unknown; pinnedInScroller?: unknown; ref?: unknown; children?: ReactNode } & Record<string, unknown>) {
+  const node = useElementRef(ref);
   const scroll = scrollOf(className);
   if (scroll === null) {
     if (isFixed(className)) {
-      return <AnimatedView className={className as string} bottomAnchored={isBottomAnchored(className)} {...rest}>{children}</AnimatedView>;
+      return <AnimatedView ref={node} className={className as string} bottomAnchored={isBottomAnchored(className)} {...rest}>{children}</AnimatedView>;
     }
     if (isSticky(className) && pinnedInScroller !== true) {
-      return <StickyView className={className as string} {...rest}>{children}</StickyView>;
+      return <StickyView ref={node} className={className as string} {...rest}>{children}</StickyView>;
     }
-    return <View className={className as string} {...rest}>{children}</View>;
+    return <View ref={node} className={className as string} {...rest}>{children}</View>;
   }
   const split = splitScroll(className);
   const content =
@@ -3461,9 +3511,9 @@ function Scroller({ className, contentContainerStyle, pinnedInScroller, children
     </ScrollView>
   );
   if (isFixed(className)) {
-    return <AnimatedView className={split.className} bottomAnchored={isBottomAnchored(className)} {...rest}>{view}</AnimatedView>;
+    return <AnimatedView ref={node} className={split.className} bottomAnchored={isBottomAnchored(className)} {...rest}>{view}</AnimatedView>;
   }
-  return <View className={split.className} {...rest}>{view}</View>;
+  return <View ref={node} className={split.className} {...rest}>{view}</View>;
 }
 
 // Only a Text may hold a string, so a block that holds text has to become one,
@@ -3502,9 +3552,10 @@ function Inline({ className, children, ...rest }: { className?: unknown; childre
   return <Text className={className as string} {...rest}>{children}</Text>;
 }
 
-function Anchor({ href, children, className, onPress, ...rest }: { href?: string; children?: ReactNode; className?: unknown; onPress?: unknown } & Record<string, unknown>) {
+function Anchor({ href, children, className, onPress, ref, ...rest }: { href?: string; children?: ReactNode; className?: unknown; onPress?: unknown; ref?: unknown } & Record<string, unknown>) {
   return (
     <Pressable
+      ref={useElementRef(ref)}
       accessibilityRole="link"
       className={className as string}
       onPress={() => {
@@ -3527,8 +3578,8 @@ function Anchor({ href, children, className, onPress, ...rest }: { href?: string
   );
 }
 
-function Button({ children, type, className, onPress, ...rest }: { children?: ReactNode; type?: unknown; className?: unknown; onPress?: unknown } & Record<string, unknown>) {
-  return <Pressable accessibilityRole="button" className={className as string} onPress={usePress(type, onPress as (() => void) | undefined)} {...rest}>{textRuns(children, className)}</Pressable>;
+function Button({ children, type, className, onPress, ref, ...rest }: { children?: ReactNode; type?: unknown; className?: unknown; onPress?: unknown; ref?: unknown } & Record<string, unknown>) {
+  return <Pressable ref={useElementRef(ref)} accessibilityRole="button" className={className as string} onPress={usePress(type, onPress as (() => void) | undefined)} {...rest}>{textRuns(children, className)}</Pressable>;
 }
 
 // A form of the web app keeps its fields and submits them, because there is no
@@ -4684,7 +4735,8 @@ export function hostComponent(name: string): unknown {
 }
 `
 
-const nativeJSXRuntime = `import * as runtime from "react/jsx-runtime";
+const nativeJSXRuntime = `import * as devRuntime from "react/jsx-dev-runtime";
+import * as runtime from "react/jsx-runtime";
 
 // This module is evaluated before the app's own runtime is ready, because the
 // compiler needs it to build the first element. It must therefore pull nothing
@@ -4741,7 +4793,12 @@ const wrap = (create: unknown) =>
 
 export const jsx = wrap(runtime.jsx);
 export const jsxs = wrap(runtime.jsxs);
-export const jsxDEV = wrap((runtime as unknown as { jsxDEV: unknown }).jsxDEV);
+// The runtime of a development build is a module of its own: react/jsx-runtime
+// has no jsxDEV, and wrapping the one that is not there is an element built by
+// a function that does not exist. Measured on the app of the case: the language
+// select of the navbar stopped the first screen with "undefined is not a
+// function".
+export const jsxDEV = wrap(devRuntime.jsxDEV);
 export const Fragment = runtime.Fragment;
 `
 
