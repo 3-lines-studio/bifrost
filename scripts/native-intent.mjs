@@ -78,21 +78,21 @@ const cases = [
     name: "un link de un mail: la cookie entra y la app va a donde el server manda",
     address: "/auth?token=a1",
     answer: { status: 303, location: "/" },
-    wanted: "/",
+    wanted: { kind: "inside", href: "/" },
     asked: ["http://10.0.2.2:8099/auth?token=a1", "manual"],
   },
   {
     name: "un redirect absoluto del propio origen",
     address: "/auth?token=a1",
     answer: { status: 303, location: ORIGIN + "/onboarding" },
-    wanted: "/onboarding",
+    wanted: { kind: "inside", href: "/onboarding" },
     asked: ["http://10.0.2.2:8099/auth?token=a1", "manual"],
   },
   {
     name: "un redirect que se va del origen: va al navegador",
     address: "/auth?token=a1",
     answer: { status: 303, location: "https://checkout.stripe.com/c/pay/x" },
-    wanted: null,
+    wanted: { kind: "outside", href: "https://checkout.stripe.com/c/pay/x" },
     asked: ["http://10.0.2.2:8099/auth?token=a1", "manual"],
   },
   {
@@ -110,18 +110,29 @@ const cases = [
     asked: ["http://10.0.2.2:8099/auth?token=a1", "manual"],
   },
   {
-    name: "el link de google ya esta pedido por el server, no se pide de nuevo",
+    // The dance of an oauth provider starts by asking this url, and the cookie
+    // of the state belongs to whoever asked: a browser that asks is a browser
+    // that ends the dance with a session this app will never have.
+    name: "el link de google se pide, y la cookie del state queda en la app",
     address: "/api/auth/google",
     answer: { status: 303, location: "/" },
-    wanted: null,
-    asked: [],
+    wanted: { kind: "inside", href: "/" },
+    asked: ["http://10.0.2.2:8099/api/auth/google", "manual"],
   },
   {
-    name: "el de la api de pago tampoco: pedirlo crea una sesion",
+    // The request creates the checkout session, so it is the app that makes it.
+    name: "el de la api de pago tambien se pide: el pedido crea la sesion",
     address: "/api/stripe/checkout?plan=pro",
     answer: { status: 303, location: "/" },
-    wanted: null,
-    asked: [],
+    wanted: { kind: "inside", href: "/" },
+    asked: ["http://10.0.2.2:8099/api/stripe/checkout?plan=pro", "manual"],
+  },
+  {
+    name: "pedir la api no obliga a quedarse: el redirect que sale va al navegador",
+    address: "/api/stripe/checkout?plan=pro",
+    answer: { status: 303, location: "https://checkout.stripe.com/x" },
+    wanted: { kind: "outside", href: "https://checkout.stripe.com/x" },
+    asked: ["http://10.0.2.2:8099/api/stripe/checkout?plan=pro", "manual"],
   },
   {
     name: "un url de otro origen no es de este servidor",
@@ -141,10 +152,15 @@ const cases = [
     name: "un url del propio servidor se pide como path",
     address: "http://10.0.2.2:8099/auth?token=a1",
     answer: { status: 303, location: "/" },
-    wanted: "/",
+    wanted: { kind: "inside", href: "/" },
     asked: ["http://10.0.2.2:8099/auth?token=a1", "manual"],
   },
 ];
+
+// The answer is a value of two fields, so a comparison by identity would say a
+// right answer is wrong.
+const sameAnswer = (got, wanted) =>
+  wanted === null ? got === null : got !== null && got.kind === wanted.kind && got.href === wanted.href;
 
 for (const one of cases) {
   asked = [];
@@ -158,7 +174,7 @@ for (const one of cases) {
     falla(one.name, "no tenia que tirar:", error.message, "throw");
     continue;
   }
-  if (got !== one.wanted) falla(one.name, "esperado", one.wanted, got);
+  if (!sameAnswer(got, one.wanted)) falla(one.name, "esperado", one.wanted, got);
   const expectedAsked = one.asked.length === 0 ? [] : [one.asked];
   if (JSON.stringify(asked) !== JSON.stringify(expectedAsked)) {
     falla(one.name + " (los pedidos)", "esperado", expectedAsked, asked);
