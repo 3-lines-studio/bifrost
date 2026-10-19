@@ -2070,21 +2070,22 @@ func TestNativeADateIsTheCalendarOfTheDevice(t *testing.T) {
 	host := nativeHost("")
 	for _, wanted := range []string{
 		`import DateTimePicker from "@react-native-community/datetimepicker";`,
-		"if (props.type === \"date\") {",
-		"function DateField(",
+		"if (props.type === \"date\" || props.type === \"time\") {",
+		"function ClockField(",
 		"function dateOf(value: unknown): Date | null",
 		"function isoOf(date: Date): string",
+		"function clockOf(mode: string, value: unknown): Date | null",
 		// The event a page reads is the one of a browser.
-		"target: { value: next, name, type: \"date\" },",
+		"target: { value: next, name, type: kind },",
 		// What a browser limits, the calendar limits.
-		"minimumDate={dateOf(min) ?? undefined}",
-		"maximumDate={dateOf(max) ?? undefined}",
+		"minimumDate={clockOf(kind, min) ?? undefined}",
+		"maximumDate={clockOf(kind, max) ?? undefined}",
 		// The listeners of this version: onChange is deprecated in 9.
 		"onValueChange={picked}",
 		"onDismiss={() => setOpen(false)}",
 		// A browser shows the date of the locale, and no value is empty.
-		"current.toLocaleDateString()",
-		"const sent = current === null ? \"\" : isoOf(current);",
+		"labelOf(kind, current)",
+		"const sent = current === null ? \"\" : valueOf(kind, current);",
 		// A field of a form travels with the form.
 		"form.fields.set(name, sent);",
 		// The dialog of Android closes itself; the spinner of iOS waits for the
@@ -2094,6 +2095,31 @@ func TestNativeADateIsTheCalendarOfTheDevice(t *testing.T) {
 	} {
 		if !strings.Contains(host, wanted) {
 			t.Fatalf("the date does not answer %q", wanted)
+		}
+	}
+}
+
+func TestNativeATimeIsTheClockOfTheDevice(t *testing.T) {
+	// Measured on the device: a field of type="time" opened the keyboard and
+	// painted HH:MM as text. A browser opens a clock and hands the page HH:MM,
+	// which is what the same picker does in its time mode.
+	host := nativeHost("")
+	for _, wanted := range []string{
+		"function timeOf(value: unknown): Date | null",
+		`const TIME_VALUE = /^(\d{2}):(\d{2})$/;`,
+		"function hourOf(date: Date): string",
+		"function valueOf(mode: string, date: Date): string",
+		"return mode === \"time\" ? hourOf(date) : isoOf(date);",
+		// The picker is the same one, in the mode of the field.
+		"mode={kind as \"date\" | \"time\"}",
+		"const kind = mode === \"time\" ? \"time\" : \"date\";",
+		// The clock of the locale is what the field paints.
+		"date.toLocaleTimeString([], { hour: \"2-digit\", minute: \"2-digit\" })",
+		// The date that carries a clock is one the picker needs, not the page's.
+		"const date = new Date();\n  date.setHours(Number(match[1]), Number(match[2]), 0, 0);",
+	} {
+		if !strings.Contains(host, wanted) {
+			t.Fatalf("the time does not answer %q", wanted)
 		}
 	}
 }
