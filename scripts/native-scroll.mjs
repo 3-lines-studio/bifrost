@@ -2,8 +2,8 @@
 // string of Go and so is executed by no other test. The module is cut out of the
 // generator and fed the classes a stylesheet really has: the one that scrolls
 // down, the one that scrolls across, the one that asks for both, the one that
-// only clips, the ones with variants, what is not a class at all, and the class
-// of a child the scroll view has to pin.
+// only clips, the ones with variants, what is not a class at all, the class of a
+// child the scroll view has to pin, and the class of a box pinned to the screen.
 //
 // Run it with `make native-scroll`.
 
@@ -28,7 +28,7 @@ if (module.includes("\\\\s")) throw new Error("a regex of the module carries an 
 const directory = await mkdtemp(path.join(tmpdir(), "bifrost-scroll-"));
 const file = path.join(directory, "scroll.js");
 await writeFile(file, module);
-const { isSticky, scrollOf } = require(file);
+const { isBottomAnchored, isFixed, isSticky, scrollOf } = require(file);
 
 const cases = [
   ["nada que scrollee", "flex-1 min-h-0", null],
@@ -95,6 +95,34 @@ for (const [name, className, wanted] of stickyCases) {
   }
 }
 
-const total = cases.length + stickyCases.length;
+const fixedCases = [
+  ["una caja clavada arriba", "fixed left-0 right-0 top-0 z-50", true, false],
+  ["una caja clavada abajo", "fixed bottom-0 left-0 right-0 z-50", true, true],
+  ["abajo pero sin clavarla", "absolute bottom-0", false, true],
+  ["una variante no es la clase", "md:fixed bottom-0", false, true],
+  ["una clase parecida no alcanza", "fixed-bottom", false, false],
+];
+
+for (const [name, className, fixed, bottom] of fixedCases) {
+  let gotFixed;
+  let gotBottom;
+  try {
+    gotFixed = isFixed(className);
+    gotBottom = isBottomAnchored(className);
+  } catch (error) {
+    failed += 1;
+    console.log("FALLA " + name + ": tiró " + error.message);
+    continue;
+  }
+  if (gotFixed !== fixed || gotBottom !== bottom) {
+    failed += 1;
+    console.log("FALLA " + name);
+    console.log("  entrada  " + JSON.stringify(className));
+    console.log("  esperado " + JSON.stringify([fixed, bottom]));
+    console.log("  obtenido " + JSON.stringify([gotFixed, gotBottom]));
+  }
+}
+
+const total = cases.length + stickyCases.length + fixedCases.length;
 console.log(failed === 0 ? total + " casos, todos bien" : failed + " de " + total + " fallan");
 process.exit(failed === 0 ? 0 : 1);

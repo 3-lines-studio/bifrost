@@ -433,9 +433,10 @@ module.exports = { inheritedText, textStyle };
 // then hands that style on: a Text folds what it carries into what it paints,
 // and a box keeps what the words inside it should inherit.
 const nativeTextModule = `import { createContext, useContext, type ReactNode } from "react";
-import { Pressable, Text, TextInput, View, type StyleProp, type ViewStyle } from "react-native";
+import { Animated, Pressable, Text, TextInput, View, type StyleProp, type ViewStyle } from "react-native";
 import { styled } from "react-native-css/native";
 import * as declaredFonts from "./fonts";
+import { useDocumentScroll } from "./document-scroll";
 import { inheritedText, textStyle } from "./text-style";
 
 // The weights of each family the app ships, if it ships any: a project that
@@ -476,6 +477,19 @@ function ViewBox({ style, children, ...rest }: HostProps) {
   );
 }
 
+function AnimatedViewBox({ style, bottomAnchored, children, ...rest }: HostProps) {
+  const carried = useContext(Carried);
+  const document = useDocumentScroll();
+  const anchored = document !== null && document.viewport > 0 && bottomAnchored === true;
+  const correction = document === null || !anchored ? 0 : document.viewport - document.content;
+  const painted = document === null ? style : [style, { transform: [{ translateY: Animated.add(document.y, correction) }] }];
+  return (
+    <Carried.Provider value={inheritedText(carried, style)}>
+      <Animated.View {...withoutClass(rest)} style={painted as StyleProp<ViewStyle>}>{children}</Animated.View>
+    </Carried.Provider>
+  );
+}
+
 function InputBox({ style, children, ...rest }: HostProps) {
   const carried = useContext(Carried);
   const own = inheritedText(carried, style);
@@ -497,6 +511,7 @@ function PressBox({ style, children, ...rest }: HostProps) {
 
 export const StyledText = styled(TextView);
 export const StyledView = styled(ViewBox);
+export const StyledAnimatedView = styled(AnimatedViewBox);
 export const StyledPressable = styled(PressBox);
 export const StyledTextInput = styled(InputBox);
 
@@ -2681,9 +2696,10 @@ export function useRouter() {
 `
 
 const nativeScreen = `import { router, useIsFocused, useLocalSearchParams, usePathname } from "expo-router";
-import { Component, useEffect, useState, type ReactNode } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text } from "react-native";
+import { Component, useEffect, useRef, useState, type ReactNode } from "react";
+import { ActivityIndicator, Animated, StyleSheet, Text } from "react-native";
 import { StyledView as View } from "./text";
+import { DocumentScroll } from "./document-scroll";
 import { loadPage, type PageData } from "./data";
 import { onRefresh } from "./refresh";
 import { setAddress } from "./route";
@@ -2713,6 +2729,9 @@ export function Screen({ render, params }: ScreenProps) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [fallback, setFallback] = useState<Fallback | null>(null);
   const [nonce, setNonce] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
+  const scrollY = useRef(new Animated.Value(0)).current;
   const href = pathname + query(search, params);
 
   // Where this screen is, written down before anything inside it renders: a page
@@ -2816,9 +2835,19 @@ export function Screen({ render, params }: ScreenProps) {
   const documentStyle = direction === undefined ? styles.screen : [styles.screen, { direction }];
   return (
     <View className={root} style={documentStyle}>
-      <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" style={styles.pageScroll}>
-        {content}
-      </ScrollView>
+      <DocumentScroll.Provider value={{ y: scrollY, viewport: viewportHeight, content: contentHeight }}>
+        <Animated.ScrollView
+          contentContainerStyle={styles.page}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={(width: number, height: number) => { setContentHeight(height); }}
+          onLayout={(event) => { setViewportHeight(event.nativeEvent.layout.height); }}
+          onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
+          scrollEventThrottle={16}
+          style={styles.pageScroll}
+        >
+          {content}
+        </Animated.ScrollView>
+      </DocumentScroll.Provider>
     </View>
   );
 }
@@ -2865,6 +2894,27 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   error: { color: "crimson", fontSize: 12, textAlign: "center" },
 });
+`
+
+const nativeDocumentScroll = `import { createContext, useContext } from "react";
+import type { Animated } from "react-native";
+
+// The offset of the document, measured by the screen that scrolls it. A box the
+// page pinned to the viewport is inside the content, so the content scrolls under
+// it and the box has to move by as much as the content moved. A screen that does
+// not hold the document -- a modal, a test -- hands nothing, and the box stays
+// where its layout put it.
+export type DocumentScrollValue = {
+  y: Animated.Value;
+  viewport: number;
+  content: number;
+};
+
+export const DocumentScroll = createContext<DocumentScrollValue | null>(null);
+
+export function useDocumentScroll(): DocumentScrollValue | null {
+  return useContext(DocumentScroll);
+}
 `
 
 // A block that scrolls is written in the stylesheet, and a native view only
@@ -2979,7 +3029,23 @@ function isSticky(className) {
   return typeof className === "string" && className.split(/\s+/).indexOf("sticky") >= 0;
 }
 
-module.exports = { scrollOf, splitScroll, isSticky, VERTICAL, HORIZONTAL };
+// A child the page pins to the viewport: position: fixed is no style a native
+// view has, and ./position turns it into absolute before the stylesheet is
+// compiled -- an absolute box is still a box inside the content, so this is what
+// names the one that has to be moved by as much as the content moved.
+function isFixed(className) {
+  return typeof className === "string" && className.split(/\s+/).indexOf("fixed") >= 0;
+}
+
+// A fixed box the page anchors to the bottom of the viewport: the bottom of an
+// absolute box is the one of the box that holds it, and for a page that scrolls
+// that box is the whole content, so the difference between the document and the
+// screen is what has to be taken out.
+function isBottomAnchored(className) {
+  return typeof className === "string" && className.split(/\s+/).some((name) => name.indexOf("bottom-") === 0);
+}
+
+module.exports = { scrollOf, splitScroll, isSticky, isFixed, isBottomAnchored, VERTICAL, HORIZONTAL };
 `
 
 const nativeRuns = `// A block that holds a string has to become one Text, because only a Text may
@@ -3111,9 +3177,9 @@ import Slider from "@react-native-community/slider";
 import * as DocumentPicker from "expo-document-picker";
 import Svg, { Circle, ClipPath, Defs, Ellipse, G, Line, LinearGradient, Mask, Path, Polygon, Polyline, RadialGradient, Rect, Stop, Symbol as SymbolTag, Use } from "react-native-svg";
 import { styled } from "react-native-css/native";
-import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";
+import { StyledAnimatedView as AnimatedView, StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";
 import { ORIGIN } from "./origin";
-import { isSticky, scrollOf, splitScroll } from "./scroll";
+import { isBottomAnchored, isFixed, isSticky, scrollOf, splitScroll } from "./scroll";
 import { runsOf, asksForFlex } from "./runs";
 import { navigate } from "virtual:bifrost/navigation";
 import { FormProvider, useForm, usePress, type Upload } from "./form";
@@ -3203,6 +3269,9 @@ export function droppedProps(name: string, props: unknown): string[] {
 function Scroller({ className, contentContainerStyle, children, ...rest }: { className?: unknown; contentContainerStyle?: unknown; children?: ReactNode } & Record<string, unknown>) {
   const scroll = scrollOf(className);
   if (scroll === null) {
+    if (isFixed(className)) {
+      return <AnimatedView className={className as string} bottomAnchored={isBottomAnchored(className)} {...rest}>{children}</AnimatedView>;
+    }
     return <View className={className as string} {...rest}>{children}</View>;
   }
   const split = splitScroll(className);
@@ -3216,19 +3285,21 @@ function Scroller({ className, contentContainerStyle, children, ...rest }: { cla
   // be one -- the index is the one of the ScrollView, not one of the tree.
   const parts = Children.toArray(children);
   const pinned = parts.flatMap((child, at) => (isValidElement(child) && isSticky((child.props as { className?: unknown }).className) ? [at] : []));
-  return (
-    <View className={split.className} {...rest}>
-      <ScrollView
-        contentContainerStyle={content as never}
-        horizontal={scroll === "horizontal"}
-        keyboardShouldPersistTaps="handled"
-        stickyHeaderIndices={scroll === "vertical" && pinned.length > 0 ? pinned : undefined}
-        style={SCROLL_FILLS}
-      >
-        {parts}
-      </ScrollView>
-    </View>
+  const view = (
+    <ScrollView
+      contentContainerStyle={content as never}
+      horizontal={scroll === "horizontal"}
+      keyboardShouldPersistTaps="handled"
+      stickyHeaderIndices={scroll === "vertical" && pinned.length > 0 ? pinned : undefined}
+      style={SCROLL_FILLS}
+    >
+      {parts}
+    </ScrollView>
   );
+  if (isFixed(className)) {
+    return <AnimatedView className={split.className} bottomAnchored={isBottomAnchored(className)} {...rest}>{view}</AnimatedView>;
+  }
+  return <View className={split.className} {...rest}>{view}</View>;
 }
 
 // Only a Text may hold a string, so a block that holds text has to become one,
@@ -4518,6 +4589,7 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/row-direction.js", nativeRowDirection},
 	{"bifrost/runs.js", nativeRuns},
 	{"bifrost/scroll.js", nativeScroll},
+	{"bifrost/document-scroll.ts", nativeDocumentScroll},
 	{"bifrost/position.js", nativePosition},
 	{"bifrost/selectors.js", nativeSelectors},
 	{"bifrost/data.ts", nativeData},

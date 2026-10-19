@@ -629,7 +629,7 @@ func TestNativeMakesABlockThatScrollsAScrollView(t *testing.T) {
 	if !shipped {
 		t.Fatal("the decision of what scrolls is not part of the generated project")
 	}
-	if !strings.Contains(nativeHostHead, `import { isSticky, scrollOf, splitScroll } from "./scroll";`) {
+	if !strings.Contains(nativeHostHead, `import { isBottomAnchored, isFixed, isSticky, scrollOf, splitScroll } from "./scroll";`) {
 		t.Fatal("the map does not read the decision")
 	}
 	if !strings.Contains(nativeHostBody, "function Scroller({ className, contentContainerStyle, children, ...rest }") {
@@ -1462,14 +1462,66 @@ func TestNativeTheBoxAPagePinsKeepsItsPlace(t *testing.T) {
 	}
 }
 
+func TestNativeAPinnedBoxFollowsTheDocument(t *testing.T) {
+	// Measured on the device: a fixed box over a page that scrolls went up with
+	// the content, and a fixed box of the bottom stayed at the bottom of the
+	// content, which is a screen or three below where it belongs. The offset of
+	// the document is what the box has to cancel.
+	files := map[string]string{}
+	for _, file := range nativeProjectFiles {
+		files[file.Name] = file.Content
+	}
+	document := files["bifrost/document-scroll.ts"]
+	if document == "" {
+		t.Fatal("a pinned box has no document offset to read")
+	}
+	for _, said := range []string{
+		"export const DocumentScroll = createContext<DocumentScrollValue | null>(null);",
+		"y: Animated.Value;",
+		"viewport: number;",
+		"content: number;",
+	} {
+		if !strings.Contains(document, said) {
+			t.Fatalf("the document offset does not carry %q", said)
+		}
+	}
+	for _, said := range []string{
+		"<DocumentScroll.Provider value={{ y: scrollY, viewport: viewportHeight, content: contentHeight }}>",
+		"<Animated.ScrollView",
+		"onContentSizeChange={(width: number, height: number) => { setContentHeight(height); }}",
+		"onLayout={(event) => { setViewportHeight(event.nativeEvent.layout.height); }}",
+		"onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}",
+	} {
+		if !strings.Contains(nativeScreen, said) {
+			t.Fatalf("the screen does not carry %q", said)
+		}
+	}
+	if host := nativeHost(""); !strings.Contains(host, "bottomAnchored={isBottomAnchored(className)}") {
+		t.Fatal("a pinned box does not say whether it is anchored to the bottom")
+	}
+	text := files["bifrost/text.tsx"]
+	for _, said := range []string{
+		"const anchored = document !== null && document.viewport > 0 && bottomAnchored === true;",
+		"const correction = document === null || !anchored ? 0 : document.viewport - document.content;",
+		"Animated.add(document.y, correction)",
+	} {
+		if !strings.Contains(text, said) {
+			t.Fatalf("the pinned box does not carry %q", said)
+		}
+	}
+}
+
 func TestNativeThePageScrollsAsItsDocument(t *testing.T) {
 	// Measured on the device: a page taller than the screen painted its first rows
 	// and nothing else, with no way to reach the rest, because a native view does
 	// not scroll unless it is a ScrollView. On the web the document is what
 	// scrolls, and here the screen is the document.
 	for _, said := range []string{
-		`import { ActivityIndicator, ScrollView, StyleSheet, Text } from "react-native";`,
-		`<ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" style={styles.pageScroll}>`,
+		`import { ActivityIndicator, Animated, StyleSheet, Text } from "react-native";`,
+		"<Animated.ScrollView",
+		"contentContainerStyle={styles.page}",
+		`keyboardShouldPersistTaps="handled"`,
+		"style={styles.pageScroll}",
 		"screen: { flex: 1 }",
 		"pageScroll: { flex: 1 }",
 		"page: { flexGrow: 1 }",
@@ -3017,7 +3069,7 @@ func TestNativeShipsTheFontsTheAppDeclares(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(host), `import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";`) {
+	if !strings.Contains(string(host), `import { StyledAnimatedView as AnimatedView, StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";`) {
 		t.Error("the tag map paints plain views, so nothing inherits and no weight reaches a file")
 	}
 	text, err := os.ReadFile(filepath.Join(native, "bifrost", "text.tsx"))
