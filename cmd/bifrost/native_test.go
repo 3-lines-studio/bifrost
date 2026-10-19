@@ -1070,6 +1070,10 @@ func TestNativeLayoutCarriesWhatTheOverlayShips(t *testing.T) {
 	// add one line to it. Measured on fonnso: the file was replaced to import a
 	// stylesheet, a module of its own and the network shim, and two of those three
 	// lines are ones the generator can write.
+	// The two imports of the fonts come after the shim: the layout loads the
+	// typeface of the app before it paints, and an app that ships none has an
+	// empty map and the first frame.
+	fonts := []string{`import * as declaredFonts from "../bifrost/fonts";`, `import { useFonts } from "expo-font";`}
 	cases := []struct {
 		name    string
 		files   []string
@@ -1078,22 +1082,22 @@ func TestNativeLayoutCarriesWhatTheOverlayShips(t *testing.T) {
 		{
 			"an overlay with neither",
 			nil,
-			[]string{`import "../bifrost/net";`},
+			append([]string{`import "../bifrost/net";`}, fonts...),
 		},
 		{
 			"a global stylesheet",
 			[]string{"global.css"},
-			[]string{`import "../global.css";`, `import "../bifrost/net";`},
+			append([]string{`import "../global.css";`, `import "../bifrost/net";`}, fonts...),
 		},
 		{
 			"a module of its own",
 			[]string{"bifrost/setup.ts"},
-			[]string{`import "../bifrost/setup";`, `import "../bifrost/net";`},
+			append([]string{`import "../bifrost/setup";`, `import "../bifrost/net";`}, fonts...),
 		},
 		{
 			"both, before the shim that wraps what they install",
 			[]string{"global.css", "bifrost/setup.tsx"},
-			[]string{`import "../global.css";`, `import "../bifrost/setup";`, `import "../bifrost/net";`},
+			append([]string{`import "../global.css";`, `import "../bifrost/setup";`, `import "../bifrost/net";`}, fonts...),
 		},
 	}
 	for _, test := range cases {
@@ -2369,5 +2373,173 @@ func TestNativePaintsTheChildrenOfAButtonAsItemsOfTheirOwn(t *testing.T) {
 	}
 	if !strings.Contains(body, "className,") {
 		t.Errorf("textRuns does not hand the class to the rule:\n%s", body)
+	}
+}
+
+func TestNativeShipsTheFontsTheAppDeclares(t *testing.T) {
+	// A native screen picks a font by family and loads it as a file, so a family
+	// with four weights is four families here. The app declares them once, and
+	// the target loads them, folds the weight a rule asked for into the name, and
+	// hands a box's text down to the text inside it, which is what a browser does
+	// and what a view does not.
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.tsx"), []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	overlay := filepath.Join(projectRoot, "native")
+	fonts := `[{"fontFamily":"Plus Jakarta Sans Variable","fonts":[
+		{"path":"assets/fonts/jakarta-600.ttf","weight":600},
+		{"path":"assets/fonts/jakarta-400.ttf","weight":400}
+	]}]`
+	for name, content := range map[string]string{
+		"fonts.json":                   fonts,
+		"assets/fonts/jakarta-400.ttf": "400",
+		"assets/fonts/jakarta-600.ttf": "600",
+	} {
+		path := filepath.Join(overlay, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prepared, err := prepareAppRouter(t.Context(), projectRoot, appRoot, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(projectRoot, ".bifrost", "native")
+	if _, err := writeNativeProject(native, prepared, "", overlay); err != nil {
+		t.Fatal(err)
+	}
+
+	// The file the layout loads: one name per weight, and the weights of each
+	// family so that a rule finds the file it asked for.
+	module, err := os.ReadFile(filepath.Join(native, "bifrost", "fonts.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"Plus Jakarta Sans Variable": [400, 600],`,
+		`"Plus Jakarta Sans Variable 400": require("../assets/fonts/jakarta-400.ttf"),`,
+		`"Plus Jakarta Sans Variable 600": require("../assets/fonts/jakarta-600.ttf"),`,
+	} {
+		if !strings.Contains(string(module), want) {
+			t.Errorf("fonts.ts does not have %s:\n%s", want, module)
+		}
+	}
+
+	// The layout loads them before it paints, and an app that declares none is in
+	// on the first frame.
+	layout, err := os.ReadFile(filepath.Join(native, "app", "_layout.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(layout), `import { useFonts } from "expo-font";`) {
+		t.Error("the layout does not load the fonts of the app")
+	}
+	if !strings.Contains(string(layout), "const [ready] = useFonts(FONTS);") || !strings.Contains(string(layout), "if (!NONE && !ready)") {
+		t.Error("the layout paints a frame before the fonts of the app are in")
+	}
+
+	// The tags of the map are painted by the wrappers that keep what a browser
+	// inherits and fold the weight into the family.
+	host, err := os.ReadFile(filepath.Join(native, "bifrost", "host.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(host), `import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View } from "./text";`) {
+		t.Error("the tag map paints plain views, so nothing inherits and no weight reaches a file")
+	}
+	text, err := os.ReadFile(filepath.Join(native, "bifrost", "text.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"inheritedText(carried, style)", "textStyle(own, families)", "<Carried.Provider value={own}>"} {
+		if !strings.Contains(string(text), want) {
+			t.Errorf("text.tsx does not have %q:\n%s", want, text)
+		}
+	}
+	style, err := os.ReadFile(filepath.Join(native, "bifrost", "text-style.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(style), "module.exports = { inheritedText, textStyle };") {
+		t.Errorf("the pass is not shipped whole:\n%s", style)
+	}
+
+	// The module the layout loads needs its package.
+	manifest, err := os.ReadFile(filepath.Join(native, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(manifest), `"expo-font"`) {
+		t.Error("the project loads fonts without the module that loads them")
+	}
+}
+
+func TestNativeRefusesAFontTheOverlayDoesNotShip(t *testing.T) {
+	cases := []struct {
+		name  string
+		fonts string
+		want  string
+	}{
+		{
+			"a file the overlay does not ship",
+			`[{"fontFamily":"A","fonts":[{"path":"assets/a-400.ttf","weight":400}]}]`,
+			"the overlay does not ship assets/a-400.ttf",
+		},
+		{
+			"a weight of zero",
+			`[{"fontFamily":"A","fonts":[{"path":"assets/a.ttf","weight":0}]}]`,
+			"no path or no weight",
+		},
+		{
+			"the same weight twice",
+			`[{"fontFamily":"A","fonts":[{"path":"assets/a.ttf","weight":400},{"path":"assets/a.ttf","weight":400}]}]`,
+			"names weight 400 twice",
+		},
+		{
+			"a family with no files",
+			`[{"fontFamily":"A","fonts":[]}]`,
+			"a family has no name or no files",
+		},
+		{
+			"what is not JSON",
+			`{`,
+			"fonts.json",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			overlay := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(overlay, "assets"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(overlay, "assets", "a.ttf"), []byte("A"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(overlay, "fonts.json"), []byte(test.fonts), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := nativeFonts(overlay)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("err = %v, want one that says %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestNativeAnAppWithoutFontsDeclaresAnEmptyMap(t *testing.T) {
+	module := nativeFontsModule(nil)
+	if !strings.Contains(module, "export const families: Record<string, number[]> = {\n};") {
+		t.Errorf("a project without fonts does not declare an empty map:\n%s", module)
+	}
+	if !strings.Contains(module, "export const fonts: Record<string, number> = {\n};") {
+		t.Errorf("a project without fonts does not declare an empty map:\n%s", module)
 	}
 }
