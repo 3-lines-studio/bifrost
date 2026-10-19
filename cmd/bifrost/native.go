@@ -432,7 +432,7 @@ module.exports = { inheritedText, textStyle };
 // place where the rules of an element are already merged into one style -- and
 // then hands that style on: a Text folds what it carries into what it paints,
 // and a box keeps what the words inside it should inherit.
-const nativeTextModule = `import { createContext, useContext, type ReactNode } from "react";
+const nativeTextModule = `import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, Pressable, Text, TextInput, View, type StyleProp, type ViewStyle } from "react-native";
 import { styled } from "react-native-css/native";
 import * as declaredFonts from "./fonts";
@@ -490,6 +490,42 @@ function AnimatedViewBox({ style, bottomAnchored, children, ...rest }: HostProps
   );
 }
 
+type LayoutNode = {
+  measureLayout: (relative: unknown, onSuccess: (x: number, y: number, width: number, height: number) => void, onFail?: () => void) => void;
+};
+
+// The box a page stuck to the edge of the document: it starts where the page put
+// it and, once the content has scrolled that far, travels with the content by as
+// much as it scrolls -- the box stays at the edge while the content goes under
+// it. The distance from the top of the document is measured once, against the
+// box the document scrolls, and measured again whenever the content changes size.
+function StickyViewBox({ style, children, ...rest }: HostProps) {
+  const carried = useContext(Carried);
+  const document = useDocumentScroll();
+  const view = useRef<LayoutNode | null>(null);
+  const [top, setTop] = useState<number | null>(null);
+  const content = document === null ? 0 : document.content;
+  useEffect(() => {
+    const node = view.current;
+    const inner = document === null ? null : document.inner;
+    if (node === null || inner === null || inner.current === null) {
+      return;
+    }
+    node.measureLayout(inner.current, (x: number, y: number) => { setTop(y); }, () => { setTop(null); });
+  }, [document, content]);
+  const shift = document === null || top === null
+    ? null
+    : top <= 0
+      ? document.y
+      : document.y.interpolate({ inputRange: [-1, 0, top, top + 1, 1e9], outputRange: [0, 0, 0, 1, 1e9] });
+  const painted = shift === null ? style : [style, { transform: [{ translateY: shift }] }];
+  return (
+    <Carried.Provider value={inheritedText(carried, style)}>
+      <Animated.View ref={view as never} {...withoutClass(rest)} style={painted as StyleProp<ViewStyle>}>{children}</Animated.View>
+    </Carried.Provider>
+  );
+}
+
 function InputBox({ style, children, ...rest }: HostProps) {
   const carried = useContext(Carried);
   const own = inheritedText(carried, style);
@@ -512,6 +548,7 @@ function PressBox({ style, children, ...rest }: HostProps) {
 export const StyledText = styled(TextView);
 export const StyledView = styled(ViewBox);
 export const StyledAnimatedView = styled(AnimatedViewBox);
+export const StyledStickyView = styled(StickyViewBox);
 export const StyledPressable = styled(PressBox);
 export const StyledTextInput = styled(InputBox);
 
@@ -2697,7 +2734,7 @@ export function useRouter() {
 
 const nativeScreen = `import { router, useIsFocused, useLocalSearchParams, usePathname } from "expo-router";
 import { Component, useEffect, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Animated, StyleSheet, Text } from "react-native";
+import { ActivityIndicator, Animated, StyleSheet, Text, type View as NativeView } from "react-native";
 import { StyledView as View } from "./text";
 import { DocumentScroll } from "./document-scroll";
 import { loadPage, type PageData } from "./data";
@@ -2732,6 +2769,7 @@ export function Screen({ render, params }: ScreenProps) {
   const [viewportHeight, setViewportHeight] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
   const scrollY = useRef(new Animated.Value(0)).current;
+  const innerView = useRef<NativeView | null>(null);
   const href = pathname + query(search, params);
 
   // Where this screen is, written down before anything inside it renders: a page
@@ -2835,9 +2873,10 @@ export function Screen({ render, params }: ScreenProps) {
   const documentStyle = direction === undefined ? styles.screen : [styles.screen, { direction }];
   return (
     <View className={root} style={documentStyle}>
-      <DocumentScroll.Provider value={{ y: scrollY, viewport: viewportHeight, content: contentHeight }}>
+      <DocumentScroll.Provider value={{ y: scrollY, viewport: viewportHeight, content: contentHeight, inner: innerView }}>
         <Animated.ScrollView
           contentContainerStyle={styles.page}
+          innerViewRef={innerView as never}
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={(width: number, height: number) => { setContentHeight(height); }}
           onLayout={(event) => { setViewportHeight(event.nativeEvent.layout.height); }}
@@ -2896,8 +2935,8 @@ const styles = StyleSheet.create({
 });
 `
 
-const nativeDocumentScroll = `import { createContext, useContext } from "react";
-import type { Animated } from "react-native";
+const nativeDocumentScroll = `import { createContext, useContext, type RefObject } from "react";
+import type { Animated, View } from "react-native";
 
 // The offset of the document, measured by the screen that scrolls it. A box the
 // page pinned to the viewport is inside the content, so the content scrolls under
@@ -2908,6 +2947,7 @@ export type DocumentScrollValue = {
   y: Animated.Value;
   viewport: number;
   content: number;
+  inner: RefObject<View | null> | null;
 };
 
 export const DocumentScroll = createContext<DocumentScrollValue | null>(null);
@@ -3170,14 +3210,14 @@ for (const [name, component] of Object.entries(extraTags)) {
 }
 `
 
-const nativeHostHead = `import { Children, Fragment, createElement, isValidElement, useState, useSyncExternalStore, type ReactNode } from "react";
+const nativeHostHead = `import { Children, Fragment, cloneElement, createElement, isValidElement, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Image, Linking, Modal, Platform, ScrollView, StyleSheet } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import Slider from "@react-native-community/slider";
 import * as DocumentPicker from "expo-document-picker";
 import Svg, { Circle, ClipPath, Defs, Ellipse, G, Line, LinearGradient, Mask, Path, Polygon, Polyline, RadialGradient, Rect, Stop, Symbol as SymbolTag, Use } from "react-native-svg";
 import { styled } from "react-native-css/native";
-import { StyledAnimatedView as AnimatedView, StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";
+import { StyledAnimatedView as AnimatedView, StyledPressable as Pressable, StyledStickyView as StickyView, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";
 import { ORIGIN } from "./origin";
 import { isBottomAnchored, isFixed, isSticky, scrollOf, splitScroll } from "./scroll";
 import { runsOf, asksForFlex } from "./runs";
@@ -3266,11 +3306,14 @@ export function droppedProps(name: string, props: unknown): string[] {
 // in 30 s without it -- because the height a ScrollView reports is not the height
 // the parent measured from, and the measurement feeds the layout back. The View
 // on the outside reports what it always reported.
-function Scroller({ className, contentContainerStyle, children, ...rest }: { className?: unknown; contentContainerStyle?: unknown; children?: ReactNode } & Record<string, unknown>) {
+function Scroller({ className, contentContainerStyle, pinnedInScroller, children, ...rest }: { className?: unknown; contentContainerStyle?: unknown; pinnedInScroller?: unknown; children?: ReactNode } & Record<string, unknown>) {
   const scroll = scrollOf(className);
   if (scroll === null) {
     if (isFixed(className)) {
       return <AnimatedView className={className as string} bottomAnchored={isBottomAnchored(className)} {...rest}>{children}</AnimatedView>;
+    }
+    if (isSticky(className) && pinnedInScroller !== true) {
+      return <StickyView className={className as string} {...rest}>{children}</StickyView>;
     }
     return <View className={className as string} {...rest}>{children}</View>;
   }
@@ -3285,6 +3328,7 @@ function Scroller({ className, contentContainerStyle, children, ...rest }: { cla
   // be one -- the index is the one of the ScrollView, not one of the tree.
   const parts = Children.toArray(children);
   const pinned = parts.flatMap((child, at) => (isValidElement(child) && isSticky((child.props as { className?: unknown }).className) ? [at] : []));
+  const pinnedParts = parts.map((child, at) => (pinned.indexOf(at) >= 0 && isValidElement(child) && child.type === Box ? cloneElement(child as never, { pinnedInScroller: true } as never) : child));
   const view = (
     <ScrollView
       contentContainerStyle={content as never}
@@ -3293,7 +3337,7 @@ function Scroller({ className, contentContainerStyle, children, ...rest }: { cla
       stickyHeaderIndices={scroll === "vertical" && pinned.length > 0 ? pinned : undefined}
       style={SCROLL_FILLS}
     >
-      {parts}
+      {pinnedParts}
     </ScrollView>
   );
   if (isFixed(className)) {
