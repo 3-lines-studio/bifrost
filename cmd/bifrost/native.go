@@ -2915,7 +2915,7 @@ for (const [name, component] of Object.entries(extraTags)) {
 }
 `
 
-const nativeHostHead = `import { Children, Fragment, createElement, isValidElement, useState, type ReactNode } from "react";
+const nativeHostHead = `import { Children, Fragment, createElement, isValidElement, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Image, Linking, Modal, ScrollView, StyleSheet } from "react-native";
 import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View } from "./text";
 import { scrollOf, splitScroll } from "./scroll";
@@ -3226,6 +3226,149 @@ function ImageTag({ src, alt, ...rest }: { src?: string; alt?: string } & Record
   return <Image source={{ uri: typeof src === "string" ? src : undefined }} accessibilityLabel={alt} {...rest} />;
 }
 
+// The type of a field is not only its keyboard: a checkbox and a radio are
+// controls a browser draws, and painting them as text fields was worse than
+// painting nothing -- measured on the device, a checkbox came out as an empty
+// input and a radio as an input holding its own value. What is painted here is
+// what a browser sends: a box that is checked, an event that carries
+// target.checked, and a radio group that turns the others off by name.
+const radioGroups = new Map<string, { selected: string | undefined; listeners: Set<() => void> }>();
+
+function radioGroup(name: string): { selected: string | undefined; listeners: Set<() => void> } {
+  let group = radioGroups.get(name);
+  if (group === undefined) {
+    group = { selected: undefined, listeners: new Set() };
+    radioGroups.set(name, group);
+  }
+  return group;
+}
+
+// The value a control sends with a form when the page did not give it one: a
+// browser sends "on" for a checkbox, and nothing for a radio without a value.
+function controlValue(type: string, value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return type === "checkbox" ? "on" : "";
+}
+
+function controlEvent(type: string, checked: boolean, value: string, name: unknown): Record<string, unknown> {
+  const target = { checked, value, name, type };
+  return { target, currentTarget: target, nativeEvent: { checked, value } };
+}
+
+function Control({ type, checked, className, disabled, onPress, ...rest }: Record<string, unknown>) {
+  // The class sizes the box, and a checkbox without one would be a mark with no
+  // box around it: a browser draws a control even when the page styles nothing.
+  const bare = className === undefined || className === null || className === "";
+  return (
+    <Pressable
+      {...rest}
+      accessibilityRole={type === "radio" ? "radio" : "checkbox"}
+      accessibilityState={{ checked: checked === true, disabled: disabled === true }}
+      className={className as string}
+      disabled={disabled === true}
+      onPress={onPress as () => void}
+      style={bare ? styles.control : undefined}
+    >
+      <View pointerEvents="none" style={styles.center}>
+        {checked === true ? <Text style={type === "radio" ? styles.dot : styles.check}>{type === "radio" ? "●" : "✓"}</Text> : null}
+      </View>
+    </Pressable>
+  );
+}
+
+function CheckBox({ checked, defaultChecked, onChange, name, value, disabled, className, ...rest }: Record<string, unknown>) {
+  const form = useForm();
+  const [own, setOwn] = useState(defaultChecked === true);
+  const on = checked === undefined ? own : checked === true;
+  const sent = controlValue("checkbox", value);
+  if (form !== null && typeof name === "string") {
+    if (on) {
+      form.fields.set(name, sent);
+    } else {
+      form.fields.delete(name);
+    }
+  }
+  const press = () => {
+    const next = !on;
+    if (checked === undefined) {
+      setOwn(next);
+    }
+    if (typeof onChange === "function") {
+      (onChange as (event: unknown) => void)(controlEvent("checkbox", next, sent, name));
+    }
+  };
+  return <Control type="checkbox" checked={on} className={className} disabled={disabled} onPress={press} {...rest} />;
+}
+
+// A radio group is the name its fields share: a browser turns the others off
+// when one is chosen, and a page that keeps the choice in its own state does the
+// same through checked. An uncontrolled group keeps the choice here, because no
+// page is holding it.
+function Radio({ checked, defaultChecked, onChange, name, value, disabled, className, ...rest }: Record<string, unknown>) {
+  const form = useForm();
+  const sent = controlValue("radio", value);
+  const group = checked === undefined && typeof name === "string" ? radioGroup(name) : undefined;
+  const selected = useSyncExternalStore(
+    (listener) => {
+      if (group === undefined) {
+        return () => {};
+      }
+      group.listeners.add(listener);
+      return () => {
+        group.listeners.delete(listener);
+      };
+    },
+    () => (group === undefined ? undefined : group.selected),
+    () => undefined,
+  );
+  const [own, setOwn] = useState(defaultChecked === true);
+  // The default of a group is written down the first time one of its fields is
+  // painted, so the field that comes before it in the tree already knows.
+  if (group !== undefined && group.selected === undefined && defaultChecked === true) {
+    group.selected = sent;
+  }
+  const on = checked !== undefined ? checked === true : group !== undefined ? selected === sent : own;
+  if (form !== null && typeof name === "string" && on) {
+    form.fields.set(name, sent);
+  }
+  const press = () => {
+    if (on) {
+      return;
+    }
+    if (checked === undefined) {
+      if (group !== undefined) {
+        group.selected = sent;
+        for (const listener of group.listeners) {
+          listener();
+        }
+      } else {
+        setOwn(true);
+      }
+    }
+    if (typeof onChange === "function") {
+      (onChange as (event: unknown) => void)(controlEvent("radio", true, sent, name));
+    }
+  };
+  return <Control type="radio" checked={on} className={className} disabled={disabled} onPress={press} {...rest} />;
+}
+
+// The type of the input decides which control it is; everything else is a field
+// of text.
+function InputTag(props: Record<string, unknown>) {
+  if (props.type === "checkbox") {
+    return <CheckBox {...props} />;
+  }
+  if (props.type === "radio") {
+    return <Radio {...props} />;
+  }
+  return <Field {...props} />;
+}
+
 // A browser opens a select and lists the options it holds; a native target has
 // neither, and a tag this table does not paint takes the whole screen down --
 // measured: one <select> in a form and the render stopped at "View config getter
@@ -3373,6 +3516,10 @@ const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.4)", justifyContent: "flex-end" },
   sheet: { backgroundColor: "#ffffff", borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingVertical: 8 },
   choice: { paddingHorizontal: 20, paddingVertical: 14 },
+  control: { width: 18, height: 18 },
+  center: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  check: { fontSize: 12, lineHeight: 14 },
+  dot: { fontSize: 8, lineHeight: 10 },
 });
 
 const NAMED: Record<string, unknown> = {
@@ -3381,7 +3528,7 @@ const NAMED: Record<string, unknown> = {
   form: FormTag,
   hr: Rule,
   img: ImageTag,
-  input: Field,
+  input: InputTag,
   optgroup: OptionGroup,
   option: Option,
   select: Select,
