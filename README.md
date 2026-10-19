@@ -497,11 +497,11 @@ The seam is there because replacing the file is what an app had to do, and it is
 
 The `type` of a field is the browser's name for what the field is for, and the map reads it because a native control knows the same things but has no browser to read the name: a `password` masks what is typed, and `email`, `number`, `tel` and `url` each bring the keyboard of what they ask for instead of the plain one. `email` and `url` also turn the first-letter capitalisation off, and a `password` turns off the guesswork of autocorrect. `inputMode` is the same thing said narrower -- it is only the keyboard -- and it wins for the keyboard, which is how a page spells a text field that wants a numeric keypad, like an otp code, while `type` still decides the masking.
 
+A `checkbox` and a `radio` are the two types a browser draws instead of typing into, and the map paints them as the control they are: a box that fills with a check or a dot, an `onChange` whose event carries `target.checked` and `target.value`, and a `name` that travels with the form -- `on` for a checkbox without a value, and nothing for a radio without one. A radio group is the name its fields share, and the target turns the others off; a group a page controls through `checked` keeps the choice in the page, and one it does not keeps it in the target. A radio that is already chosen does nothing when pressed, as in a browser.
+
 A `select` is painted from the options it holds: the chosen one in a pressable, and the rest in a sheet that opens on a press. It reads `value`, `defaultValue`, `onChange` and `name` the way a browser does, an option without a value is worth its label, and an option group is read as the options it holds. A `select multiple` chooses one option and says so in development, because a form of this target carries one value per name.
 
 A form is submitted by its own `onSubmit` when a `button type="submit"` is pressed, and the fields answer with what they hold. Its `method` and `action` are still the browser's: the request a form makes is the app's to make.
-
-A tag that is behaviour and not presentation is left out on purpose. A `form` with `method` and `action` sends nothing on its own, and the app gives it the request it needs next to the screen.
 
 ## Browser performance
 

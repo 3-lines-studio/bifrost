@@ -1954,6 +1954,46 @@ func TestNativeSelectIsAListTheTargetCanPaint(t *testing.T) {
 	}
 }
 
+func TestNativeAControlThatIsNotTextIsItsControl(t *testing.T) {
+	// Measured on the device: <input type="checkbox"> came out as an empty text
+	// field and a radio as a field holding its own value. A browser draws a box
+	// and sends target.checked, and that is what the map paints now.
+	host := nativeHost("")
+	for _, wanted := range []string{
+		"input: InputTag,",
+		"return <Field {...props} />;",
+		"if (props.type === \"checkbox\") {",
+		"if (props.type === \"radio\") {",
+		"function CheckBox(",
+		"function Radio(",
+		"function Control(",
+		// A checkbox without a value sends "on", and a radio without one sends
+		// nothing, as a browser does.
+		"return type === \"checkbox\" ? \"on\" : \"\";",
+		// The event carries what a page reads.
+		"const target = { checked, value, name, type };",
+		// A form keeps the checked box and forgets the unchecked one.
+		"form.fields.set(name, sent);",
+		"form.fields.delete(name);",
+		// A radio group turns the others off by name, and an uncontrolled group
+		// keeps the choice itself.
+		"const group = checked === undefined && typeof name === \"string\" ? radioGroup(name) : undefined;",
+		"group.selected = sent;",
+		"for (const listener of group.listeners) {",
+		"if (group !== undefined && group.selected === undefined && defaultChecked === true) {",
+		// A radio that is already chosen does nothing, as a browser does.
+		"if (on) {\n      return;\n    }",
+		// The class of the page sizes the box, and a control without one still
+		// has a box to be pressed.
+		"style={bare ? styles.control : undefined}",
+		"accessibilityRole={type === \"radio\" ? \"radio\" : \"checkbox\"}",
+	} {
+		if !strings.Contains(host, wanted) {
+			t.Fatalf("the control does not answer %q", wanted)
+		}
+	}
+}
+
 func TestNativeRuntimeLeavesNamesItDoesNotKnowAlone(t *testing.T) {
 	// react-native builds its own views out of strings (`codegenNativeComponent`
 	// returns "RCTView"), so replacing an unknown name would tear them apart.
