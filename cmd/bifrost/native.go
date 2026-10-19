@@ -2927,6 +2927,7 @@ import { Image, Linking, Modal, ScrollView, StyleSheet } from "react-native";
 import Svg, { Circle, ClipPath, Defs, Ellipse, G, Line, LinearGradient, Mask, Path, Polygon, Polyline, RadialGradient, Rect, Stop, Symbol as SymbolTag, Use } from "react-native-svg";
 import { styled } from "react-native-css/native";
 import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";
+import { ORIGIN } from "./origin";
 import { scrollOf, splitScroll } from "./scroll";
 import { runsOf, asksForFlex } from "./runs";
 import { navigate } from "virtual:bifrost/navigation";
@@ -3231,8 +3232,30 @@ function Field({ name, value, defaultValue, rows, type, inputMode, onKeyDown, on
   );
 }
 
-function ImageTag({ src, alt, ...rest }: { src?: string; alt?: string } & Record<string, unknown>) {
-  return <Image source={{ uri: typeof src === "string" ? src : undefined }} accessibilityLabel={alt} {...rest} />;
+// A page names the source of an image in two ways: a module it imported, which
+// the bundler hands over as an asset, and a url the server answers. A browser
+// resolves the url against the document it is in; a native client has no
+// document, so the path is the origin of the app. Measured on the device: an
+// imported logo and a rooted one both painted nothing -- a number is not a uri,
+// and there was no server named by the path.
+function imageSource(src: unknown): unknown {
+  if (typeof src === "number") {
+    return src;
+  }
+  if (typeof src === "object" && src !== null && typeof (src as { uri?: unknown }).uri === "string") {
+    return src;
+  }
+  if (typeof src !== "string" || src === "") {
+    return undefined;
+  }
+  if (src.charAt(0) === "/" && src.charAt(1) !== "/") {
+    return { uri: ORIGIN + src };
+  }
+  return { uri: src };
+}
+
+function ImageTag({ src, alt, ...rest }: { src?: unknown; alt?: string } & Record<string, unknown>) {
+  return <Image source={imageSource(src) as never} accessibilityLabel={alt} {...rest} />;
 }
 
 // The type of a field is not only its keyboard: a checkbox and a radio are

@@ -2034,6 +2034,31 @@ func TestNativeAnSvgIsADrawingTheTargetCanPaint(t *testing.T) {
 	}
 }
 
+func TestNativeAnImageIsTheAssetItCameFrom(t *testing.T) {
+	// Measured on the device: an <img> whose src was a module the page imported
+	// and one whose src was a rooted url both painted nothing. Metro hands an
+	// import over as a number, which is not a uri, and a rooted url has no
+	// document here to resolve it against.
+	host := nativeHost("")
+	for _, wanted := range []string{
+		`import { ORIGIN } from "./origin";`,
+		"function imageSource(src: unknown): unknown",
+		// The asset of the bundler, and the one Expo builds as an object.
+		"if (typeof src === \"number\") {",
+		"typeof (src as { uri?: unknown }).uri === \"string\"",
+		// A rooted url is the url of the app's own server, and a
+		// protocol-relative one is not.
+		"if (src.charAt(0) === \"/\" && src.charAt(1) !== \"/\") {",
+		"return { uri: ORIGIN + src };",
+		"source={imageSource(src) as never}",
+		"accessibilityLabel={alt}",
+	} {
+		if !strings.Contains(host, wanted) {
+			t.Fatalf("the image does not answer %q", wanted)
+		}
+	}
+}
+
 func TestNativeRuntimeLeavesNamesItDoesNotKnowAlone(t *testing.T) {
 	// react-native builds its own views out of strings (`codegenNativeComponent`
 	// returns "RCTView"), so replacing an unknown name would tear them apart.
