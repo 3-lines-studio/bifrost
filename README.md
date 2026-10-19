@@ -503,6 +503,8 @@ The `type` of a field is the browser's name for what the field is for, and the m
 
 A `checkbox` and a `radio` are the two types a browser draws instead of typing into, and the map paints them as the control they are: a box that fills with a check or a dot, an `onChange` whose event carries `target.checked` and `target.value`, and a `name` that travels with the form -- `on` for a checkbox without a value, and nothing for a radio without one. A radio group is the name its fields share, and the target turns the others off; a group a page controls through `checked` keeps the choice in the page, and one it does not keeps it in the target. A radio that is already chosen does nothing when pressed, as in a browser.
 
+A `date` is the calendar of the device. The field shows the date of the locale, and the value the page reads from `onChange` and the form sends is `YYYY-MM-DD`; `min` and `max` limit the calendar, and a dismissed dialog leaves the value as it was. A value that is not a date is empty rather than today.
+
 A `select` is painted from the options it holds: the chosen one in a pressable, and the rest in a sheet that opens on a press. It reads `value`, `defaultValue`, `onChange` and `name` the way a browser does, an option without a value is worth its label, and an option group is read as the options it holds. A `select multiple` chooses one option and says so in development, because a form of this target carries one value per name.
 
 A form is submitted by its own `onSubmit` when a `button type="submit"` is pressed, and the fields answer with what they hold. Its `method` and `action` are still the browser's: the request a form makes is the app's to make.

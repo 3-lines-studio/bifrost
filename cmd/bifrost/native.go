@@ -2923,7 +2923,8 @@ for (const [name, component] of Object.entries(extraTags)) {
 `
 
 const nativeHostHead = `import { Children, Fragment, createElement, isValidElement, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Image, Linking, Modal, ScrollView, StyleSheet } from "react-native";
+import { Image, Linking, Modal, Platform, ScrollView, StyleSheet } from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import Svg, { Circle, ClipPath, Defs, Ellipse, G, Line, LinearGradient, Mask, Path, Polygon, Polyline, RadialGradient, Rect, Stop, Symbol as SymbolTag, Use } from "react-native-svg";
 import { styled } from "react-native-css/native";
 import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";
@@ -3389,9 +3390,105 @@ function Radio({ checked, defaultChecked, onChange, name, value, disabled, class
   return <Control type="radio" checked={on} className={className} disabled={disabled} onPress={press} {...rest} />;
 }
 
+// A browser draws a field of type="date" with a calendar and hands the page the
+// value as YYYY-MM-DD. Measured on the device: the field opened the keyboard and
+// painted the ISO string, which is not a date to pick. The calendar is the one of
+// the device, and the value the page reads is the one a browser gives it.
+const DATE_VALUE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+function dateOf(value: unknown): Date | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const match = DATE_VALUE.exec(value);
+  if (match === null) {
+    return null;
+  }
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isoOf(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return date.getFullYear() + "-" + month + "-" + day;
+}
+
+function DateField({ value, defaultValue, onChange, name, min, max, disabled, className, ...rest }: Record<string, unknown>) {
+  const form = useForm();
+  const [own, setOwn] = useState<Date | null>(() => dateOf(defaultValue));
+  const [open, setOpen] = useState(false);
+  const current = value === undefined ? own : dateOf(value);
+  const sent = current === null ? "" : isoOf(current);
+  if (form !== null && typeof name === "string") {
+    form.fields.set(name, sent);
+  }
+  const picked = (event: unknown, date: Date) => {
+    // The dialog of Android is a dialog: picking it or dismissing it is the whole
+    // visit. The spinner of iOS stays until the page closes it.
+    if (Platform.OS === "android") {
+      setOpen(false);
+    }
+    if (value === undefined) {
+      setOwn(date);
+    }
+    const next = isoOf(date);
+    if (form !== null && typeof name === "string") {
+      form.fields.set(name, next);
+    }
+    if (typeof onChange !== "function") {
+      return;
+    }
+    (onChange as (event: unknown) => void)({
+      target: { value: next, name, type: "date" },
+      currentTarget: { value: next, name, type: "date" },
+      nativeEvent: { text: next },
+    });
+  };
+  const calendar = (
+    <DateTimePicker
+      value={current === null ? new Date() : current}
+      mode="date"
+      minimumDate={dateOf(min) ?? undefined}
+      maximumDate={dateOf(max) ?? undefined}
+      onValueChange={picked}
+      onDismiss={() => setOpen(false)}
+    />
+  );
+  return (
+    <>
+      <Pressable
+        {...rest}
+        accessibilityRole="button"
+        className={className as string}
+        disabled={disabled === true}
+        onPress={() => setOpen(true)}
+        style={className === undefined || className === null || className === "" ? styles.date : undefined}
+      >
+        <Text>{current === null ? " " : current.toLocaleDateString()}</Text>
+      </Pressable>
+      {open === false ? null : Platform.OS === "android" ? calendar : (
+        <Modal transparent animationType="fade" visible onRequestClose={() => setOpen(false)}>
+          <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
+            <View style={styles.sheet}>
+              {calendar}
+              <Pressable onPress={() => setOpen(false)}>
+                <Text>Done</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Modal>
+      )}
+    </>
+  );
+}
+
 // The type of the input decides which control it is; everything else is a field
 // of text.
 function InputTag(props: Record<string, unknown>) {
+  if (props.type === "date") {
+    return <DateField {...props} />;
+  }
   if (props.type === "checkbox") {
     return <CheckBox {...props} />;
   }
@@ -3630,6 +3727,7 @@ const styles = StyleSheet.create({
   center: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
   check: { fontSize: 12, lineHeight: 14 },
   dot: { fontSize: 8, lineHeight: 10 },
+  date: { paddingHorizontal: 12, paddingVertical: 8 },
 });
 
 const NAMED: Record<string, unknown> = {
@@ -4051,12 +4149,16 @@ func nativePackageManifest() map[string]any {
 		"private": true,
 		"main":    "expo-router/entry",
 		"dependencies": map[string]any{
-			"expo":            "~57.0.28",
-			"expo-constants":  "~57.0.21",
-			"expo-font":       "~57.0.4",
-			"expo-linking":    "~57.0.12",
-			"expo-router":     "~57.0.26",
-			"expo-status-bar": "~57.0.1",
+			// The calendar of the device, for the fields of a form that a browser
+			// draws instead of typing into. The version is the one the runtime of
+			// this SDK carries.
+			"@react-native-community/datetimepicker": "9.1.0",
+			"expo":                                   "~57.0.28",
+			"expo-constants":                         "~57.0.21",
+			"expo-font":                              "~57.0.4",
+			"expo-linking":                           "~57.0.12",
+			"expo-router":                            "~57.0.26",
+			"expo-status-bar":                        "~57.0.1",
 			// The transformer of this target reads a stylesheet and rewrites its
 			// selectors, which takes a parser: Metro resolves it from the project,
 			// and without it every element selector is left as it was and dropped by
