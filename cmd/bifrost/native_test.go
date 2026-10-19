@@ -1994,6 +1994,46 @@ func TestNativeAControlThatIsNotTextIsItsControl(t *testing.T) {
 	}
 }
 
+func TestNativeAnSvgIsADrawingTheTargetCanPaint(t *testing.T) {
+	// Measured on the device: an <svg> warned "no native counterpart for <svg>"
+	// and painted nothing. react-native-svg is part of the runtime of Expo Go,
+	// so the drawing is a drawing here too.
+	dependencies, _ := nativePackageManifest()["dependencies"].(map[string]any)
+	if dependencies["react-native-svg"] != "15.15.4" {
+		t.Fatalf("the project draws an svg without the module that draws it: %v", dependencies["react-native-svg"])
+	}
+	host := nativeHost("")
+	for _, wanted := range []string{
+		`import Svg, { Circle, ClipPath, Defs, Ellipse, G, Line, LinearGradient, Mask, Path, Polygon, Polyline, RadialGradient, Rect, Stop, Symbol as SymbolTag, Use } from "react-native-svg";`,
+		"svg: SvgRoot,",
+		"path: SvgPath,",
+		"g: SvgG,",
+		"linearGradient: SvgLinearGradient,",
+		"clipPath: SvgClipPath,",
+		// The class sizes the box and the drawing fills it; a drawing without a
+		// class keeps the size the page wrote.
+		"const sized = flat.width !== undefined || flat.height !== undefined;",
+		"width: sized ? \"100%\" : props.width,",
+		"height: sized ? \"100%\" : props.height,",
+		// The colour a browser inherits reaches currentColor.
+		"const color = typeof flat.color === \"string\" ? flat.color : carried;",
+		"color,",
+		// An attribute written for HTML is the same attribute of a drawing.
+		"name.replace(/-(.)/g, (_, letter: string) => letter.toUpperCase())",
+		// What belongs to the document is not part of the drawing.
+		"name === \"className\" || name === \"xmlns\" || name === \"xmlnsXlink\" || name === \"aria-hidden\" || name === \"focusable\"",
+		// A description is text of the document, not a shape.
+		"const HIDDEN = [\"base\", \"desc\",",
+	} {
+		if !strings.Contains(host, wanted) {
+			t.Fatalf("the drawing does not answer %q", wanted)
+		}
+	}
+	if !strings.Contains(nativeTextModule, "export function useInheritedColor(): string | undefined") {
+		t.Fatal("the box cannot hand its colour to a drawing")
+	}
+}
+
 func TestNativeRuntimeLeavesNamesItDoesNotKnowAlone(t *testing.T) {
 	// react-native builds its own views out of strings (`codegenNativeComponent`
 	// returns "RCTView"), so replacing an unknown name would tear them apart.
@@ -2650,7 +2690,7 @@ func TestNativeShipsTheFontsTheAppDeclares(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(host), `import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View } from "./text";`) {
+	if !strings.Contains(string(host), `import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";`) {
 		t.Error("the tag map paints plain views, so nothing inherits and no weight reaches a file")
 	}
 	text, err := os.ReadFile(filepath.Join(native, "bifrost", "text.tsx"))

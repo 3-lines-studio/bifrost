@@ -477,7 +477,9 @@ as a single token: measured, `"DejaVu Serif"` from the theme reaches the style a
 
 ### One page, two targets
 
-A page is written once, for the browser, and the tags in it are what the native screen paints. Metro resolves `react/jsx-runtime` to a wrapper that turns a lowercase tag into the component that draws it: `div` and the other blocks become a `View` that groups any text inside it into a `Text`, `p`, `h1`, `span` and the rest become `Text`, `a` becomes a `Pressable` that navigates a path and opens a url, `button`, `input`, `textarea` and `img` become their controls. Sheet links, metadata and scripts have nothing to paint, so they render nothing.
+A page is written once, for the browser, and the tags in it are what the native screen paints. Metro resolves `react/jsx-runtime` to a wrapper that turns a lowercase tag into the component that draws it: `div` and the other blocks become a `View` that groups any text inside it into a `Text`, `p`, `h1`, `span` and the rest become `Text`, `a` becomes a `Pressable` that navigates a path and opens a url, `button`, `input`, `textarea`, `select` and `img` become their controls. Sheet links, metadata and scripts have nothing to paint, so they render nothing.
+
+An `svg` is a drawing, not a tag of the document: `svg`, `path`, `circle`, `rect`, `line`, `polyline`, `polygon`, `ellipse`, `g`, `defs`, `linearGradient`, `radialGradient`, `stop`, `clipPath`, `mask`, `symbol` and `use` are painted with `react-native-svg`, the version the runtime of the SDK carries. The class of the root is the box of the drawing: it sizes a `View` that the svg fills, and the colour follows `currentColor` from the icon's own class or from the box that holds it, which is what a browser inherits. `stroke-width` of an HTML string and `strokeWidth` of React name the same attribute, and `xmlns` and `aria-hidden` stay with the document. A filter, or text inside a drawing, is outside this map.
 
 The vocabulary is the set of tags a native target supports. A lowercase tag outside it is one the map is missing: it warns in development with its own name, and the element is left exactly as it was, so the failure is loud instead of a paragraph that quietly disappears. Anything that is not a lowercase tag is untouched too, because React Native builds its own views out of strings and replacing one would tear them apart.
 
@@ -485,8 +487,8 @@ An app always has a tag the generator does not know, or one it wants painted its
 
 ```tsx
 export const extraTags: Record<string, unknown> = {
-  svg: Svg,
-  path: Path,
+  video: Video,
+  canvas: Canvas,
   div: Box,
 };
 ```
