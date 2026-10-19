@@ -2059,6 +2059,45 @@ func TestNativeAnImageIsTheAssetItCameFrom(t *testing.T) {
 	}
 }
 
+func TestNativeADateIsTheCalendarOfTheDevice(t *testing.T) {
+	// Measured on the device: a field of type="date" opened the keyboard and
+	// painted the ISO string. A browser opens a calendar and hands the page
+	// YYYY-MM-DD, which is what the target does with the calendar of the device.
+	dependencies, _ := nativePackageManifest()["dependencies"].(map[string]any)
+	if dependencies["@react-native-community/datetimepicker"] != "9.1.0" {
+		t.Fatalf("the project opens a calendar without the module that opens it: %v", dependencies["@react-native-community/datetimepicker"])
+	}
+	host := nativeHost("")
+	for _, wanted := range []string{
+		`import DateTimePicker from "@react-native-community/datetimepicker";`,
+		"if (props.type === \"date\") {",
+		"function DateField(",
+		"function dateOf(value: unknown): Date | null",
+		"function isoOf(date: Date): string",
+		// The event a page reads is the one of a browser.
+		"target: { value: next, name, type: \"date\" },",
+		// What a browser limits, the calendar limits.
+		"minimumDate={dateOf(min) ?? undefined}",
+		"maximumDate={dateOf(max) ?? undefined}",
+		// The listeners of this version: onChange is deprecated in 9.
+		"onValueChange={picked}",
+		"onDismiss={() => setOpen(false)}",
+		// A browser shows the date of the locale, and no value is empty.
+		"current.toLocaleDateString()",
+		"const sent = current === null ? \"\" : isoOf(current);",
+		// A field of a form travels with the form.
+		"form.fields.set(name, sent);",
+		// The dialog of Android closes itself; the spinner of iOS waits for the
+		// page.
+		"if (Platform.OS === \"android\") {",
+		"onRequestClose={() => setOpen(false)}",
+	} {
+		if !strings.Contains(host, wanted) {
+			t.Fatalf("the date does not answer %q", wanted)
+		}
+	}
+}
+
 func TestNativeRuntimeLeavesNamesItDoesNotKnowAlone(t *testing.T) {
 	// react-native builds its own views out of strings (`codegenNativeComponent`
 	// returns "RCTView"), so replacing an unknown name would tear them apart.
