@@ -632,7 +632,7 @@ func TestNativeMakesABlockThatScrollsAScrollView(t *testing.T) {
 	if !strings.Contains(nativeHostHead, `import { isBottomAnchored, isFixed, isSticky, scrollOf, splitScroll } from "./scroll";`) {
 		t.Fatal("the map does not read the decision")
 	}
-	if !strings.Contains(nativeHostBody, "function Scroller({ className, contentContainerStyle, children, ...rest }") {
+	if !strings.Contains(nativeHostBody, "function Scroller({ className, contentContainerStyle, pinnedInScroller, children, ...rest }") {
 		t.Fatal("the map does not paint a block that scrolls")
 	}
 	if !strings.Contains(nativeHostBody, "<ScrollView") {
@@ -1486,7 +1486,7 @@ func TestNativeAPinnedBoxFollowsTheDocument(t *testing.T) {
 		}
 	}
 	for _, said := range []string{
-		"<DocumentScroll.Provider value={{ y: scrollY, viewport: viewportHeight, content: contentHeight }}>",
+		"<DocumentScroll.Provider value={{ y: scrollY, viewport: viewportHeight, content: contentHeight, inner: innerView }}>",
 		"<Animated.ScrollView",
 		"onContentSizeChange={(width: number, height: number) => { setContentHeight(height); }}",
 		"onLayout={(event) => { setViewportHeight(event.nativeEvent.layout.height); }}",
@@ -1511,13 +1511,58 @@ func TestNativeAPinnedBoxFollowsTheDocument(t *testing.T) {
 	}
 }
 
+func TestNativeAStickyBoxOfTheDocumentKeepsItsEdge(t *testing.T) {
+	// Measured on the device: a sticky title of a page without a scroll box of its
+	// own scrolled away with the content. The box is in the flow until its top
+	// reaches the edge, and from there it travels with the content by as much as
+	// it scrolls; the distance to that edge is measured against the box the
+	// document scrolls, and measured again whenever the content changes size.
+	files := map[string]string{}
+	for _, file := range nativeProjectFiles {
+		files[file.Name] = file.Content
+	}
+	document := files["bifrost/document-scroll.ts"]
+	if !strings.Contains(document, "inner: RefObject<View | null> | null;") {
+		t.Fatal("the document does not carry the box a sticky one is measured against")
+	}
+	for _, said := range []string{
+		"innerViewRef={innerView as never}",
+		"value={{ y: scrollY, viewport: viewportHeight, content: contentHeight, inner: innerView }}",
+	} {
+		if !strings.Contains(nativeScreen, said) {
+			t.Fatalf("the screen does not carry %q", said)
+		}
+	}
+	text := files["bifrost/text.tsx"]
+	for _, said := range []string{
+		"function StickyViewBox(",
+		"node.measureLayout(inner.current",
+		"inputRange: [-1, 0, top, top + 1, 1e9], outputRange: [0, 0, 0, 1, 1e9]",
+		"export const StyledStickyView = styled(StickyViewBox);",
+	} {
+		if !strings.Contains(text, said) {
+			t.Fatalf("the sticky box does not carry %q", said)
+		}
+	}
+	host := nativeHost("")
+	for _, said := range []string{
+		`<StickyView className={className as string} {...rest}>`,
+		"pinnedInScroller !== true",
+		"cloneElement(child as never, { pinnedInScroller: true } as never)",
+	} {
+		if !strings.Contains(host, said) {
+			t.Fatalf("the map does not carry %q", said)
+		}
+	}
+}
+
 func TestNativeThePageScrollsAsItsDocument(t *testing.T) {
 	// Measured on the device: a page taller than the screen painted its first rows
 	// and nothing else, with no way to reach the rest, because a native view does
 	// not scroll unless it is a ScrollView. On the web the document is what
 	// scrolls, and here the screen is the document.
 	for _, said := range []string{
-		`import { ActivityIndicator, Animated, StyleSheet, Text } from "react-native";`,
+		`import { ActivityIndicator, Animated, StyleSheet, Text, type View as NativeView } from "react-native";`,
 		"<Animated.ScrollView",
 		"contentContainerStyle={styles.page}",
 		`keyboardShouldPersistTaps="handled"`,
@@ -3069,7 +3114,7 @@ func TestNativeShipsTheFontsTheAppDeclares(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(host), `import { StyledAnimatedView as AnimatedView, StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";`) {
+	if !strings.Contains(string(host), `import { StyledAnimatedView as AnimatedView, StyledPressable as Pressable, StyledStickyView as StickyView, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";`) {
 		t.Error("the tag map paints plain views, so nothing inherits and no weight reaches a file")
 	}
 	text, err := os.ReadFile(filepath.Join(native, "bifrost", "text.tsx"))
