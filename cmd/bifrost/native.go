@@ -888,10 +888,58 @@ function urlOf(input: RequestInfo | URL): string {
   return input.url;
 }
 
+// The fetch of the runtime turns every part of a FormData into bytes, and a file
+// the page chose is a path of the device and not bytes: a request with one is
+// refused as "Unsupported FormDataPart implementation" -- measured on the device
+// with a picked document. The XMLHttpRequest of the target is the uploader that
+// reads that part, so a multipart request with a file is sent by it.
+function isUpload(body: unknown): body is FormData {
+  if (!(body instanceof FormData)) {
+    return false;
+  }
+  for (const [, value] of body.entries()) {
+    if (typeof value === "object" && value !== null && "uri" in value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function uploaded(url: string, init: RequestInit): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open(init.method ?? "GET", url);
+    request.responseType = "text";
+    // The multipart of an upload carries the boundary it made, so the content
+    // type the page wrote is not copied; every other header is.
+    new Headers(init.headers).forEach((value, name) => {
+      if (name.toLowerCase() !== "content-type") {
+        request.setRequestHeader(name, value);
+      }
+    });
+    request.onload = () => {
+      const headers = new Headers();
+      for (const line of request.getAllResponseHeaders().trim().split(/\r?\n/)) {
+        const split = line.indexOf(":");
+        if (split > 0) {
+          headers.append(line.slice(0, split).trim(), line.slice(split + 1).trim());
+        }
+      }
+      resolve(new Response(request.responseText, { status: request.status, statusText: request.statusText, headers }));
+    };
+    request.onerror = () => reject(new TypeError("Network request failed"));
+    request.send(init.body as never);
+  });
+}
+
 globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
   const url = urlOf(input);
+  const target = url.startsWith("/") ? ORIGIN + url : url;
+  if (init !== undefined && isUpload(init.body)) {
+    return uploaded(target, init);
+  }
   if (url.startsWith("/")) {
-    return original(ORIGIN + url, init);
+    return original(target, init);
   }
   return original(input, init);
 };
@@ -909,12 +957,20 @@ globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
 // replaces the one of the map, and the form it is inside is still the form.
 const nativeForm = `import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
+// What a form sends for a file: the part React Native's own uploader, the
+// XMLHttpRequest of the target, knows how to read. The fetch of the runtime
+// converts parts to bytes and refuses this one, so it never sees it.
+export type Upload = { uri: string; name: string; type: string };
+
 export type Form = {
   fields: Map<string, string>;
   // A select that takes more than one value is the only control that answers
   // with more than one value for a name, so it keeps its list apart: the fields
   // of every other control stay one value per name.
   lists: Map<string, string[]>;
+  // A file is neither: the form sends the thing itself, and the upload is what
+  // fetch of react-native knows how to put in the request.
+  files: Map<string, Upload[]>;
   submit: () => void;
 };
 
@@ -924,21 +980,30 @@ const FormContext = createContext<Form | null>(null);
 // There is no document -- the form answered already -- so the constructor hands
 // back what it was given. A page that builds its own, to put a file in, gets an
 // empty one to append to.
+//
+// The replacement shares the prototype of the real one, because the fetch of the
+// runtime asks whether the body is a FormData before it accepts it: a look-alike
+// constructor made every upload "Unsupported BodyInit type" -- measured on the
+// device, a form with a file that was read correctly and could not be sent.
 const NativeFormData = globalThis.FormData;
-globalThis.FormData = function FormData(source?: unknown) {
+const PatchedFormData = function FormData(source?: unknown) {
   if (source instanceof NativeFormData) {
     return source;
   }
   return new NativeFormData();
 } as unknown as typeof FormData;
+(PatchedFormData as unknown as { prototype: unknown }).prototype = NativeFormData.prototype;
+globalThis.FormData = PatchedFormData;
 
 export function FormProvider({ onSubmit, children }: { onSubmit?: unknown; children?: ReactNode }) {
   const [fields] = useState(() => new Map<string, string>());
   const [lists] = useState(() => new Map<string, string[]>());
+  const [files] = useState(() => new Map<string, Upload[]>());
   const form = useMemo<Form>(
     () => ({
       fields,
       lists,
+      files,
       submit: () => {
         if (typeof onSubmit !== "function") {
           return;
@@ -952,10 +1017,15 @@ export function FormProvider({ onSubmit, children }: { onSubmit?: unknown; child
             body.append(name, value);
           }
         }
+        for (const [name, uploads] of files) {
+          for (const upload of uploads) {
+            body.append(name, upload as unknown as Blob);
+          }
+        }
         (onSubmit as (event: unknown) => void)({ preventDefault() {}, currentTarget: body, target: body });
       },
     }),
-    [fields, lists, onSubmit],
+    [fields, lists, files, onSubmit],
   );
   return <FormContext.Provider value={form}>{children}</FormContext.Provider>;
 }
@@ -2937,6 +3007,7 @@ const nativeHostHead = `import { Children, Fragment, createElement, isValidEleme
 import { Image, Linking, Modal, Platform, ScrollView, StyleSheet } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import Slider from "@react-native-community/slider";
+import * as DocumentPicker from "expo-document-picker";
 import Svg, { Circle, ClipPath, Defs, Ellipse, G, Line, LinearGradient, Mask, Path, Polygon, Polyline, RadialGradient, Rect, Stop, Symbol as SymbolTag, Use } from "react-native-svg";
 import { styled } from "react-native-css/native";
 import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";
@@ -2944,7 +3015,7 @@ import { ORIGIN } from "./origin";
 import { scrollOf, splitScroll } from "./scroll";
 import { runsOf, asksForFlex } from "./runs";
 import { navigate } from "virtual:bifrost/navigation";
-import { FormProvider, useForm, usePress } from "./form";
+import { FormProvider, useForm, usePress, type Upload } from "./form";
 
 // The scroll view of a box that scrolls fills the box, which is what its content
 // did in a browser: the box has the size the page gave it and clips what goes
@@ -3592,6 +3663,85 @@ function RangeField({ value, defaultValue, onChange, onInput, name, min, max, st
   );
 }
 
+// A file is not a value of the document: a browser opens the file dialog of the
+// system and keeps the file for the form. Measured on the device: an
+// <input type="file"> was a text field, so there was no way to choose a file at
+// all. The picker is the one of the device; the form keeps the part that React
+// Native's own uploader reads, and ./net sends a multipart request with one.
+type Picked = { uri: string; name: string; type: string; size?: number };
+
+function accepted(accept: unknown): string | string[] {
+  if (typeof accept !== "string" || accept.trim() === "") {
+    return "*/*";
+  }
+  const list = accept
+    .split(",")
+    .map((one) => one.trim())
+    .filter((one) => one !== "");
+  return list.length === 1 ? list[0] : list;
+}
+
+function FileField({ name, multiple, accept, disabled, className, onChange, value, type, ...rest }: Record<string, unknown>) {
+  const form = useForm();
+  const [files, setFiles] = useState<Picked[]>([]);
+  const uploads = files.map((one) => ({ uri: one.uri, name: one.name, type: one.type }));
+  if (form !== null && typeof name === "string") {
+    form.files.set(name, uploads);
+  }
+  const pick = async () => {
+    let result;
+    try {
+      result = await DocumentPicker.getDocumentAsync({
+        type: accepted(accept),
+        multiple: multiple === true,
+        copyToCacheDirectory: true,
+      });
+    } catch (error) {
+      console.warn("bifrost: the picker of the device failed: " + String(error));
+      return;
+    }
+    if (result.canceled) {
+      return;
+    }
+    const picked: Picked[] = result.assets.map((asset) => ({
+      uri: asset.uri,
+      name: asset.name,
+      type: asset.mimeType ?? "application/octet-stream",
+      size: asset.size,
+    }));
+    setFiles(picked);
+    if (form !== null && typeof name === "string") {
+      form.files.set(name, picked.map((one) => ({ uri: one.uri, name: one.name, type: one.type })));
+    }
+    if (typeof onChange !== "function") {
+      return;
+    }
+    // The event a page reads has the files it chose, and the name of the first
+    // one where a browser puts it.
+    const said = picked[0] === undefined ? "" : picked[0].name;
+    (onChange as (event: unknown) => void)({
+      target: { files: picked, value: said, name, type: "file" },
+      currentTarget: { files: picked, value: said, name, type: "file" },
+      nativeEvent: { files: picked },
+    });
+  };
+  const bare = className === undefined || className === null || className === "";
+  return (
+    <Pressable
+      {...rest}
+      accessibilityRole="button"
+      className={className as string}
+      disabled={disabled === true}
+      onPress={() => {
+        void pick();
+      }}
+      style={bare ? styles.file : undefined}
+    >
+      <Text>{files.length === 0 ? "Choose a file" : files.map((one) => one.name).join(", ")}</Text>
+    </Pressable>
+  );
+}
+
 // The type of the input decides which control it is; everything else is a field
 // of text.
 function InputTag(props: Record<string, unknown>) {
@@ -3600,6 +3750,9 @@ function InputTag(props: Record<string, unknown>) {
   }
   if (props.type === "range") {
     return <RangeField {...props} />;
+  }
+  if (props.type === "file") {
+    return <FileField {...props} />;
   }
   if (props.type === "checkbox") {
     return <CheckBox {...props} />;
@@ -3955,6 +4108,7 @@ const styles = StyleSheet.create({
   option: { paddingHorizontal: 12, paddingVertical: 8 },
   optionOn: { backgroundColor: "#dbeafe" },
   summary: { paddingVertical: 6 },
+  file: { paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: "#d4d4d4", borderRadius: 6 },
 });
 
 const NAMED: Record<string, unknown> = {
@@ -4389,6 +4543,7 @@ func nativePackageManifest() map[string]any {
 			"@react-native-community/slider": "5.2.0",
 			"expo":                           "~57.0.28",
 			"expo-constants":                 "~57.0.21",
+			"expo-document-picker":           "~57.0.3",
 			"expo-font":                      "~57.0.4",
 			"expo-linking":                   "~57.0.12",
 			"expo-router":                    "~57.0.26",

@@ -1193,8 +1193,20 @@ func TestNativeShipsThePiecesEveryClientNeeds(t *testing.T) {
 	if !ok {
 		t.Fatal("a page that asks its server for /api/... has nothing to put the origin there")
 	}
-	if !strings.Contains(net, `url.startsWith("/")`) || !strings.Contains(net, "original(ORIGIN + url, init)") {
+	if !strings.Contains(net, `url.startsWith("/")`) || !strings.Contains(net, "original(target, init)") {
 		t.Fatal("the shim does not do what the browser does to a relative url")
+	}
+	// A multipart request with a file is the one the fetch of the runtime cannot
+	// send: the uploader of the target is the one that knows the part.
+	for _, wanted := range []string{
+		"function isUpload(body: unknown): body is FormData",
+		"function uploaded(url: string, init: RequestInit): Promise<Response>",
+		"new XMLHttpRequest()",
+		"isUpload(init.body)",
+	} {
+		if !strings.Contains(net, wanted) {
+			t.Fatalf("the shim does not send an upload: %q", wanted)
+		}
 	}
 	// A Request and a URL spell their address differently, and only one of them
 	// has a url at all.
@@ -1812,8 +1824,15 @@ func TestNativeTagMapSubmitsAFormTheWayABrowserDoes(t *testing.T) {
 		// A select of more than one value answers with a list for its name.
 		"const [lists] = useState(() => new Map<string, string[]>());",
 		"for (const [name, values] of lists) {",
+		// A file answers with the upload itself.
+		"const [files] = useState(() => new Map<string, Upload[]>());",
+		"for (const [name, uploads] of files) {",
+		"body.append(name, upload as unknown as Blob);",
 		// What the page reads out of the event is the FormData the form built.
 		"source instanceof NativeFormData",
+		// A replacement that did not share the prototype made fetch refuse every
+		// upload: "Unsupported BodyInit type".
+		"(PatchedFormData as unknown as { prototype: unknown }).prototype = NativeFormData.prototype;",
 	} {
 		if !strings.Contains(host, wanted) && !strings.Contains(nativeForm, wanted) && !strings.Contains(nativeJSXRuntime, wanted) {
 			t.Fatalf("neither the tag map nor the form carries %q", wanted)
@@ -2194,6 +2213,39 @@ func TestNativeDetailsOpensAndCloses(t *testing.T) {
 	} {
 		if !strings.Contains(host, wanted) {
 			t.Fatalf("the details does not answer %q", wanted)
+		}
+	}
+}
+
+func TestNativeAFileIsChosenFromTheDevice(t *testing.T) {
+	// Measured on the device: an <input type="file"> was a text field, so there
+	// was no way to choose a file. The picker is the one of the device, and the
+	// form sends the upload that fetch of react-native can put in a request.
+	dependencies, _ := nativePackageManifest()["dependencies"].(map[string]any)
+	if dependencies["expo-document-picker"] != "~57.0.3" {
+		t.Fatalf("the project chooses a file without the module that chooses it: %v", dependencies["expo-document-picker"])
+	}
+	host := nativeHost("")
+	for _, wanted := range []string{
+		`import * as DocumentPicker from "expo-document-picker";`,
+		`if (props.type === "file") {`,
+		"function FileField(",
+		"DocumentPicker.getDocumentAsync({",
+		// What the page asked for is what the picker offers.
+		"type: accepted(accept),",
+		"multiple: multiple === true,",
+		// The file has to survive the dialog that chose it.
+		"copyToCacheDirectory: true,",
+		"if (result.canceled) {",
+		`type: asset.mimeType ?? "application/octet-stream",`,
+		// The event a page reads is the one of a browser.
+		"target: { files: picked, value: said, name, type: \"file\" },",
+		// A form carries the upload as the part the target's own uploader reads.
+		"form.files.set(name, uploads);",
+		"form.files.set(name, picked.map((one) => ({ uri: one.uri, name: one.name, type: one.type })));",
+	} {
+		if !strings.Contains(host, wanted) {
+			t.Fatalf("the file does not answer %q", wanted)
 		}
 	}
 }
