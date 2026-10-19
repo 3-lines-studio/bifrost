@@ -490,6 +490,13 @@ export const StyledText = styled(TextView);
 export const StyledView = styled(ViewBox);
 export const StyledPressable = styled(PressBox);
 export const StyledTextInput = styled(InputBox);
+
+// The colour a box hands down, for the one element that paints it without being
+// a text: a drawing of the web takes currentColor from the box that holds it.
+export function useInheritedColor(): string | undefined {
+  const carried = useContext(Carried);
+  return typeof carried.color === "string" ? carried.color : undefined;
+}
 `
 
 // A flex container means a row to a browser and a column to a native view, and
@@ -2917,7 +2924,9 @@ for (const [name, component] of Object.entries(extraTags)) {
 
 const nativeHostHead = `import { Children, Fragment, createElement, isValidElement, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Image, Linking, Modal, ScrollView, StyleSheet } from "react-native";
-import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View } from "./text";
+import Svg, { Circle, ClipPath, Defs, Ellipse, G, Line, LinearGradient, Mask, Path, Polygon, Polyline, RadialGradient, Rect, Stop, Symbol as SymbolTag, Use } from "react-native-svg";
+import { styled } from "react-native-css/native";
+import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";
 import { scrollOf, splitScroll } from "./scroll";
 import { runsOf, asksForFlex } from "./runs";
 import { navigate } from "virtual:bifrost/navigation";
@@ -2937,7 +2946,7 @@ const BOXES = ["address", "article", "aside", "blockquote", "caption", "dd", "de
 const TEXTS = ["abbr", "b", "br", "cite", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6", "i", "label", "mark", "p", "pre", "q", "s", "small", "span", "strong", "time", "u"];
 
 // Sheet links, metadata and scripts have nothing to paint.
-const HIDDEN = ["base", "head", "link", "meta", "noscript", "script", "style", "title"];
+const HIDDEN = ["base", "desc", "head", "link", "meta", "noscript", "script", "style", "title"];
 
 // Props whose whole meaning is the document: a page writes them for the browser,
 // a native view has nothing to do with them, and the renderer drops them without
@@ -3508,6 +3517,84 @@ function Rule() {
   return <View style={{ height: 1, backgroundColor: "#e9dfd2" }} />;
 }
 
+// An icon of the web is an svg, and the target has no vector tags of its own: an
+// app had to ship a table of them in host-extra, and every app that drew one
+// wrote the same table. Measured on the device, an <svg> warned "no native
+// counterpart for <svg>" and painted nothing. react-native-svg is part of the
+// runtime of Expo Go, so the drawing is painted here.
+//
+// The class of the root is the box of the drawing: h-4 w-4 sizes a View and the
+// svg fills it, and the colour travels as currentColor does in a browser -- from
+// the class of the icon or from the box that holds it.
+function flatStyle(style: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const one of Array.isArray(style) ? style : [style]) {
+    if (one !== null && typeof one === "object") {
+      Object.assign(out, one);
+    }
+  }
+  return out;
+}
+
+// stroke-width is how a string of HTML spells an attribute and strokeWidth is
+// how React does; both name the same thing in a drawing. What belongs to the
+// document and not to the drawing is left out.
+function svgProps(props: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(props)) {
+    if (name === "className" || name === "xmlns" || name === "xmlnsXlink" || name === "aria-hidden" || name === "focusable") {
+      continue;
+    }
+    const key = name.indexOf("-") < 0 ? name : name.replace(/-(.)/g, (_, letter: string) => letter.toUpperCase());
+    out[key] = value;
+  }
+  return out;
+}
+
+function SvgCanvas({ style, children, ...rest }: { style?: unknown; children?: ReactNode } & Record<string, unknown>) {
+  const carried = useInheritedColor();
+  const flat = flatStyle(style);
+  const color = typeof flat.color === "string" ? flat.color : carried;
+  const sized = flat.width !== undefined || flat.height !== undefined;
+  const props = svgProps(rest);
+  return (
+    <View style={style}>
+      {createElement(Svg as never, {
+        ...props,
+        width: sized ? "100%" : props.width,
+        height: sized ? "100%" : props.height,
+        color,
+      }, children)}
+    </View>
+  );
+}
+
+// Every tag of a drawing takes the props of a drawing and nothing of the
+// document; the root is the one that also owns the box.
+function shape(component: unknown) {
+  return function Shape(props: Record<string, unknown>) {
+    return createElement(component as never, svgProps(props));
+  };
+}
+
+const SvgRoot = styled(SvgCanvas);
+const SvgCircle = shape(Circle);
+const SvgClipPath = shape(ClipPath);
+const SvgDefs = shape(Defs);
+const SvgEllipse = shape(Ellipse);
+const SvgG = shape(G);
+const SvgLine = shape(Line);
+const SvgLinearGradient = shape(LinearGradient);
+const SvgMask = shape(Mask);
+const SvgPath = shape(Path);
+const SvgPolygon = shape(Polygon);
+const SvgPolyline = shape(Polyline);
+const SvgRadialGradient = shape(RadialGradient);
+const SvgRect = shape(Rect);
+const SvgStop = shape(Stop);
+const SvgSymbol = shape(SymbolTag);
+const SvgUse = shape(Use);
+
 function Nothing() {
   return null;
 }
@@ -3542,6 +3629,29 @@ for (const name of TEXTS) {
 }
 for (const name of HIDDEN) {
   NAMED[name] = Nothing;
+}
+// The tags of a drawing, in the case React spells them: a page writes
+// linearGradient and clipPath, and the runtime hands the name as it was written.
+for (const [name, component] of Object.entries({
+  circle: SvgCircle,
+  clipPath: SvgClipPath,
+  defs: SvgDefs,
+  ellipse: SvgEllipse,
+  g: SvgG,
+  line: SvgLine,
+  linearGradient: SvgLinearGradient,
+  mask: SvgMask,
+  path: SvgPath,
+  polygon: SvgPolygon,
+  polyline: SvgPolyline,
+  radialGradient: SvgRadialGradient,
+  rect: SvgRect,
+  stop: SvgStop,
+  svg: SvgRoot,
+  symbol: SvgSymbol,
+  use: SvgUse,
+})) {
+  NAMED[name] = component;
 }
 
 // The interaction of a page is written the way a browser writes it: onClick. A
@@ -3934,6 +4044,9 @@ func nativePackageManifest() map[string]any {
 			"react-native":                   "0.86.3",
 			"react-native-safe-area-context": "5.10.1",
 			"react-native-screens":           "4.29.0",
+			// A drawing of the web is an svg, and the target has no vector tags
+			// of its own. The version is the one the runtime of this SDK carries.
+			"react-native-svg": "15.15.4",
 		},
 		"devDependencies": map[string]any{
 			"@types/react": "~19.2.2",
