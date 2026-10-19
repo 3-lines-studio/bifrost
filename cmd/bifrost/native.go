@@ -2925,6 +2925,7 @@ for (const [name, component] of Object.entries(extraTags)) {
 const nativeHostHead = `import { Children, Fragment, createElement, isValidElement, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Image, Linking, Modal, Platform, ScrollView, StyleSheet } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import Slider from "@react-native-community/slider";
 import Svg, { Circle, ClipPath, Defs, Ellipse, G, Line, LinearGradient, Mask, Path, Polygon, Polyline, RadialGradient, Rect, Stop, Symbol as SymbolTag, Use } from "react-native-svg";
 import { styled } from "react-native-css/native";
 import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";
@@ -3483,11 +3484,75 @@ function DateField({ value, defaultValue, onChange, name, min, max, disabled, cl
   );
 }
 
+// A browser draws a field of type="range" as a slider and hands the page the
+// value as a string. Measured on the device: the field was a text field of no
+// height, and the value was typed instead of dragged. The track is the one of the
+// device; what the page reads is the string a browser gives it.
+function numberOf(value: unknown, fallback: number): number {
+  const number = typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : NaN;
+  return Number.isFinite(number) ? number : fallback;
+}
+
+const SliderRoot = styled(Slider);
+
+function RangeField({ value, defaultValue, onChange, onInput, name, min, max, step, disabled, className, ...rest }: Record<string, unknown>) {
+  const form = useForm();
+  const low = numberOf(min, 0);
+  const high = numberOf(max, 100);
+  const stride = step === "any" ? 0 : numberOf(step, 1);
+  // Without a value, a browser starts at the middle of the range.
+  const middle = low + (high - low) / 2;
+  const [own, setOwn] = useState(() => (defaultValue === undefined ? middle : numberOf(defaultValue, middle)));
+  const wanted = value === undefined ? own : numberOf(value, middle);
+  const current = Math.min(Math.max(wanted, low), high);
+  const sent = String(current);
+  if (form !== null && typeof name === "string") {
+    form.fields.set(name, sent);
+  }
+  // A browser fires input and change while the thumb moves; a native slider fires
+  // one callback, and the two names a page may use read it.
+  const changed = (next: number) => {
+    if (value === undefined) {
+      setOwn(next);
+    }
+    if (form !== null && typeof name === "string") {
+      form.fields.set(name, String(next));
+    }
+    const event = {
+      target: { value: String(next), name, type: "range" },
+      currentTarget: { value: String(next), name, type: "range" },
+      nativeEvent: { text: String(next) },
+    };
+    for (const handler of [onInput, onChange]) {
+      if (typeof handler === "function") {
+        (handler as (event: unknown) => void)(event);
+      }
+    }
+  };
+  return (
+    <SliderRoot
+      {...rest}
+      accessibilityRole="adjustable"
+      className={className as string}
+      disabled={disabled === true}
+      maximumValue={high}
+      minimumValue={low}
+      step={stride}
+      value={current}
+      onValueChange={changed}
+      style={className === undefined || className === null || className === "" ? styles.slider : undefined}
+    />
+  );
+}
+
 // The type of the input decides which control it is; everything else is a field
 // of text.
 function InputTag(props: Record<string, unknown>) {
   if (props.type === "date") {
     return <DateField {...props} />;
+  }
+  if (props.type === "range") {
+    return <RangeField {...props} />;
   }
   if (props.type === "checkbox") {
     return <CheckBox {...props} />;
@@ -3728,6 +3793,7 @@ const styles = StyleSheet.create({
   check: { fontSize: 12, lineHeight: 14 },
   dot: { fontSize: 8, lineHeight: 10 },
   date: { paddingHorizontal: 12, paddingVertical: 8 },
+  slider: { width: "100%", height: 40 },
 });
 
 const NAMED: Record<string, unknown> = {
@@ -4153,12 +4219,15 @@ func nativePackageManifest() map[string]any {
 			// draws instead of typing into. The version is the one the runtime of
 			// this SDK carries.
 			"@react-native-community/datetimepicker": "9.1.0",
-			"expo":                                   "~57.0.28",
-			"expo-constants":                         "~57.0.21",
-			"expo-font":                              "~57.0.4",
-			"expo-linking":                           "~57.0.12",
-			"expo-router":                            "~57.0.26",
-			"expo-status-bar":                        "~57.0.1",
+			// The slider of the device, for the same reason: a range is dragged,
+			// not typed into. Same version of the same runtime.
+			"@react-native-community/slider": "5.2.0",
+			"expo":                           "~57.0.28",
+			"expo-constants":                 "~57.0.21",
+			"expo-font":                      "~57.0.4",
+			"expo-linking":                   "~57.0.12",
+			"expo-router":                    "~57.0.26",
+			"expo-status-bar":                "~57.0.1",
 			// The transformer of this target reads a stylesheet and rewrites its
 			// selectors, which takes a parser: Metro resolves it from the project,
 			// and without it every element selector is left as it was and dropped by

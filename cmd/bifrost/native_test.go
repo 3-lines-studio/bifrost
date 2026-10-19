@@ -2098,6 +2098,40 @@ func TestNativeADateIsTheCalendarOfTheDevice(t *testing.T) {
 	}
 }
 
+func TestNativeARangeIsTheSliderOfTheDevice(t *testing.T) {
+	// Measured on the device: a field of type="range" was a text field of no
+	// height, and the value was typed instead of dragged. A browser hands the page
+	// the value as a string, and that is what the slider does.
+	dependencies, _ := nativePackageManifest()["dependencies"].(map[string]any)
+	if dependencies["@react-native-community/slider"] != "5.2.0" {
+		t.Fatalf("the project drags a range without the module that drags it: %v", dependencies["@react-native-community/slider"])
+	}
+	host := nativeHost("")
+	for _, wanted := range []string{
+		`import Slider from "@react-native-community/slider";`,
+		"if (props.type === \"range\") {",
+		"function RangeField(",
+		"function numberOf(value: unknown, fallback: number): number",
+		// The bounds, the step and the value of a browser.
+		"minimumValue={low}",
+		"maximumValue={high}",
+		"step={stride}",
+		"const stride = step === \"any\" ? 0 : numberOf(step, 1);",
+		"const middle = low + (high - low) / 2;",
+		"Math.min(Math.max(wanted, low), high)",
+		// The event a page reads, and the string it holds.
+		"target: { value: String(next), name, type: \"range\" },",
+		"for (const handler of [onInput, onChange]) {",
+		"onValueChange={changed}",
+		// A field of a form travels with the form.
+		"form.fields.set(name, sent);",
+	} {
+		if !strings.Contains(host, wanted) {
+			t.Fatalf("the range does not answer %q", wanted)
+		}
+	}
+}
+
 func TestNativeRuntimeLeavesNamesItDoesNotKnowAlone(t *testing.T) {
 	// react-native builds its own views out of strings (`codegenNativeComponent`
 	// returns "RCTView"), so replacing an unknown name would tear them apart.
