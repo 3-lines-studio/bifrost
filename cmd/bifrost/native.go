@@ -2919,7 +2919,7 @@ const nativeHostHead = `import { Children, Fragment, createElement, isValidEleme
 import { Image, Linking, ScrollView } from "react-native";
 import { StyledPressable as Pressable, StyledText as Text, StyledTextInput as TextInput, StyledView as View } from "./text";
 import { scrollOf, splitScroll } from "./scroll";
-import { runsOf } from "./runs";
+import { runsOf, asksForFlex } from "./runs";
 import { navigate } from "virtual:bifrost/navigation";
 import { FormProvider, useForm, usePress } from "./form";
 
@@ -3041,7 +3041,7 @@ function textRuns(children: ReactNode, className: unknown): ReactNode[] {
   return runsOf(
     Children.toArray(children),
     className,
-    (child: unknown) => isValidElement(child) && child.type === Text,
+    (child: unknown) => isValidElement(child) && child.type === Inline,
     (run: ReactNode[], at: number) => <Text key={"text-" + at}>{run}</Text>,
     (child: unknown) => isValidElement(child) && child.type === Fragment,
   );
@@ -3049,6 +3049,20 @@ function textRuns(children: ReactNode, className: unknown): ReactNode[] {
 
 function Box({ children, className, ...rest }: { children?: ReactNode; className?: unknown } & Record<string, unknown>) {
   return <Scroller className={className} {...rest}>{textRuns(children, className)}</Scroller>;
+}
+
+// An inline element -- a span, a label -- flows as text until it asks for a
+// layout of its own: in a browser display:flex turns it into a box, and a Text
+// cannot lay children out along an axis. Measured on the login form of the
+// case: every <label> that held a field came out on one line with the field
+// beside the label, because the map painted the label as a Text and the field
+// as text inside it. When the class asks for flex the element is a Box, which
+// is what the browser made of it.
+function Inline({ className, children, ...rest }: { className?: unknown; children?: ReactNode } & Record<string, unknown>) {
+  if (asksForFlex(className)) {
+    return <Box className={className as string} {...rest}>{children}</Box>;
+  }
+  return <Text className={className as string} {...rest}>{children}</Text>;
 }
 
 function Anchor({ href, children, className, onPress, ...rest }: { href?: string; children?: unknown; className?: unknown; onPress?: unknown } & Record<string, unknown>) {
@@ -3233,7 +3247,7 @@ for (const name of BOXES) {
   NAMED[name] = Box;
 }
 for (const name of TEXTS) {
-  NAMED[name] = Text;
+  NAMED[name] = Inline;
 }
 for (const name of HIDDEN) {
   NAMED[name] = Nothing;

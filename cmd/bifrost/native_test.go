@@ -1880,6 +1880,32 @@ func TestNativeFieldReadsTheTypeABrowserReads(t *testing.T) {
 	}
 }
 
+func TestNativeInlineElementThatAsksForFlexIsABox(t *testing.T) {
+	// A label and a span flow as text, but a browser turns one into a box the
+	// moment its class asks for a flex layout, and a Text cannot lay children out
+	// along an axis. Measured on the login form of the case: every <label> that
+	// held a field came out on one line with the field beside the label.
+	host := nativeHost("")
+	for _, wanted := range []string{
+		"function Inline({ className, children, ...rest }",
+		"if (asksForFlex(className))",
+		"return <Box className={className as string} {...rest}>{children}</Box>;",
+		"return <Text className={className as string} {...rest}>{children}</Text>;",
+		// The elements of a run of text are the inline ones, and the map hands
+		// the rule the same component it paints them with.
+		"child.type === Inline",
+	} {
+		if !strings.Contains(host, wanted) {
+			t.Fatalf("the inline element does not answer %q", wanted)
+		}
+	}
+	// The tags that flow as text go through Inline, so a label that asks for flex
+	// is a box and a span that does not is still a Text.
+	if !strings.Contains(host, "for (const name of TEXTS) {\n  NAMED[name] = Inline;\n}") {
+		t.Fatal("the text tags do not go through Inline")
+	}
+}
+
 func TestNativeRuntimeLeavesNamesItDoesNotKnowAlone(t *testing.T) {
 	// react-native builds its own views out of strings (`codegenNativeComponent`
 	// returns "RCTView"), so replacing an unknown name would tear them apart.
