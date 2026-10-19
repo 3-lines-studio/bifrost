@@ -1824,7 +1824,7 @@ func TestNativeTagMapKeepsTheValueOfEveryFieldOfAForm(t *testing.T) {
 	// document, so the answer has to come from the field itself: what the page
 	// set, and what somebody typed into a field the page let keep its own value.
 	host := nativeHost("")
-	if !strings.Contains(host, "function Field({ name, value, defaultValue, rows, onKeyDown, onChange, ...rest }") {
+	if !strings.Contains(host, "function Field({ name, value, defaultValue, rows, type, inputMode, onKeyDown, onChange, ...rest }") {
 		t.Fatal("a field does not know its own name")
 	}
 	if !strings.Contains(host, `form.fields.set(name, held === undefined || held === null ? "" : String(held))`) {
@@ -1844,11 +1844,39 @@ func TestNativeTagMapAnswersTheChangeOfAField(t *testing.T) {
 	// page paints the value it had: measured on the files panel of the app, the
 	// search box typed and the list never filtered.
 	host := nativeHost("")
-	if !strings.Contains(host, "function Field({ name, value, defaultValue, rows, onKeyDown, onChange, ...rest }") {
+	if !strings.Contains(host, "function Field({ name, value, defaultValue, rows, type, inputMode, onKeyDown, onChange, ...rest }") {
 		t.Fatal("a field does not listen to its change")
 	}
 	if !strings.Contains(host, "target: { value: text, name }") {
 		t.Fatal("the change of a field does not reach the page")
+	}
+}
+
+func TestNativeFieldReadsTheTypeABrowserReads(t *testing.T) {
+	// A field of type="password" has to mask what is typed, and an email, a
+	// number, a phone and a url each bring the keyboard of what they ask for.
+	// Measured on fonnso: the password painted in clear text, and the email field
+	// opened the plain keyboard with its first letter capitalized.
+	host := nativeHost("")
+	for _, wanted := range []string{
+		"out.secureTextEntry = true",
+		"out.keyboardType = \"email-address\"",
+		"out.keyboardType = \"decimal-pad\"",
+		"out.keyboardType = \"number-pad\"",
+		"out.keyboardType = \"phone-pad\"",
+		"out.keyboardType = \"url\"",
+		"out.autoCapitalize = \"none\"",
+		"out.autoCorrect = false",
+		"{...fieldControl(type, inputMode)}",
+	} {
+		if !strings.Contains(host, wanted) {
+			t.Fatalf("the field does not answer %q", wanted)
+		}
+	}
+	// inputMode is the keyboard said on its own, and it wins over type for the
+	// keyboard while type still wins for the masking.
+	if !strings.Contains(host, "const said = inputMode !== undefined && inputMode !== null ? inputMode : type;") {
+		t.Fatal("inputMode does not win the keyboard")
 	}
 }
 

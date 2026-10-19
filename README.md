@@ -495,6 +495,8 @@ It is merged over the generated table, so a name that is already there is replac
 
 The seam is there because replacing the file is what an app had to do, and it is not a cost you pay once. Measured: an app replaced this file, the generator later added a function the runtime calls, the replaced copy did not have it, and **every element of the app threw in development** -- `loaded.droppedProps is not a function` -- with nothing saying why. Through the seam the same app runs.
 
+The `type` of a field is the browser's name for what the field is for, and the map reads it because a native control knows the same things but has no browser to read the name: a `password` masks what is typed, and `email`, `number`, `tel` and `url` each bring the keyboard of what they ask for instead of the plain one. `email` and `url` also turn the first-letter capitalisation off, and a `password` turns off the guesswork of autocorrect. `inputMode` is the same thing said narrower -- it is only the keyboard -- and it wins for the keyboard, which is how a page spells a text field that wants a numeric keypad, like an otp code, while `type` still decides the masking.
+
 A tag that is behaviour and not presentation is left out on purpose. `select` needs a picker, so claiming it would be a lie: it stays unsupported, and the app gives it a native counterpart next to the screen. A form's `method` and `action` are the same kind of thing, and a `button type="submit"` does nothing on its own.
 
 ## Browser performance

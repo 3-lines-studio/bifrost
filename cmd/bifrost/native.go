@@ -3100,7 +3100,59 @@ function FormTag({ onSubmit, children, ...rest }: { onSubmit?: unknown; children
 // The event a page reads is given the two things it uses: the key, and the form
 // it is inside, whose requestSubmit is the form of this map. That is why the
 // composer needs no change to send with Enter.
-function Field({ name, value, defaultValue, rows, onKeyDown, onChange, ...rest }: Record<string, unknown>) {
+//
+// The type of a field is the browser's name for what the field is for, and a
+// native control knows the same things but has no browser to read the name: a
+// field of type="password" has to mask what is typed, and an email, a number, a
+// phone and a url each bring the keyboard of what they ask for instead of the
+// plain one. Measured on the login page of fonnso: the password painted in clear
+// text on the device, and the email field opened the plain keyboard with its
+// first letter capitalized. inputMode is the same thing said narrower -- it is
+// only the keyboard -- and a page writes it when the field is text but the keys
+// are not, like an otp code of digits, so it wins for the keyboard while type
+// still wins for the masking.
+function fieldControl(type: unknown, inputMode: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (type === "password") {
+    // A browser masks a password, and it does not guess at it: no capitalization
+    // and no correction.
+    out.secureTextEntry = true;
+    out.autoCapitalize = "none";
+    out.autoCorrect = false;
+  }
+  const said = inputMode !== undefined && inputMode !== null ? inputMode : type;
+  if (typeof said !== "string") {
+    return out;
+  }
+  switch (said) {
+    case "email":
+      out.keyboardType = "email-address";
+      out.autoCapitalize = "none";
+      out.autoCorrect = false;
+      break;
+    case "number":
+    case "decimal":
+      out.keyboardType = "decimal-pad";
+      break;
+    case "numeric":
+      out.keyboardType = "number-pad";
+      break;
+    case "tel":
+      out.keyboardType = "phone-pad";
+      break;
+    case "url":
+      out.keyboardType = "url";
+      out.autoCapitalize = "none";
+      out.autoCorrect = false;
+      break;
+    case "search":
+      out.returnKeyType = "search";
+      break;
+  }
+  return out;
+}
+
+function Field({ name, value, defaultValue, rows, type, inputMode, onKeyDown, onChange, ...rest }: Record<string, unknown>) {
   const form = useForm();
   const held = value === undefined ? defaultValue : value;
   if (form && typeof name === "string") {
@@ -3132,6 +3184,7 @@ function Field({ name, value, defaultValue, rows, onKeyDown, onChange, ...rest }
       multiline={typeof rows === "number"}
       submitBehavior={typeof rows === "number" ? "submit" : "blurAndSubmit"}
       onSubmitEditing={onKeyDown === undefined ? undefined : enter}
+      {...fieldControl(type, inputMode)}
       {...rest}
       onChangeText={(text) => {
         if (form && typeof name === "string") {
