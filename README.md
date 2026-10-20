@@ -19,7 +19,7 @@ bifrost dev .
 
 | Command | Does |
 | --- | --- |
-| `bifrost dev [dir]` | Development server with HMR on `:8080` (`BIFROST_ADDR` overrides it). |
+| `bifrost dev [dir]` | Development server on `:8080` (`BIFROST_ADDR` overrides it); HMR for React pages and page scripts, rebuild and restart for templates. |
 | `bifrost build [dir]` | Builds `.bifrost/bifrost-app` and prints the route table. |
 | `bifrost routes [dir]` | Prints the route table; `--json` is the machine-readable form. |
 
@@ -109,7 +109,7 @@ document.querySelector("h1").textContent = props.title;
 
 The shell injects the props JSON and the built module; do not add your own entry script to `page.html`.
 
-A build with only `page.html` routes and no `page.js` skips Bun and Vite. `bifrost dev` works when a page script or a React page exists; a pure HTML app can be built and started with `.bifrost/bifrost-app`.
+A build with only `page.html` routes and no `page.js` skips Bun and Vite. `bifrost dev` works for pure HTML apps too: it rebuilds and restarts the Go app on `.html`, Go, and `public/` changes, without Vite.
 
 ## Route handlers
 
