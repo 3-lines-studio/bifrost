@@ -115,9 +115,6 @@ func (r *templateRenderer) Render(ctx context.Context, request renderRequest, si
 			return err
 		}
 	}
-	if err := sink.Head(head.Bytes()); err != nil {
-		return err
-	}
 
 	var body bytes.Buffer
 	if err := view.Execute(&body, data); err != nil {
@@ -132,6 +129,9 @@ func (r *templateRenderer) Render(ctx context.Context, request renderRequest, si
 		if err := r.layouts[index].Execute(&body, data); err != nil {
 			return err
 		}
+	}
+	if err := sink.Head(head.Bytes()); err != nil {
+		return err
 	}
 	for start := 0; start < body.Len(); start += bodyChunkSize {
 		if err := ctx.Err(); err != nil {
