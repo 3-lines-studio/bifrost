@@ -284,6 +284,9 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 			if !hasSymbol(ctx, moduleDir, routes[index].ImportPath, "NotFound") {
 				return appRouter{}, fmt.Errorf("bifrost: %s must export NotFound", filepath.ToSlash(filepath.Join(routes[index].Directory, "not-found.go")))
 			}
+			if err := validateGoArity(filepath.Join(routeRoot, filepath.FromSlash(routes[index].Directory)), goArity{name: "NotFound", params: 1, results: 1}); err != nil {
+				return appRouter{}, err
+			}
 			continue
 		}
 		if routes[index].GoRender {
@@ -296,6 +299,25 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 			routes[index].HasError = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Error")
 			routes[index].HasNotFound = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "NotFound")
 			routes[index].HasLayout = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Layout") && !fileExists(filepath.Join(routeRoot, filepath.FromSlash(routes[index].Directory), "layout.go"))
+			expected := []goArity{
+				{name: "Load", params: 1, results: 2},
+				{name: "Page", params: 1, results: 1},
+			}
+			if routes[index].HasLayout {
+				expected = append(expected, goArity{name: "Layout", params: 2, results: 1})
+			}
+			if routes[index].HasError {
+				expected = append(expected, goArity{name: "Error", params: 2, results: 1})
+			}
+			if routes[index].HasNotFound {
+				expected = append(expected, goArity{name: "NotFound", params: 1, results: 1})
+			}
+			if routes[index].HasCache {
+				expected = append(expected, goArity{name: "Cache", params: 0, results: 1})
+			}
+			if err := validateGoArity(filepath.Join(routeRoot, filepath.FromSlash(routes[index].Directory)), expected...); err != nil {
+				return appRouter{}, err
+			}
 		}
 	}
 	for index := range goDirs {
@@ -338,6 +360,9 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 			if !hasContext && !hasSymbol(ctx, moduleDir, importPath, "Layout") {
 				return appRouter{}, fmt.Errorf("bifrost: %s must export Layout or LayoutContext", filepath.ToSlash(filepath.Join(layout, "layout.go")))
 			}
+			if err := validateGoArity(filepath.Join(routeRoot, filepath.FromSlash(layout)), goArity{name: "Layout", params: 1, results: 1}, goArity{name: "LayoutContext", params: 2, results: 1}); err != nil {
+				return appRouter{}, err
+			}
 			routes[index].GoLayouts = append(routes[index].GoLayouts, importPath)
 			routes[index].GoLayoutAlias = append(routes[index].GoLayoutAlias, importAlias(aliases, importPath))
 			routes[index].GoLayoutContext = append(routes[index].GoLayoutContext, hasContext)
@@ -351,6 +376,9 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 				if !hasSymbol(ctx, moduleDir, importPath, "Error") {
 					return appRouter{}, fmt.Errorf("bifrost: %s must export Error", filepath.ToSlash(filepath.Join(directory, "error.go")))
 				}
+				if err := validateGoArity(filepath.Join(routeRoot, filepath.FromSlash(directory)), goArity{name: "Error", params: 2, results: 1}); err != nil {
+					return appRouter{}, err
+				}
 				routes[index].GoErrorPath = importPath
 				routes[index].GoErrorAlias = importAlias(aliases, importPath)
 			}
@@ -363,6 +391,9 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 				}
 				if !hasSymbol(ctx, moduleDir, importPath, "NotFound") {
 					return appRouter{}, fmt.Errorf("bifrost: %s must export NotFound", filepath.ToSlash(filepath.Join(directory, "not-found.go")))
+				}
+				if err := validateGoArity(filepath.Join(routeRoot, filepath.FromSlash(directory)), goArity{name: "NotFound", params: 1, results: 1}); err != nil {
+					return appRouter{}, err
 				}
 				routes[index].GoNotFoundPath = importPath
 				routes[index].GoNotFoundAlias = importAlias(aliases, importPath)
