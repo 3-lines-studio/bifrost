@@ -3991,12 +3991,25 @@ function sizeOf(value: unknown): number | undefined {
   return undefined;
 }
 
-function ImageTag({ src, alt, width, height, ...rest }: { src?: unknown; alt?: string; width?: unknown; height?: unknown } & Record<string, unknown>) {
+function ImageTag({ src, alt, width, height, className, onLoad, ...rest }: { src?: unknown; alt?: string; width?: unknown; height?: unknown; className?: unknown; onLoad?: unknown } & Record<string, unknown>) {
   const uri = imageUri(src);
   if (uri !== null && /\.svg(\?|#|$)/i.test(uri)) {
     return <SvgUri uri={uri} width={sizeOf(width)} height={sizeOf(height)} accessibilityLabel={alt} />;
   }
-  return <Image source={imageSource(src) as never} accessibilityLabel={alt} {...rest} />;
+  // A picture of the web that fades in when it is loaded takes the class that
+  // hid it off the node it got in the event: there is no node here, and the class
+  // that hid it would stay -- measured on the cards of a profile, "Cannot read
+  // property 'remove' of undefined". The picture is painted without the hiding
+  // class, and the handler still receives a node with a class list.
+  const hidden = typeof className === "string" && /\bopacity-0\b/.test(className);
+  const classes = hidden ? className.replace(/\bopacity-0\b/g, "") : className;
+  const loaded = typeof onLoad === "function"
+    ? (event: unknown) => {
+        const node = (globalThis as { document?: { createElement?: (tag: string) => unknown } }).document?.createElement?.("img") ?? {};
+        (onLoad as (event: unknown) => void)({ ...(event as Record<string, unknown>), target: node, currentTarget: node });
+      }
+    : undefined;
+  return <Image source={imageSource(src) as never} accessibilityLabel={alt} className={classes as string} onLoad={loaded} {...rest} />;
 }
 
 // The type of a field is not only its keyboard: a checkbox and a radio are

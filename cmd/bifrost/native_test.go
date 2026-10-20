@@ -724,6 +724,21 @@ func TestNativeADrawingOfThePageIsFetchedAndPainted(t *testing.T) {
 	}
 }
 
+func TestNativeAPictureThatFadesInIsPainted(t *testing.T) {
+	// Measured on the cards of a profile of picsel: the picture takes off the
+	// class that hid it when the load arrives, and there is no node to take it
+	// from -- "Cannot read property 'remove' of undefined".
+	for _, said := range []string{
+		`const hidden = typeof className === "string" && /\bopacity-0\b/.test(className);`,
+		`onLoad as (event: unknown) => void`,
+		`currentTarget: node`,
+	} {
+		if !strings.Contains(nativeHostBody, said) {
+			t.Fatalf("a picture that fades in crashes its page: %q", said)
+		}
+	}
+}
+
 func TestNativeAParagraphOfTheHTMLIsABlock(t *testing.T) {
 	// Measured on the body of a post of the app of the case: every paragraph came
 	// out as one run of text. A p a page writes by hand flows inline with its
