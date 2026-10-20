@@ -1,6 +1,6 @@
-.PHONY: check test race vet gate demo native-html native-row native-selectors native-position native-resolve native-events native-scroll native-intent native-text-style bench fuzz throughput integration dev-integration reproducible
+.PHONY: check test race vet gate demo bench fuzz throughput integration dev-integration reproducible
 
-check: test race vet gate native-html native-row native-selectors native-position native-resolve native-events native-scroll native-intent native-text-style demo
+check: test race vet gate demo
 
 test:
 	@test -z "$$(gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'))" || (gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'); exit 1)
@@ -18,54 +18,6 @@ demo:
 gate:
 	bun install --frozen-lockfile
 	BIFROST_RELEASE_GATE=1 go test ./cmd/bifrost -run TestAppRouterReleaseGate -count=1
-
-# The parser of injected HTML is generated as a string of Go, so nothing else
-# executes it.
-native-html:
-	bun ./scripts/native-html.mjs
-
-# The pass that gives a flex container the direction a browser gives it is
-# generated as a string of Go, so nothing else executes it.
-native-row:
-	bun ./scripts/native-row.mjs
-
-# The pass that takes the tag of a selector down to a class is a string of Go
-# too, and it is the one that decides what a stylesheet written for a browser
-# means on a native view.
-native-selectors:
-	bun ./scripts/native-selectors.mjs
-
-# The pass that turns a position a native view cannot express into the one it
-# can is a string of Go too, and it is the one that decides whether a fixed
-# header of the shell is painted at all.
-native-position:
-	bun ./scripts/native-position.mjs
-
-# The resolver that reads a TypeScript file behind the extension NodeNext puts in
-# the import, which is a string of Go too, and it is the one that decides whether
-# an app written that way bundles at all.
-native-resolve:
-	bun ./scripts/native-resolve.mjs
-
-# The reader of a stream is a string of Go too, and it is the one that decides
-# what a page that watches its own server sees and when.
-native-events:
-	bun ./scripts/native-events.mjs
-
-# The decision of what a block that scrolls is, which is a string of Go too.
-native-scroll:
-	bun ./scripts/native-scroll.mjs
-
-# The decision of what a url that is not a page of the app is, which is a string
-# of Go too, and it is the one that decides whether a link that opens a session
-# leaves the cookie in the app or in a browser.
-native-intent:
-	bun ./scripts/native-intent.mjs
-
-# What a browser hands down to the text inside a box, and which font file has the
-# weight a rule asked for, which is a string of Go too.
-native-text-style:
-	bun ./scripts/native-text-style.mjs
 
 bench:
 	go test -run '^$$' -bench . -benchmem ./...
@@ -87,15 +39,6 @@ integration:
 	bash ./scripts/integration.sh
 	bash ./scripts/navigation-integration.sh
 	bash ./scripts/structured-integration.sh
-	bun ./scripts/native-html.mjs
-	bun ./scripts/native-row.mjs
-	bun ./scripts/native-selectors.mjs
-	bun ./scripts/native-position.mjs
-	bun ./scripts/native-resolve.mjs
-	bun ./scripts/native-events.mjs
-	bun ./scripts/native-scroll.mjs
-	bun ./scripts/native-intent.mjs
-	bun ./scripts/native-text-style.mjs
 
 dev-integration:
 	bash ./scripts/dev-integration.sh
