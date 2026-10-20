@@ -65,10 +65,10 @@ try {
   const cards = page.locator('div[data-bifrost-component="card"]');
   check("21 component instances", (await cards.count()) === 21);
   check("@scope applies", (await cards.first().evaluate((el) => getComputedStyle(el).borderTopWidth)) === "1px");
-  check("card default prop", (await cards.first().locator(".card__summary").textContent()) === "Normal DOM, Alpine and @scope.");
-  check("card required prop", (await cards.first().locator(".card__kicker").textContent()) === "Component");
+  check("card template default", (await cards.first().locator(".card__summary").textContent()) === "Normal DOM, Alpine and @scope.");
+  check("card inline kicker", (await cards.first().locator(".card__kicker").textContent()) === "Component");
   const inlineCard = cards.filter({ hasText: "Inline card" });
-  check("card dict and list props", (await inlineCard.locator(".card__tags li").allTextContents()).join(",") === "go,alpine");
+  check("card inline list data", (await inlineCard.locator(".card__tags li").allTextContents()).join(",") === "go,alpine");
   const dropdown = page.locator('div[data-bifrost-component="dropdown"]');
   const menu = dropdown.locator(".dropdown__menu");
   check("dropdown starts closed", !(await menu.isVisible()));
@@ -86,8 +86,10 @@ try {
   check("component js mounts", (await counter.locator("[data-count]").textContent()) === "1");
 
   await page.evaluate(() => window.Turbo.visit("/"));
-  await page.waitForTimeout(300);
+  await page.waitForURL(`${base}/`);
+  await page.waitForFunction(() => document.title === "Bifrost vanilla");
   await page.evaluate(() => window.Turbo.visit("/components-demo"));
+  await page.waitForURL(`${base}/components-demo`);
   await page.waitForFunction(() => document.querySelector('div[data-bifrost-component="counter"]')?.__bifrostMounted === true, null, { timeout: 5000 });
   const counterAgain = page.locator('div[data-bifrost-component="counter"]');
   check("component js remounts", (await counterAgain.locator("[data-count]").textContent()) === "0");

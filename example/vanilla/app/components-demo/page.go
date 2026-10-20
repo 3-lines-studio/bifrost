@@ -15,6 +15,10 @@ func Load(r *http.Request) (any, error) {
 	}
 	return map[string]any{
 		"items": items,
+		"inline": map[string]any{
+			"Title": "Inline card",
+			"Tags":  []string{"go", "alpine"},
+		},
 		"menu": map[string]any{
 			"Label": "Open menu",
 			"Items": []map[string]string{

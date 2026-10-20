@@ -66,7 +66,6 @@ document.addEventListener("turbo:before-render", unmountAll);
 `
 
 var componentCallPattern = regexp.MustCompile(`\{\{-?\s*component\s+["']([a-z0-9-]+)["']`)
-var componentPropPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var componentScriptSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 var componentTags = map[string]struct{}{
@@ -121,10 +120,6 @@ func componentImportURL(component protocol.ComponentSource, relative string) str
 		return "/_bifrost/components/" + component.Name + "/" + relative
 	}
 	return "/_bifrost/components/" + component.Name + "/" + component.Hash + "/" + relative
-}
-
-func validComponentPropName(name string) bool {
-	return componentPropPattern.MatchString(name)
 }
 
 func validComponentScriptPath(value string) bool {

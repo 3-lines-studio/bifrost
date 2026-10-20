@@ -1,4 +1,4 @@
-<p class="card__kicker">{{.Kicker}}</p>
+<p class="card__kicker">{{or .Kicker "Component"}}</p>
 <h2 class="card__title">{{.Title}}</h2>
-<p class="card__summary">{{.Summary}}</p>
+<p class="card__summary">{{or .Summary "Normal DOM, Alpine and @scope."}}</p>
 {{with .Tags}}<ul class="card__tags">{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}

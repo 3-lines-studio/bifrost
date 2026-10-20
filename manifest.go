@@ -406,24 +406,6 @@ func validateHTMLView(view protocol.BuiltView) error {
 			}
 			seenImports[imported.Path] = struct{}{}
 		}
-		for key := range component.Defaults {
-			if !validComponentPropName(key) {
-				return fmt.Errorf("component %q prop %q must be a template field name", component.Name, key)
-			}
-		}
-		seenRequired := make(map[string]struct{}, len(component.Required))
-		for _, key := range component.Required {
-			if !validComponentPropName(key) {
-				return fmt.Errorf("component %q required prop %q must be a template field name", component.Name, key)
-			}
-			if _, exists := seenRequired[key]; exists {
-				return fmt.Errorf("component %q required prop %q is duplicated", component.Name, key)
-			}
-			if _, exists := component.Defaults[key]; exists {
-				return fmt.Errorf("component %q required prop %q has a default", component.Name, key)
-			}
-			seenRequired[key] = struct{}{}
-		}
 	}
 	return nil
 }

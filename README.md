@@ -118,22 +118,17 @@ A `components/<name>/` directory with `<name>.html`, optional `<name>.css`, and 
 ```html
 {{component "card" .Props.card}}
 {{component "row" .Props.row "tr"}}
-{{component "card" (dict "Title" "Inline" "Tags" (list "go" "html"))}}
 ```
 
-The value passed at the call becomes the dot. Use `dict` and `list` for inline props; a loader map or struct works too. An optional `<name>.props.json` declares defaults and required props:
+The value passed at the call becomes the dot; it is ordinary Go template data. There is no props schema. Defaults and optional sections use the template language:
 
-```json
-{
-  "defaults": {
-    "Title": "Untitled",
-    "Tags": []
-  },
-  "required": ["Title"]
-}
+```html
+<h2>{{.Title}}</h2>
+<p>{{or .Summary "Default summary"}}</p>
+{{with .Tags}}<ul>{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}
 ```
 
-Defaults fill missing keys and required keys fail the render when absent. Keys must be template field names. The default wrapper is `<div data-bifrost-component="<name>">`; pass a tag as the third argument for table, list, or inline markup. Component CSS for the components used by the view is injected once per page; use `@scope` or prefixed classes. Alpine works inside components; there is no shadow DOM. `@scope` needs a modern browser, so keep prefixed classes or Tailwind as a fallback.
+Build the data in the loader. For a one-off item, return it under a key and pass that key at the call site. The default wrapper is `<div data-bifrost-component="<name>">`; pass a tag as the third argument for table, list, or inline markup. Component CSS for the components used by the view is injected once per page; use `@scope` or prefixed classes. Alpine works inside components; there is no shadow DOM. `@scope` needs a modern browser, so keep prefixed classes or Tailwind as a fallback.
 
 A component JS file exports `mount(root)` and can return a cleanup:
 

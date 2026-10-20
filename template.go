@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"maps"
-	"reflect"
 
 	"github.com/3-lines-studio/bifrost/internal/protocol"
 )
@@ -23,12 +21,6 @@ type templateRenderer struct {
 	componentCSS   []string
 	componentJS    map[string]string
 	hasComponentJS bool
-}
-
-type componentRenderer struct {
-	template *template.Template
-	defaults map[string]any
-	required []string
 }
 
 type templateData struct {
@@ -51,15 +43,13 @@ func newTemplateRenderer(assets *protocol.HTMLAssets, funcs ...template.FuncMap)
 		sources = append(sources, *assets.NotFound)
 	}
 	used := usedComponentNames(sources, assets.Components)
-	components := make(map[string]componentRenderer)
+	components := make(map[string]*template.Template)
 	funcMap := template.FuncMap{}
 	if len(funcs) > 0 {
 		for name, function := range funcs[0] {
 			funcMap[name] = function
 		}
 	}
-	funcMap["dict"] = componentDict
-	funcMap["list"] = func(values ...any) []any { return values }
 	funcMap["component"] = func(name string, data any, tags ...string) (template.HTML, error) {
 		component, exists := components[name]
 		if !exists {
@@ -72,12 +62,8 @@ func newTemplateRenderer(assets *protocol.HTMLAssets, funcs ...template.FuncMap)
 		if len(tags) > 1 || !validComponentTag(tag) {
 			return "", fmt.Errorf("bifrost: invalid wrapper tag %q", tag)
 		}
-		props, err := componentProps(name, component.defaults, component.required, data)
-		if err != nil {
-			return "", err
-		}
 		var body bytes.Buffer
-		if err := component.template.Execute(&body, props); err != nil {
+		if err := component.Execute(&body, data); err != nil {
 			return "", err
 		}
 		return template.HTML("<" + tag + ` data-bifrost-component="` + template.HTMLEscapeString(name) + `">` + body.String() + "</" + tag + ">"), nil
@@ -113,7 +99,7 @@ func newTemplateRenderer(assets *protocol.HTMLAssets, funcs ...template.FuncMap)
 		if err != nil {
 			return nil, err
 		}
-		components[component.Name] = componentRenderer{template: parsed, defaults: component.Defaults, required: component.Required}
+		components[component.Name] = parsed
 		if _, exists := used[component.Name]; !exists {
 			continue
 		}
@@ -126,74 +112,6 @@ func newTemplateRenderer(assets *protocol.HTMLAssets, funcs ...template.FuncMap)
 		}
 	}
 	return renderer, nil
-}
-
-func componentDict(values ...any) (map[string]any, error) {
-	if len(values)%2 != 0 {
-		return nil, errors.New("bifrost: dict requires an even number of arguments")
-	}
-	result := make(map[string]any, len(values)/2)
-	for index := 0; index < len(values); index += 2 {
-		key, ok := values[index].(string)
-		if !ok {
-			return nil, fmt.Errorf("bifrost: dict key %v is not a string", values[index])
-		}
-		result[key] = values[index+1]
-	}
-	return result, nil
-}
-
-func componentProps(name string, defaults map[string]any, required []string, data any) (any, error) {
-	if defaults == nil && len(required) == 0 {
-		return data, nil
-	}
-	props := make(map[string]any, len(defaults))
-	maps.Copy(props, defaults)
-	if err := mergeComponentProps(props, data); err != nil {
-		return nil, fmt.Errorf("bifrost: component %q: %w", name, err)
-	}
-	for _, key := range required {
-		if _, exists := props[key]; !exists {
-			return nil, fmt.Errorf("bifrost: component %q: missing required prop %q", name, key)
-		}
-	}
-	return props, nil
-}
-
-func mergeComponentProps(props map[string]any, data any) error {
-	if data == nil {
-		return nil
-	}
-	value := reflect.ValueOf(data)
-	for value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface {
-		if value.IsNil() {
-			return nil
-		}
-		value = value.Elem()
-	}
-	switch value.Kind() {
-	case reflect.Map:
-		iterator := value.MapRange()
-		for iterator.Next() {
-			key := iterator.Key()
-			if key.Kind() != reflect.String {
-				return fmt.Errorf("props map keys must be strings")
-			}
-			props[key.String()] = iterator.Value().Interface()
-		}
-	case reflect.Struct:
-		typ := value.Type()
-		for index := 0; index < value.NumField(); index++ {
-			field := typ.Field(index)
-			if field.PkgPath != "" {
-				continue
-			}
-			props[field.Name] = value.Field(index).Interface()
-		}
-	default:
-		return fmt.Errorf("props must be a map or struct, got %s", value.Kind())
-	}
-	return nil
 }
 
 func parseTemplate(name, source string, funcs template.FuncMap) (*template.Template, error) {

@@ -71,9 +71,9 @@ else
 fi
 expect_body "component scope" '@scope ([data-bifrost-component="card"])' "/components-demo"
 expect_body "component dropdown" 'data-bifrost-component="dropdown"' "/components-demo"
-expect_body "component default prop" "Normal DOM, Alpine and @scope." "/components-demo"
-expect_body "component required prop" "Inline card" "/components-demo"
-expect_body "component list prop" "<li>go</li>" "/components-demo"
+expect_body "component template default" "Normal DOM, Alpine and @scope." "/components-demo"
+expect_body "component inline data" "Inline card" "/components-demo"
+expect_body "component list data" "<li>go</li>" "/components-demo"
 expect_body "component runtime" "component-runtime.js" "/components-demo"
 expect_status "component runtime response" 200 "/_bifrost/component-runtime.js"
 counter_js=$(curl -sS --max-time 10 "$base/components-demo" | grep -oE '/_bifrost/components/counter/[a-f0-9]{12}/counter\.js' | head -1 || true)

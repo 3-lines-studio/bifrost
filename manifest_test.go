@@ -250,7 +250,7 @@ func TestValidateManifestAcceptsHTMLViews(t *testing.T) {
 	}
 }
 
-func TestValidateManifestAcceptsComponentPropsAndScripts(t *testing.T) {
+func TestValidateManifestAcceptsComponentScripts(t *testing.T) {
 	app, err := newApp(Config{
 		SourceRoot: t.TempDir(),
 		Routes:     []Route{Server("/", "app/page.html", nil)},
@@ -265,13 +265,11 @@ func TestValidateManifestAcceptsComponentPropsAndScripts(t *testing.T) {
 		HTML: &protocol.HTMLAssets{
 			Page: protocol.TemplateSource{Path: "app/page.html", Source: `<h1>{{component "card" .}}</h1>`},
 			Components: []protocol.ComponentSource{{
-				Name:     "card",
-				HTML:     protocol.TemplateSource{Path: "components/card/card.html", Source: `<h2>{{.Title}}</h2>`},
-				JS:       `export function mount() {}`,
-				Imports:  []protocol.TemplateSource{{Path: "lib/format.js", Source: `export const value = 1;`}},
-				Hash:     "abcdef012345",
-				Defaults: map[string]any{"Summary": "Default"},
-				Required: []string{"Title"},
+				Name:    "card",
+				HTML:    protocol.TemplateSource{Path: "components/card/card.html", Source: `<h2>{{.Title}}</h2>`},
+				JS:      `export function mount() {}`,
+				Imports: []protocol.TemplateSource{{Path: "lib/format.js", Source: `export const value = 1;`}},
+				Hash:    "abcdef012345",
 			}},
 		},
 	}
@@ -305,9 +303,6 @@ func TestValidateManifestRejectsInvalidComponents(t *testing.T) {
 		{name: "entry import", component: protocol.ComponentSource{Name: "card", JS: "export function mount() {}", Imports: []protocol.TemplateSource{{Path: "card.js"}}}},
 		{name: "non javascript import", component: protocol.ComponentSource{Name: "card", JS: "export function mount() {}", Imports: []protocol.TemplateSource{{Path: "card.css"}}}},
 		{name: "duplicate import", component: protocol.ComponentSource{Name: "card", JS: "export function mount() {}", Imports: []protocol.TemplateSource{{Path: "lib/format.js"}, {Path: "lib/format.js"}}}},
-		{name: "invalid default", component: protocol.ComponentSource{Name: "card", Defaults: map[string]any{"bad-name": ""}}},
-		{name: "duplicate required", component: protocol.ComponentSource{Name: "card", Required: []string{"Title", "Title"}}},
-		{name: "required with default", component: protocol.ComponentSource{Name: "card", Defaults: map[string]any{"Title": ""}, Required: []string{"Title"}}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

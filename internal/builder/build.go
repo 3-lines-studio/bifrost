@@ -567,13 +567,7 @@ func componentTreeDigest(sourceRoot string) (string, error) {
 }
 
 var componentNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-var componentPropPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var componentScriptSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-
-type componentPropsFile struct {
-	Defaults map[string]any `json:"defaults"`
-	Required []string       `json:"required"`
-}
 
 func collectComponents(sourceRoot string) ([]protocol.ComponentSource, error) {
 	root := filepath.Join(sourceRoot, "components")
@@ -615,10 +609,6 @@ func collectComponents(sourceRoot string) ([]protocol.ComponentSource, error) {
 		case !errors.Is(err, os.ErrNotExist):
 			return nil, err
 		}
-		defaults, required, err := readComponentProps(root, name)
-		if err != nil {
-			return nil, err
-		}
 		imports, err := collectComponentImports(root, name, js != "")
 		if err != nil {
 			return nil, err
@@ -628,58 +618,16 @@ func collectComponents(sourceRoot string) ([]protocol.ComponentSource, error) {
 			hash = componentScriptHash(js, imports)
 		}
 		components = append(components, protocol.ComponentSource{
-			Name:     name,
-			HTML:     html,
-			CSS:      css,
-			JS:       js,
-			Imports:  imports,
-			Hash:     hash,
-			Defaults: defaults,
-			Required: required,
+			Name:    name,
+			HTML:    html,
+			CSS:     css,
+			JS:      js,
+			Imports: imports,
+			Hash:    hash,
 		})
 	}
 	slices.SortFunc(components, func(a, b protocol.ComponentSource) int { return strings.Compare(a.Name, b.Name) })
 	return components, nil
-}
-
-func readComponentProps(root, name string) (map[string]any, []string, error) {
-	propsPath := filepath.Join(root, name, name+".props.json")
-	data, err := os.ReadFile(propsPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, nil
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	var file componentPropsFile
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&file); err != nil {
-		return nil, nil, fmt.Errorf("bifrost: component %q props: %w", name, err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return nil, nil, fmt.Errorf("bifrost: component %q props: trailing JSON", name)
-	}
-	for key := range file.Defaults {
-		if !componentPropPattern.MatchString(key) {
-			return nil, nil, fmt.Errorf("bifrost: component %q prop %q must be a template field name", name, key)
-		}
-	}
-	seen := make(map[string]struct{}, len(file.Required))
-	for _, key := range file.Required {
-		if !componentPropPattern.MatchString(key) {
-			return nil, nil, fmt.Errorf("bifrost: component %q required prop %q must be a template field name", name, key)
-		}
-		if _, exists := seen[key]; exists {
-			return nil, nil, fmt.Errorf("bifrost: component %q required prop %q is duplicated", name, key)
-		}
-		if _, exists := file.Defaults[key]; exists {
-			return nil, nil, fmt.Errorf("bifrost: component %q required prop %q has a default", name, key)
-		}
-		seen[key] = struct{}{}
-	}
-	return file.Defaults, file.Required, nil
 }
 
 func collectComponentImports(root, name string, hasEntry bool) ([]protocol.TemplateSource, error) {
