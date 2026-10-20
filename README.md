@@ -196,3 +196,11 @@ export function Layout({ children }: { children: ReactNode }) {
 ```
 
 `bifrost init` sets up Tailwind in `app/style.css`; Vite configuration lives in `vite.config.ts`.
+
+Go templates reference public files through `asset`, which returns a content-hashed URL:
+
+```html
+<link rel="stylesheet" href="{{asset "/styles.css"}}">
+```
+
+Hashed URLs are served with `Cache-Control: public, max-age=31536000, immutable`; the original `/styles.css` still works with a one-hour cache.

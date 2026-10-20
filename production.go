@@ -142,7 +142,8 @@ func (a *App) Register(mux *http.ServeMux) (err error) {
 	}
 	slices.Sort(publicURLs)
 	for _, publicURL := range publicURLs {
-		mux.Handle("GET "+publicURL, &publicAssetHandler{assets: a.runtime.assets, file: a.runtime.public[publicURL], headers: a.hooks.assetHeaders})
+		_, immutable := a.runtime.hashedPublic[publicURL]
+		mux.Handle("GET "+publicURL, &publicAssetHandler{assets: a.runtime.assets, file: a.runtime.public[publicURL], headers: a.hooks.assetHeaders, immutable: immutable})
 	}
 	return nil
 }

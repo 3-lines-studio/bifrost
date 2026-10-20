@@ -54,6 +54,21 @@ expect_header "root middleware" "X-Vanilla" "1" "/"
 expect_status "about group" 200 "/about"
 expect_body "about group body" "marketing~/about" "/about"
 expect_status "island" 200 "/island"
+css=$(curl -sS --max-time 10 "$base/" | grep -oE '/styles\.[a-f0-9]{12}\.css' | head -1 || true)
+if [[ -n "$css" ]]; then
+  ok "hashed css"
+  expect_status "hashed css response" 200 "$css"
+  expect_header "hashed css cache" "Cache-Control" "immutable" "$css"
+else
+  bad "hashed css" "no hashed URL in the page"
+fi
+js=$(curl -sS --max-time 10 "$base/" | grep -oE '/site\.[a-f0-9]{12}\.js' | head -1 || true)
+if [[ -n "$js" ]]; then
+  ok "hashed js"
+  expect_status "hashed js response" 200 "$js"
+else
+  bad "hashed js" "no hashed URL in the page"
+fi
 
 echo "posts"
 expect_status "posts" 200 "/posts"
