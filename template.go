@@ -14,12 +14,14 @@ import (
 const bodyChunkSize = 32 << 10
 
 type templateRenderer struct {
-	page         *template.Template
-	layouts      []*template.Template
-	errors       []*template.Template
-	notFound     *template.Template
-	components   map[string]*template.Template
-	componentCSS []string
+	page           *template.Template
+	layouts        []*template.Template
+	errors         []*template.Template
+	notFound       *template.Template
+	components     map[string]*template.Template
+	componentCSS   []string
+	componentJS    map[string]string
+	hasComponentJS bool
 }
 
 type templateData struct {
@@ -34,6 +36,14 @@ func newTemplateRenderer(assets *protocol.HTMLAssets, funcs ...template.FuncMap)
 	if assets == nil {
 		return nil, errors.New("bifrost: html view has no templates")
 	}
+	sources := make([]protocol.TemplateSource, 0, 1+len(assets.Layouts)+len(assets.Errors))
+	sources = append(sources, assets.Page)
+	sources = append(sources, assets.Layouts...)
+	sources = append(sources, assets.Errors...)
+	if assets.NotFound != nil {
+		sources = append(sources, *assets.NotFound)
+	}
+	used := usedComponentNames(sources, assets.Components)
 	components := make(map[string]*template.Template)
 	funcMap := template.FuncMap{}
 	if len(funcs) > 0 {
@@ -41,22 +51,29 @@ func newTemplateRenderer(assets *protocol.HTMLAssets, funcs ...template.FuncMap)
 			funcMap[name] = function
 		}
 	}
-	funcMap["component"] = func(name string, data any) (template.HTML, error) {
+	funcMap["component"] = func(name string, data any, tags ...string) (template.HTML, error) {
 		component, exists := components[name]
 		if !exists {
 			return "", fmt.Errorf("bifrost: component %q not found", name)
+		}
+		tag := "div"
+		if len(tags) > 0 {
+			tag = tags[0]
+		}
+		if len(tags) > 1 || !validComponentTag(tag) {
+			return "", fmt.Errorf("bifrost: invalid wrapper tag %q", tag)
 		}
 		var body bytes.Buffer
 		if err := component.Execute(&body, data); err != nil {
 			return "", err
 		}
-		return template.HTML(`<div data-bifrost-component="` + template.HTMLEscapeString(name) + `">` + body.String() + `</div>`), nil
+		return template.HTML("<" + tag + ` data-bifrost-component="` + template.HTMLEscapeString(name) + `">` + body.String() + "</" + tag + ">"), nil
 	}
 	page, err := parseTemplate(assets.Page.Path, assets.Page.Source, funcMap)
 	if err != nil {
 		return nil, err
 	}
-	renderer := &templateRenderer{page: page, components: components}
+	renderer := &templateRenderer{page: page, components: components, componentJS: make(map[string]string)}
 	for _, layout := range assets.Layouts {
 		parsed, err := parseTemplate(layout.Path, layout.Source, funcMap)
 		if err != nil {
@@ -84,8 +101,17 @@ func newTemplateRenderer(assets *protocol.HTMLAssets, funcs ...template.FuncMap)
 			return nil, err
 		}
 		components[component.Name] = parsed
+		if component.JS != "" {
+			renderer.hasComponentJS = true
+		}
+		if _, exists := used[component.Name]; !exists {
+			continue
+		}
 		if component.CSS != "" {
 			renderer.componentCSS = append(renderer.componentCSS, component.CSS)
+		}
+		if component.JS != "" {
+			renderer.componentJS[component.Name] = componentURL(component.Name)
 		}
 	}
 	return renderer, nil
@@ -156,6 +182,9 @@ func (r *templateRenderer) Render(ctx context.Context, request renderRequest, si
 		}
 		head.WriteString(`</style>`)
 	}
+	if r.hasComponentJS {
+		head.WriteString(`<script type="module" src="` + componentRuntimePath + `"></script>`)
+	}
 
 	var body bytes.Buffer
 	if err := view.Execute(&body, data); err != nil {
@@ -170,6 +199,15 @@ func (r *templateRenderer) Render(ctx context.Context, request renderRequest, si
 		if err := r.layouts[index].Execute(&body, data); err != nil {
 			return err
 		}
+	}
+	if len(r.componentJS) > 0 {
+		encoded, err := json.Marshal(r.componentJS)
+		if err != nil {
+			return err
+		}
+		body.WriteString(`<script type="application/json" id="bifrost-component-manifest">`)
+		body.Write(encoded)
+		body.WriteString(`</script>`)
 	}
 	if err := sink.Head(head.Bytes()); err != nil {
 		return err

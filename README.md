@@ -113,13 +113,27 @@ A build with only `page.html` routes and no `page.js` skips Bun and Vite. `bifro
 
 ### Components
 
-A `components/<name>/` directory with `<name>.html` and optional `<name>.css` is available as `{{component "<name>" .}}`:
+A `components/<name>/` directory with `<name>.html`, optional `<name>.css`, and optional `<name>.js` is available as `{{component "<name>" .}}`:
 
 ```html
 {{component "card" .Props.card}}
+{{component "row" .Props.row "tr"}}
 ```
 
-Components render as normal DOM inside `<div data-bifrost-component="<name>">`; the value passed at the call becomes the dot. Component CSS is injected once per page; use `@scope` or prefixed classes. Alpine works inside components; there is no shadow DOM. `@scope` needs a modern browser, so keep prefixed classes or Tailwind as a fallback.
+The value passed at the call becomes the dot. The default wrapper is `<div data-bifrost-component="<name>">`; pass a tag as the third argument for table, list, or inline markup. Component CSS for the components used by the view is injected once per page; use `@scope` or prefixed classes. Alpine works inside components; there is no shadow DOM. `@scope` needs a modern browser, so keep prefixed classes or Tailwind as a fallback.
+
+A component JS file exports `mount(root)` and can return a cleanup:
+
+```js
+export function mount(root) {
+  const button = root.querySelector("button");
+  const onClick = () => button.classList.toggle("is-active");
+  button.addEventListener("click", onClick);
+  return () => button.removeEventListener("click", onClick);
+}
+```
+
+Bifrost loads the module, mounts each instance, and remounts after Turbo navigation. The wrapper is the root. Component calls are discovered statically, so use a literal name at the call site.
 
 ### Turbo and Alpine
 

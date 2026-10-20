@@ -476,6 +476,7 @@ func TestCollectHTMLViewsIncludesComponents(t *testing.T) {
 		"app/page.html":             "<h1>page</h1>",
 		"components/card/card.html": "<h2>{{.Title}}</h2>",
 		"components/card/card.css":  "@scope ([data-bifrost-component=\"card\"]) { :scope { color: red; } }",
+		"components/card/card.js":   "export function mount() { return () => {}; }",
 	} {
 		path := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -495,7 +496,7 @@ func TestCollectHTMLViewsIncludesComponents(t *testing.T) {
 		t.Fatalf("views = %+v", views)
 	}
 	component := views[0].HTML.Components[0]
-	if component.Name != "card" || component.HTML.Path != "components/card/card.html" || !strings.Contains(component.CSS, "color: red") {
+	if component.Name != "card" || component.HTML.Path != "components/card/card.html" || !strings.Contains(component.CSS, "color: red") || !strings.Contains(component.JS, "export function mount") {
 		t.Fatalf("component = %+v", component)
 	}
 }

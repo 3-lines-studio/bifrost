@@ -75,6 +75,21 @@ try {
   await page.waitForTimeout(150);
   check("dropdown closes outside", !(await menu.isVisible()));
 
+  await page.waitForFunction(() => document.querySelector('div[data-bifrost-component="counter"]')?.__bifrostMounted === true, null, { timeout: 5000 });
+  const counter = page.locator('div[data-bifrost-component="counter"]');
+  check("component js starts", (await counter.locator("[data-count]").textContent()) === "0");
+  await counter.locator("button").click();
+  check("component js mounts", (await counter.locator("[data-count]").textContent()) === "1");
+
+  await page.evaluate(() => window.Turbo.visit("/"));
+  await page.waitForTimeout(300);
+  await page.evaluate(() => window.Turbo.visit("/components-demo"));
+  await page.waitForFunction(() => document.querySelector('div[data-bifrost-component="counter"]')?.__bifrostMounted === true, null, { timeout: 5000 });
+  const counterAgain = page.locator('div[data-bifrost-component="counter"]');
+  check("component js remounts", (await counterAgain.locator("[data-count]").textContent()) === "0");
+  await counterAgain.locator("button").click();
+  check("component js has one listener", (await counterAgain.locator("[data-count]").textContent()) === "1");
+
   check("no page errors", errors.length === 0);
   console.log("all browser checks passed");
 } finally {

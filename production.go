@@ -136,6 +136,15 @@ func (a *App) Register(mux *http.ServeMux) (err error) {
 		mux.Handle("GET "+strings.TrimSuffix(dochtml.DevPrefix, "/")+"/{path...}", a.runtime.devProxy)
 	}
 	mux.Handle("GET "+dochtml.AssetPrefix+"{path...}", &assetHandler{assets: a.runtime.assets, files: a.runtime.files, headers: a.hooks.assetHeaders})
+	mux.HandleFunc("GET "+componentRuntimePath, func(w http.ResponseWriter, request *http.Request) {
+		writeComponentScript(w, request, componentRuntime)
+	})
+	for name, source := range a.runtime.componentJS {
+		source := source
+		mux.HandleFunc("GET /_bifrost/components/"+name+".js", func(w http.ResponseWriter, request *http.Request) {
+			writeComponentScript(w, request, source)
+		})
+	}
 	publicURLs := make([]string, 0, len(a.runtime.public))
 	for publicURL := range a.runtime.public {
 		publicURLs = append(publicURLs, publicURL)

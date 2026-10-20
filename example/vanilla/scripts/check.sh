@@ -71,6 +71,15 @@ else
 fi
 expect_body "component scope" '@scope ([data-bifrost-component="card"])' "/components-demo"
 expect_body "component dropdown" 'data-bifrost-component="dropdown"' "/components-demo"
+expect_body "component js manifest" '"/_bifrost/components/counter.js"' "/components-demo"
+expect_status "component runtime" 200 "/_bifrost/component-runtime.js"
+expect_status "counter js" 200 "/_bifrost/components/counter.js"
+home_styles=$(curl -sS --max-time 10 "$base/" | grep -o '<style data-bifrost-components>' | wc -l | tr -d ' ' || true)
+if [[ "$home_styles" == "0" ]]; then
+  ok "component css filtered from home"
+else
+  bad "component css filtered from home" "got $home_styles"
+fi
 css=$(curl -sS --max-time 10 "$base/" | grep -oE '/styles\.[a-f0-9]{12}\.css' | head -1 || true)
 if [[ -n "$css" ]]; then
   ok "hashed css"

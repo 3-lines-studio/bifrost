@@ -1,0 +1,23 @@
+@scope ([data-bifrost-component="counter"]) {
+  :scope {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .counter__value {
+    margin: 0;
+    color: var(--dim, #8b96a8);
+  }
+
+  .counter__button {
+    font: inherit;
+    padding: 0.5rem 0.8rem;
+    border: 1px solid var(--line, #2a3140);
+    border-radius: 0.4rem;
+    background: #0c1017;
+    color: inherit;
+    cursor: pointer;
+  }
+}

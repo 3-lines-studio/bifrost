@@ -97,6 +97,7 @@ type ComponentSource struct {
 	Name string         `json:"name"`
 	HTML TemplateSource `json:"html"`
 	CSS  string         `json:"css,omitempty"`
+	JS   string         `json:"js,omitempty"`
 }
 
 type TemplateSource struct {

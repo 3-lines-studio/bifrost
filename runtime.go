@@ -57,6 +57,7 @@ type runtimeState struct {
 	files          map[string]protocol.FileRef
 	public         map[string]protocol.FileRef
 	hashedPublic   map[string]struct{}
+	componentJS    map[string]string
 	devProxy       http.Handler
 }
 
@@ -71,6 +72,17 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 	if app == nil || manifest == nil {
 		return nil, errors.New("bifrost: incomplete runtime input")
 	}
+	componentJS := make(map[string]string)
+	for _, view := range manifest.views {
+		if view.HTML == nil {
+			continue
+		}
+		for _, component := range view.HTML.Components {
+			if component.JS != "" {
+				componentJS[component.Name] = component.JS
+			}
+		}
+	}
 	public, hashedPublic, publicAssets := publicAssetIndex(manifest.public)
 	state := &runtimeState{
 		assets:         assets,
@@ -81,6 +93,7 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 		files:          make(map[string]protocol.FileRef),
 		public:         public,
 		hashedPublic:   hashedPublic,
+		componentJS:    componentJS,
 	}
 	maps.Copy(state.files, manifest.clientFiles)
 	for _, route := range manifest.routes {
@@ -532,6 +545,15 @@ func (h *clientPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 	w.WriteHeader(http.StatusOK)
 	if request.Method != http.MethodHead {
 		_, _ = w.Write(h.document)
+	}
+}
+
+func writeComponentScript(w http.ResponseWriter, request *http.Request, source string) {
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	if request.Method != http.MethodHead {
+		_, _ = io.WriteString(w, source)
 	}
 }
 

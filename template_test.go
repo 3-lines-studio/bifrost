@@ -119,6 +119,57 @@ func TestTemplateRendererRendersComponentsAndCSS(t *testing.T) {
 	}
 }
 
+func TestTemplateRendererFiltersComponentCSSByUsage(t *testing.T) {
+	renderer, err := newTemplateRenderer(&protocol.HTMLAssets{
+		Page: protocol.TemplateSource{
+			Path:   "app/page.html",
+			Source: `<main>{{component "card" .}}</main>`,
+		},
+		Components: []protocol.ComponentSource{
+			{Name: "card", HTML: protocol.TemplateSource{Path: "components/card/card.html", Source: `<h2>card</h2>`}, CSS: `@scope ([data-bifrost-component="card"]) { :scope { color: red; } }`},
+			{Name: "unused", HTML: protocol.TemplateSource{Path: "components/unused/unused.html", Source: `<p>unused</p>`}, CSS: `.unused { color: blue; }`},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &templateTestSink{}
+	if err := renderer.Render(context.Background(), renderRequest{}, sink); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sink.head.String(), ".unused") {
+		t.Fatalf("unused component CSS was injected: %q", sink.head.String())
+	}
+	if !strings.Contains(sink.head.String(), "color: red") {
+		t.Fatalf("used component CSS missing: %q", sink.head.String())
+	}
+}
+
+func TestTemplateRendererComponentTagAndJS(t *testing.T) {
+	renderer, err := newTemplateRenderer(&protocol.HTMLAssets{
+		Page: protocol.TemplateSource{
+			Path:   "app/page.html",
+			Source: `<table><tbody>{{component "row" . "tr"}}</tbody></table>`,
+		},
+		Components: []protocol.ComponentSource{
+			{Name: "row", HTML: protocol.TemplateSource{Path: "components/row/row.html", Source: `<td>row</td>`}, JS: `export function mount(root) { return () => {}; }`},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &templateTestSink{}
+	if err := renderer.Render(context.Background(), renderRequest{}, sink); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := sink.body.String(), `<table><tbody><tr data-bifrost-component="row"><td>row</td></tr></tbody></table><script type="application/json" id="bifrost-component-manifest">{"row":"/_bifrost/components/row.js"}</script>`; got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+	if !strings.Contains(sink.head.String(), componentRuntimePath) {
+		t.Fatalf("runtime script missing: %q", sink.head.String())
+	}
+}
+
 func TestTemplateRendererExposesParamsAndEscapesProps(t *testing.T) {
 	renderer, err := newTemplateRenderer(&protocol.HTMLAssets{
 		Page: protocol.TemplateSource{

@@ -546,7 +546,16 @@ func collectComponents(sourceRoot string) ([]protocol.ComponentSource, error) {
 		case !errors.Is(err, os.ErrNotExist):
 			return nil, err
 		}
-		components = append(components, protocol.ComponentSource{Name: name, HTML: html, CSS: css})
+		js := ""
+		jsPath := filepath.Join(root, name, name+".js")
+		data, err = os.ReadFile(jsPath)
+		switch {
+		case err == nil:
+			js = string(data)
+		case !errors.Is(err, os.ErrNotExist):
+			return nil, err
+		}
+		components = append(components, protocol.ComponentSource{Name: name, HTML: html, CSS: css, JS: js})
 	}
 	slices.SortFunc(components, func(a, b protocol.ComponentSource) int { return strings.Compare(a.Name, b.Name) })
 	return components, nil
