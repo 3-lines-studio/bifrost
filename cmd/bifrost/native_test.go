@@ -748,6 +748,21 @@ func TestNativeAButtonPutsItsIconBesideItsLabel(t *testing.T) {
 	}
 }
 
+func TestNativeASizeWrittenInTheClassIsPainted(t *testing.T) {
+	// Measured on the card of an event of picsel: the aspect of the card was not
+	// applied and the picture that fills it grew to the whole screen.
+	for _, said := range []string{
+		"function measured(className: unknown)",
+		`"min-h": "minHeight",`,
+		`/(?:^|\s)aspect-\[(\d+)\/(\d+)\]/g`,
+		"const size = measured(given.className);",
+	} {
+		if !strings.Contains(nativeHostBody, said) {
+			t.Fatalf("a size written in the class is not painted: %q", said)
+		}
+	}
+}
+
 func TestNativeARowSpacesItsChildren(t *testing.T) {
 	// Measured on the tabs of the discounts page of picsel: space-x-4 is a margin
 	// on the siblings of a child, and the target has no siblings to name.
@@ -758,6 +773,22 @@ func TestNativeARowSpacesItsChildren(t *testing.T) {
 	} {
 		if !strings.Contains(nativeHostBody, said) {
 			t.Fatalf("a row of the page has no space between its children: %q", said)
+		}
+	}
+}
+
+func TestNativeAGridIsTheColumnOfAPhone(t *testing.T) {
+	// Measured on the album of an event of picsel: the one card of a grid
+	// stretched to the whole screen, because the target has no grid and the row
+	// it would have made had no height.
+	for _, said := range []string{
+		"function withoutGrid(css)",
+		`declaration.value = "flex";`,
+		`declaration.parent.append({ prop: "flex-direction", value: "column" });`,
+		"withoutGrid(withoutAnimations(expanded))",
+	} {
+		if !strings.Contains(nativeCSSWarnings, said) {
+			t.Fatalf("a grid of the web is not painted as a column: %q", said)
 		}
 	}
 }

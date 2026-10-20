@@ -874,6 +874,35 @@ function withoutAnimations(css) {
   return root.toString();
 }
 
+// A grid of the web is a layout the target does not have. A page of a phone lays
+// its cards in one column, and that is what the smallest screen of the page asks
+// for -- the columns appear at a width the phone does not have -- so a grid is
+// painted as the column it would be: measured on the album of an event, the one
+// card of the grid stretched to the whole screen because its row had no height.
+function withoutGrid(css) {
+  let parse;
+  try {
+    parse = require("postcss").parse;
+  } catch {
+    return css;
+  }
+  const root = parse(css);
+  root.walkDecls((declaration) => {
+    const property = declaration.prop.toLowerCase();
+    if (property === "display" && declaration.value.trim().toLowerCase() === "grid") {
+      declaration.value = "flex";
+      if (declaration.parent !== undefined) {
+        declaration.parent.append({ prop: "flex-direction", value: "column" });
+      }
+      return;
+    }
+    if (property.startsWith("grid-") || property === "grid-area") {
+      declaration.remove();
+    }
+  });
+  return root.toString();
+}
+
 function dropped(css, warnings) {
   const values = warnings.values ?? {};
   // A class the map answers with a ScrollView, or with a child of one, is not a
@@ -1003,7 +1032,7 @@ module.exports.transform = async (config, projectRoot, filePath, data, options) 
   const web = await worker.transform(config, projectRoot, filePath, data, { ...options, platform: "web" });
   const produced = web.output[0]?.data?.css?.code;
   const expanded = produced === undefined ? data.toString("utf8") : produced.toString();
-  const source = withFixed(withTagClasses(withoutAnimations(expanded), lostSelectors(config, projectRoot, filePath, options)));
+  const source = withFixed(withTagClasses(withoutGrid(withoutAnimations(expanded)), lostSelectors(config, projectRoot, filePath, options)));
   const compiled = compile(source, {
     ...(config.reactNativeCSS ?? options.reactNativeCSS),
     filename: filePath,
@@ -4888,6 +4917,32 @@ function spaced(className: unknown): Record<string, number> | undefined {
   return gap;
 }
 
+// A page writes the size it wants in the class itself -- h-[300px], aspect-[4/3]
+// -- and the target compiles a class into a style that some of those values do not
+// reach. Measured on the card of an event: the aspect of the card was not applied
+// and its picture, which fills the box, grew to the whole screen.
+function measured(className: unknown): Record<string, unknown> | undefined {
+  if (typeof className !== "string") {
+    return undefined;
+  }
+  const style: Record<string, unknown> = {};
+  const lengths: Record<string, string> = {
+    "h": "height",
+    "w": "width",
+    "min-h": "minHeight",
+    "min-w": "minWidth",
+    "max-h": "maxHeight",
+    "max-w": "maxWidth",
+  };
+  for (const match of className.matchAll(/(?:^|\s)(h|w|min-h|min-w|max-h|max-w)-\[(\d+(?:\.\d+)?px)\]/g)) {
+    style[lengths[match[1]]] = parseFloat(match[2]);
+  }
+  for (const match of className.matchAll(/(?:^|\s)aspect-\[(\d+)\/(\d+)\]/g)) {
+    style.aspectRatio = Number(match[1]) / Number(match[2]);
+  }
+  return Object.keys(style).length === 0 ? undefined : style;
+}
+
 export function nativeProps(props: unknown, tag?: string): unknown {
   if (props === null || typeof props !== "object") {
     return props;
@@ -4971,6 +5026,10 @@ export function nativeProps(props: unknown, tag?: string): unknown {
   const gap = spaced(given.className);
   if (gap !== undefined) {
     given.style = given.style === undefined ? gap : [given.style, gap];
+  }
+  const size = measured(given.className);
+  if (size !== undefined) {
+    given.style = given.style === undefined ? size : [given.style, size];
   }
   // The tag the page wrote an element of its own as. It arrives only when the
   // element is painted by a component of this table -- a name this table does not
