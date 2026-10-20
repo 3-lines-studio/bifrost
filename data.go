@@ -8,21 +8,14 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/protocol"
 )
 
-// dataMediaType asks a server route for the props its loader produced instead
-// of a rendered document. A client that renders the same view itself needs the
-// loader's data and nothing the renderer would add.
 const dataMediaType = "application/vnd.bifrost.data+json"
 
 type dataPage struct {
-	Pattern  string                      `json:"pattern"`
-	Props    json.RawMessage             `json:"props"`
-	Document protocol.DocumentAttributes `json:"document"`
-	Status   int                         `json:"status"`
-	// A page that throws while it renders falls into the nearest error.tsx, and
-	// the view the generator wrote picks which one out of `__bifrostErrorLevel`.
-	// The server walks that ladder itself; a client that renders the same view
-	// has to walk it too, so it has to know how deep it goes.
-	ErrorFallbacks int `json:"errorFallbacks"`
+	Pattern        string                      `json:"pattern"`
+	Props          json.RawMessage             `json:"props"`
+	Document       protocol.DocumentAttributes `json:"document"`
+	Status         int                         `json:"status"`
+	ErrorFallbacks int                         `json:"errorFallbacks"`
 }
 
 type dataError struct {

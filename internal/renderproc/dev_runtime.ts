@@ -91,12 +91,6 @@ if (devEntries) {
 }
 
 if (routesFile) {
-  // The routes are written to a temporary file and renamed over this one, and
-  // the watch of the directory reports that as a change of the name that
-  // disappears: the name it lands under is never the one in the event, so both
-  // are taken. Measured: watching only the name it lands under left Vite holding
-  // the views of the routes that were there before, and a page whose view moved
-  // answered 500 for as long as the development server lived.
   const name = path.basename(routesFile);
   watch(path.dirname(routesFile), (_event, filename) => {
     if (!filename || (filename !== name && filename !== name + ".tmp")) return;
@@ -129,12 +123,6 @@ function errorResponse(message: string, status: number): Response {
 
 const devBase = vite.config.base.replace(/\/$/, "");
 
-// Collects the CSS modules reachable from a server entry in Vite's live SSR
-// module graph. The dev bridge prepends stylesheet links for them so SSR
-// responses carry their styles and hydrated pages do not flash unstyled
-// content while Vite's client injects CSS. CSS imported by other CSS modules
-// (for example Tailwind's library CSS behind an @import) is excluded: Vite
-// serves the entry stylesheet with its @imports intact.
 async function collectSsrCss(entryUrl: string): Promise<string[]> {
   const seen = new Set<string>();
   const isCss = (url: string): boolean => /\.css($|\?)/.test(url);

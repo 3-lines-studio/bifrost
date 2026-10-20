@@ -8,8 +8,6 @@ import (
 	"github.com/3-lines-studio/bifrost"
 )
 
-// New declares the web application without opening listeners or external
-// services. Runtime startup happens in main after bifrost.Building returns false.
 func New(assets fs.FS) (*bifrost.App, error) {
 	return bifrost.New(bifrost.Config{
 		SourceRoot: ".",
@@ -25,8 +23,6 @@ func New(assets fs.FS) (*bifrost.App, error) {
 	})
 }
 
-// Handler composes Bifrost with ordinary net/http handlers and applies one
-// middleware chain to both.
 func Handler(app *bifrost.App) (http.Handler, error) {
 	mux := http.NewServeMux()
 	if err := app.Register(mux); err != nil {

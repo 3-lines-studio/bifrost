@@ -311,8 +311,6 @@ func Build(ctx context.Context, options Options) error {
 }
 
 func inspectPackage(ctx context.Context, dir, packagePath string) (packageInfo, error) {
-	// -e still reports package identity when a generated go:embed directory was
-	// removed by a clean command. ensureGeneratedEmbed repairs it before go run.
 	command := exec.CommandContext(ctx, "go", "list", "-e", "-json", packagePath)
 	command.Dir = dir
 	output, err := command.Output()
@@ -560,11 +558,6 @@ func buildFrontend(ctx context.Context, describe protocol.DescribeResult, output
 	command.Dir = describe.SourceRoot
 	command.Stdin = bytes.NewReader(data)
 	command.Stdout = os.Stdout
-	// What the runner says is streamed to stderr as it is written, and that same
-	// stream is kept: a command whose stderr is set leaves the error with nothing
-	// of its own -- only Output fills ExitError.Stderr -- so without a copy the
-	// failure of a frontend build is an "exit status 1" with the reason already
-	// scrolled away.
 	said := new(bytes.Buffer)
 	command.Stderr = io.MultiWriter(os.Stderr, said)
 	command.Env = append(os.Environ(), "BIFROST=1", "BIFROST_BUILD=1")
@@ -574,8 +567,6 @@ func buildFrontend(ctx context.Context, describe protocol.DescribeResult, output
 	return nil
 }
 
-// frontendBuildError names the runner that failed and keeps the end of what it
-// said, which is where a bundler puts the file it could not resolve.
 func frontendBuildError(command *exec.Cmd, err error, said string) error {
 	tail := lastLines(said, 40)
 	if tail == "" {
@@ -584,7 +575,6 @@ func frontendBuildError(command *exec.Cmd, err error, said string) error {
 	return fmt.Errorf("bifrost: %s: %w\n%s", strings.Join(command.Args, " "), err, tail)
 }
 
-// lastLines keeps the end of a build log and drops the rest.
 func lastLines(text string, wanted int) string {
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	if len(lines) == 1 && lines[0] == "" {

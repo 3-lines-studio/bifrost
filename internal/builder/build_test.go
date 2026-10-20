@@ -271,10 +271,6 @@ func TestWriteEntriesAddsReloadOnlyInDevelopment(t *testing.T) {
 }
 
 func TestFrontendBuildErrorKeepsTheEndOfWhatTheRunnerSaid(t *testing.T) {
-	// Measured: the failure of a frontend build reached the caller as "exit
-	// status 1", because a command whose stderr is set leaves ExitError with
-	// nothing of its own -- only Output fills it -- and the reason a bundler
-	// gives is the end of what it said.
 	command := exec.Command("bun", "run", "vite-runner.ts")
 	log := "vite v8.0.0 building for production\n" +
 		"error: Could not resolve \"../../app/probe/page.tsx\" from .bifrost/views/page-2.tsx\n"

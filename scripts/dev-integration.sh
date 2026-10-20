@@ -98,12 +98,6 @@ answered() {
   fi
 }
 
-# The routes of an App Router are its files: a page that arrives is a route and
-# the server has to answer for it, and a page that leaves is not, without the
-# views of the routes that stay being left to hold the page that went away.
-# Measured: a page saved under the route root was never a route until the server
-# was restarted, and a route that was removed left every later rebuild failing on
-# the file that was gone.
 demo="$root/example/app-router-demo"
 demo_route="$demo/app/tempmedicion"
 demo_port=$((port + 2))
