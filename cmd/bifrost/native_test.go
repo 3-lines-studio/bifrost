@@ -739,6 +739,15 @@ func TestNativeAPictureThatFadesInIsPainted(t *testing.T) {
 	}
 }
 
+func TestNativeAHeadingIsABlock(t *testing.T) {
+	// A browser paints a heading as a block with its own margins; measured on the
+	// coupons page of picsel: the title and the sentence under it came out in one
+	// line, because both were text.
+	if !strings.Contains(nativeHostBody, `"footer", "h1", "h2", "h3", "h4", "h5", "h6", "header"`) {
+		t.Fatal("a heading is painted inline")
+	}
+}
+
 func TestNativeAParagraphOfTheHTMLIsABlock(t *testing.T) {
 	// Measured on the body of a post of the app of the case: every paragraph came
 	// out as one run of text. A p a page writes by hand flows inline with its
