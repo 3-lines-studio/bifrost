@@ -285,3 +285,24 @@ func TestDevelopmentStampIgnoresTheFileBifrostWritesForTheApp(t *testing.T) {
 		t.Fatal("a source somebody wrote is not read as a change")
 	}
 }
+
+func TestRequireViteInstalledFindsTheModulesOfAnAncestor(t *testing.T) {
+	root := t.TempDir()
+	modules := filepath.Join(root, "node_modules", "vite")
+	if err := os.MkdirAll(modules, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(modules, "package.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "app", "pages")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireViteInstalled(nested); err != nil {
+		t.Fatalf("the modules of an ancestor were not found: %v", err)
+	}
+	if err := requireViteInstalled(t.TempDir()); err == nil {
+		t.Fatal("a tree without Vite was accepted")
+	}
+}
