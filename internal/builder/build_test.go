@@ -286,6 +286,47 @@ func TestFrontendBuildErrorKeepsTheEndOfWhatTheRunnerSaid(t *testing.T) {
 	}
 }
 
+func TestFrontendBuildErrorDropsRunnerNoise(t *testing.T) {
+	command := exec.Command("bun", "run", "vite-runner.ts")
+	said := "\x1b[33m[WARN] internal\x1b[0m\n" +
+		"✗ Build failed in 38ms\n" +
+		"44 | summary += err;\n" +
+		"\n" +
+		"error: Build failed with 1 error:\n" +
+		"\n" +
+		"\x1b[31m[builtin:vite-transform]\x1b[0m Expected `:` but found `<`\n" +
+		"   ╭─[ app/page.tsx:1:40 ]\n" +
+		" 1 │ export default function Page( {\n" +
+		"\n" +
+		"      at aggregate (/tmp/rolldown.mjs:49:22)\n" +
+		"Bun v1.4.3 (Linux x64)\n"
+	failure := frontendBuildError(command, errors.New("exit status 1"), said)
+	for _, unwanted := range []string{"\x1b", "summary +=", "at aggregate", "Bun v"} {
+		if strings.Contains(failure.Error(), unwanted) {
+			t.Fatalf("the failure kept %q:\n%s", unwanted, failure)
+		}
+	}
+	for _, wanted := range []string{"Expected", "app/page.tsx", "vite-runner.ts"} {
+		if !strings.Contains(failure.Error(), wanted) {
+			t.Fatalf("the failure lost %q:\n%s", wanted, failure)
+		}
+	}
+}
+
+func TestFrontendWarningsKeepsOnlyUserWarnings(t *testing.T) {
+	said := "\x1b[33m[INEFFECTIVE_DYNAMIC_IMPORT]\x1b[0m .bifrost/views/page-0.tsx is imported twice\n\n" +
+		"[IMPORT_IS_UNDEFINED] Import `renderHead` is undefined in '.bifrost/views/page-0.tsx'\n" +
+		"   ╭─[ .bifrost/app/server.tsx:6:29 ]\n\n" +
+		"\x1b[33m[UNUSED]\x1b[0m app/page.tsx is unused\n"
+	warnings := frontendWarnings(said)
+	if strings.Contains(warnings, ".bifrost/") || strings.Contains(warnings, "\x1b") {
+		t.Fatalf("the warnings kept generated files or ANSI:\n%s", warnings)
+	}
+	if !strings.Contains(warnings, "app/page.tsx is unused") {
+		t.Fatalf("the warnings lost the user's warning:\n%s", warnings)
+	}
+}
+
 func TestLastLinesKeepsTheEndOfTheLog(t *testing.T) {
 	var log strings.Builder
 	for index := 0; index < 100; index++ {

@@ -216,7 +216,7 @@ func runDev(args []string) error {
 			printRouteTable(description, router.routeRows(), router.routeParams(), false)
 			sourceRoot = description.SourceRoot
 			if err := writeRoutesFile(filepath.Join(socketDir, "routes.json"), description.Spec.Routes); err != nil {
-				fmt.Fprintln(os.Stderr, "bifrost: write development routes:", err)
+				reportDevError("write development routes", err)
 			}
 		}, OnOutput: func(output string) { buildOutput = output }, Version: bifrost.Version}
 		if router != nil {
@@ -274,30 +274,42 @@ func runDev(args []string) error {
 			if !bridgeAlive() {
 				fmt.Fprintln(os.Stderr, "bifrost: development bridge stopped; restarting Vite")
 				if err := ensureBridge(); err != nil {
-					fmt.Fprintln(os.Stderr, "bifrost: bridge restart:", err)
+					reportDevError("bridge restart", err)
 					continue
 				}
 			}
 			current, err := developmentStamp(*dir, routeRoot)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "bifrost: watch:", err)
+				reportDevError("watch", err)
 				continue
 			}
 			if current == last {
 				continue
 			}
 			last = current
+			begin := time.Now()
 			if isAppRouter {
 				if err := reload(ctx); err != nil {
-					fmt.Fprintln(os.Stderr, "bifrost: reload routes:", err)
+					reportDevError("reload routes", err)
+					fmt.Fprintf(os.Stderr, "bifrost: rebuild failed in %dms\n", time.Since(begin).Milliseconds())
 					continue
 				}
 			}
-			if err := buildAndStart(); err != nil && !errors.Is(err, context.Canceled) {
-				fmt.Fprintln(os.Stderr, "bifrost: rebuild:", err)
+			if err := buildAndStart(); err != nil {
+				if errors.Is(err, context.Canceled) {
+					continue
+				}
+				reportDevError("rebuild", err)
+				fmt.Fprintf(os.Stderr, "bifrost: rebuild failed in %dms\n", time.Since(begin).Milliseconds())
+				continue
 			}
+			fmt.Fprintf(os.Stderr, "bifrost: rebuilt in %dms\n", time.Since(begin).Milliseconds())
 		}
 	}
+}
+
+func reportDevError(prefix string, err error) {
+	fmt.Fprintf(os.Stderr, "bifrost: %s: %s\n", prefix, strings.TrimPrefix(err.Error(), "bifrost: "))
 }
 
 func childBinaryPath(socketDir string, generation int) string {
