@@ -121,7 +121,7 @@ func (a *App) Register(mux *http.ServeMux) (err error) {
 	}
 	mux.HandleFunc("GET "+dochtml.AssetPrefix+"build-id", func(w http.ResponseWriter, request *http.Request) {
 		id := a.runtime.manifest.manifest.BuildID
-		if request.URL.Query().Get("wait") == id && a.runtime.devProxy != nil {
+		if request.URL.Query().Get("wait") == id && (a.runtime.devProxy != nil || os.Getenv("BIFROST_GO_DEV") != "") {
 			select {
 			case <-request.Context().Done():
 				return

@@ -45,8 +45,12 @@ type appRoute struct {
 	Alias        string
 	PageGo       bool
 	GoRender     bool
+	GoNotFound   bool
 	HasLoader    bool
 	HasCache     bool
+	HasError     bool
+	HasNotFound  bool
+	HasLayout    bool
 	HasHead      bool
 	ErrorViews   []string
 	NotFoundView string
@@ -195,7 +199,11 @@ func goPageRows(routes []appRoute) []routeRow {
 		for _, param := range route.Params {
 			names = append(names, param.Name)
 		}
-		rows = append(rows, routeRow{Kind: "go", Pattern: route.Pattern, Source: path.Join(route.Directory, "page.go"), Params: names})
+		source := "page.go"
+		if route.GoNotFound {
+			source = "not-found.go"
+		}
+		rows = append(rows, routeRow{Kind: "go", Pattern: route.Pattern, Source: path.Join(route.Directory, source), Params: names})
 	}
 	return rows
 }
@@ -237,6 +245,15 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 	if err != nil {
 		return appRouter{}, err
 	}
+	if fileExists(filepath.Join(routeRoot, "not-found.go")) && hasGoRenderRoute(routes) && !hasRoutePattern(routes, "/{path...}") {
+		routes = append(routes, appRoute{
+			Directory:  ".",
+			Pattern:    "/{path...}",
+			PageGo:     true,
+			GoRender:   true,
+			GoNotFound: true,
+		})
+	}
 	modulePath, moduleDir, err := resolveModule(ctx, routeRoot, routes, len(goDirs) > 0)
 	if err != nil {
 		return appRouter{}, err
@@ -259,6 +276,12 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 		}
 		routes[index].HasLoader = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Load")
 		routes[index].HasCache = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Cache")
+		if routes[index].GoNotFound {
+			if !hasSymbol(ctx, moduleDir, routes[index].ImportPath, "NotFound") {
+				return appRouter{}, fmt.Errorf("bifrost: %s must export NotFound", filepath.ToSlash(filepath.Join(routes[index].Directory, "not-found.go")))
+			}
+			continue
+		}
 		if routes[index].GoRender {
 			if !hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Load") {
 				return appRouter{}, fmt.Errorf("bifrost: %s must export Load", filepath.ToSlash(filepath.Join(routes[index].Directory, "page.go")))
@@ -266,6 +289,9 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 			if !hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Page") {
 				return appRouter{}, fmt.Errorf("bifrost: %s must export Page", filepath.ToSlash(filepath.Join(routes[index].Directory, "page.go")))
 			}
+			routes[index].HasError = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Error")
+			routes[index].HasNotFound = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "NotFound")
+			routes[index].HasLayout = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Layout")
 		}
 	}
 	for index := range goDirs {
@@ -368,6 +394,24 @@ func joinErrors(errs ...error) error {
 		return nil
 	}
 	return errors.New(strings.Join(lines, "\n"))
+}
+
+func hasGoRenderRoute(routes []appRoute) bool {
+	for _, route := range routes {
+		if route.GoRender {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRoutePattern(routes []appRoute, pattern string) bool {
+	for _, route := range routes {
+		if route.Pattern == pattern {
+			return true
+		}
+	}
+	return false
 }
 
 func discoverRoutes(root string) ([]appRoute, error) {
@@ -1222,6 +1266,78 @@ func directoryContains(parent, child string) bool {
 	return parent == "." || parent == child || strings.HasPrefix(child, parent+"/")
 }
 
+func goPageHandlerSource(route appRoute, index int) string {
+	var source strings.Builder
+	fmt.Fprintf(&source, "func gopage%d(w http.ResponseWriter, r *http.Request) {\n", index)
+	if route.HasCache {
+		fmt.Fprintf(&source, "\tcache := %s.Cache()\n", route.Alias)
+	} else {
+		source.WriteString("\tcache := \"\"\n")
+	}
+	fmt.Fprintf(&source, "\tprops, err := %s.Load(r)\n", route.Alias)
+	source.WriteString("\tif err != nil {\n")
+	if route.HasError || route.HasNotFound {
+		source.WriteString("\t\tif !bifrost.IsRedirect(err) {\n")
+		source.WriteString("\t\t\tstatus, ok := bifrost.ErrorStatus(err)\n\t\t\tif !ok {\n\t\t\t\tstatus = http.StatusInternalServerError\n\t\t\t}\n")
+		if route.HasNotFound {
+			fmt.Fprintf(&source, "\t\t\tif status == http.StatusNotFound {\n\t\t\t\tnode := %s.NotFound(r)\n\t\t\t\tif node != nil {\n\t\t\t\t\twriteGoPage(w, status, node, cache)\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t}\n", route.Alias)
+		}
+		if route.HasError {
+			fmt.Fprintf(&source, "\t\t\tnode := %s.Error(err, r)\n\t\t\tif node != nil {\n\t\t\t\twriteGoPage(w, status, node, cache)\n\t\t\t\treturn\n\t\t\t}\n", route.Alias)
+		}
+		source.WriteString("\t\t}\n")
+	}
+	source.WriteString("\t\tbifrost.WriteError(w, r, err)\n\t\treturn\n\t}\n")
+	fmt.Fprintf(&source, "\tnode := %s.Page(props)\n", route.Alias)
+	if route.HasLayout {
+		fmt.Fprintf(&source, "\tnode = %s.Layout(node, props)\n", route.Alias)
+	}
+	source.WriteString("\twriteGoPage(w, http.StatusOK, node, cache)\n}\n\n")
+	return source.String()
+}
+
+func goPageHelpersSource() string {
+	return `type goPageNode interface {
+	Render(io.Writer) error
+}
+
+func writeGoPage(w http.ResponseWriter, status int, node goPageNode, cache string) {
+	if node == nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	var body strings.Builder
+	if err := node.Render(&body); err != nil {
+		log.Printf("bifrost: render go page: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	html := body.String()
+	if os.Getenv("BIFROST_GO_DEV") != "" {
+		html = injectGoPageReload(html)
+	}
+	if cache != "" {
+		w.Header().Set("Cache-Control", cache)
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	if _, err := w.Write([]byte("<!doctype html>")); err != nil {
+		return
+	}
+	_, _ = w.Write([]byte(html))
+}
+
+func injectGoPageReload(html string) string {
+	const script = "<script>(()=>{let build=\"\";async function poll(){try{if(!build){build=await (await fetch(\"/_bifrost/build-id\",{cache:\"no-store\"})).text();}const response=await fetch(\"/_bifrost/build-id?wait=\"+build,{cache:\"no-store\"});if((await response.text())!==build){location.reload();return;}setTimeout(poll,0);}catch{setTimeout(poll,500);}}poll();})()</script>"
+	if index := strings.LastIndex(html, "</body>"); index >= 0 {
+		return html[:index] + script + html[index:]
+	}
+	return html + script
+}
+
+`
+}
+
 func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDir, renderConcurrency, renderQueue int) error {
 	renderConfig := "Assets: bifrostAssets, "
 	if renderConcurrency > 0 {
@@ -1235,16 +1351,37 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 	var loaders strings.Builder
 	hasNotFoundPage := false
 	hasSegments := false
+	hasGoPage := false
 	for index, route := range routes {
 		if route.NotFoundPage {
 			hasNotFoundPage = true
 			fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, loadNotFound).WithNavigation(),\n", strconv.Quote(route.Pattern), strconv.Quote(route.View))
 			continue
 		}
-		if route.GoRender {
+		if route.GoNotFound {
+			hasGoPage = true
 			importsByPath[route.ImportPath] = route.Alias
-			fmt.Fprintf(&loaders, "func gopage%d(w http.ResponseWriter, r *http.Request) {\n\tprops, err := %s.Load(r)\n\tif err != nil {\n\t\tbifrost.WriteError(w, r, err)\n\t\treturn\n\t}\n\tnode := %s.Page(props)\n\tif node == nil {\n\t\thttp.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)\n\t\treturn\n\t}\n\tw.Header().Set(\"Content-Type\", \"text/html; charset=utf-8\")\n\tw.WriteHeader(http.StatusOK)\n\tif _, err := w.Write([]byte(\"<!doctype html>\")); err != nil {\n\t\treturn\n\t}\n\tif err := node.Render(w); err != nil {\n\t\tlog.Printf(\"bifrost: render %%s: %%v\", %s, err)\n\t}\n}\n\n", index, route.Alias, route.Alias, strconv.Quote(route.Pattern))
-			fmt.Fprintf(&declarations, "\t\t\tbifrost.Handler(%s, http.HandlerFunc(gopage%d)),\n", strconv.Quote(route.Pattern), index)
+			fmt.Fprintf(&loaders, "func gonotfound%d(w http.ResponseWriter, r *http.Request) {\n\twriteGoPage(w, http.StatusNotFound, %s.NotFound(r), \"\")\n}\n\n", index, route.Alias)
+			handler := fmt.Sprintf("http.HandlerFunc(gonotfound%d)", index)
+			for middlewareIndex := len(goDirs) - 1; middlewareIndex >= 0; middlewareIndex-- {
+				if goDirs[middlewareIndex].Middleware && directoryContains(goDirs[middlewareIndex].Directory, route.Directory) {
+					handler = goDirs[middlewareIndex].Alias + ".Middleware(" + handler + ")"
+				}
+			}
+			fmt.Fprintf(&declarations, "\t\t\tbifrost.Handler(%s, %s),\n", strconv.Quote(route.Pattern), handler)
+			continue
+		}
+		if route.GoRender {
+			hasGoPage = true
+			importsByPath[route.ImportPath] = route.Alias
+			loaders.WriteString(goPageHandlerSource(route, index))
+			handler := fmt.Sprintf("http.HandlerFunc(gopage%d)", index)
+			for middlewareIndex := len(goDirs) - 1; middlewareIndex >= 0; middlewareIndex-- {
+				if goDirs[middlewareIndex].Middleware && directoryContains(goDirs[middlewareIndex].Directory, route.Directory) {
+					handler = goDirs[middlewareIndex].Alias + ".Middleware(" + handler + ")"
+				}
+			}
+			fmt.Fprintf(&declarations, "\t\t\tbifrost.Handler(%s, %s),\n", strconv.Quote(route.Pattern), handler)
 			continue
 		}
 		hasSegments = hasSegments || slices.ContainsFunc(route.Params, func(param routeParam) bool { return param.Segments })
@@ -1328,7 +1465,15 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 			break
 		}
 	}
-	source := "package main\n\nimport (\n" + standardImports() + "\n\t\"github.com/3-lines-studio/bifrost\"\n" + imports.String() + ")\n\n" + loaders.String() + pathValues.String() + "func main() {\n\tif err := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n\nfunc run() error {\n\tapp, err := bifrost.New(bifrost.Config{SourceRoot: " + strconv.Quote(root) + ", " + renderConfig + "Routes: []bifrost.Route{\n" + declarations.String() + "\t}})\n\tif err != nil {\n\t\treturn err\n\t}\n\tif bifrost.Building() {\n\t\treturn nil\n\t}\n\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\tdefer stop()\n\tdefer func() {\n\t\tcloseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\t\tdefer cancel()\n\t\t_ = app.Close(closeCtx)\n\t}()\n\tpageMux := http.NewServeMux()\n\tif err := app.Register(pageMux); err != nil {\n\t\treturn err\n\t}\n\tmux := http.NewServeMux()\n" + registrations.String() + "\tmux.Handle(\"/\", pageMux)\n\t" + serve + "\n}\n\nfunc redirectTrailingSlash(next http.Handler) http.Handler {\n\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n\t\tpath := r.URL.Path\n\t\tif len(path) < 2 || !strings.HasSuffix(path, \"/\") {\n\t\t\tnext.ServeHTTP(w, r)\n\t\t\treturn\n\t\t}\n\t\ttarget := *r.URL\n\t\ttarget.Path = strings.TrimSuffix(path, \"/\")\n\t\thttp.Redirect(w, r, target.String(), http.StatusPermanentRedirect)\n\t})\n}\n\nfunc serve(ctx context.Context, handler http.Handler) error {\n\taddr := os.Getenv(\"BIFROST_ADDR\")\n\tif addr == \"\" {\n\t\taddr = \":8080\"\n\t}\n\tflag.StringVar(&addr, \"addr\", addr, \"HTTP listen address\")\n\tflag.Parse()\n\tserver := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10*time.Second}\n\tdone := make(chan error, 1)\n\tgo func() { done <- server.ListenAndServe() }()\n\tselect {\n\tcase err := <-done:\n\t\tif errors.Is(err, http.ErrServerClosed) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\tcase <-ctx.Done():\n\t}\n\tshutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\tdefer cancel()\n\tif err := server.Shutdown(shutdownCtx); err != nil {\n\t\t_ = server.Close()\n\t\treturn err\n\t}\n\terr := <-done\n\tif errors.Is(err, http.ErrServerClosed) {\n\t\treturn nil\n\t}\n\treturn err\n}\n"
+	importsText := standardImports()
+	if hasGoPage {
+		importsText += "\t\"io\"\n"
+	}
+	helpers := ""
+	if hasGoPage {
+		helpers = goPageHelpersSource()
+	}
+	source := "package main\n\nimport (\n" + importsText + "\n\t\"github.com/3-lines-studio/bifrost\"\n" + imports.String() + ")\n\n" + loaders.String() + helpers + pathValues.String() + "func main() {\n\tif err := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n\nfunc run() error {\n\tapp, err := bifrost.New(bifrost.Config{SourceRoot: " + strconv.Quote(root) + ", " + renderConfig + "Routes: []bifrost.Route{\n" + declarations.String() + "\t}})\n\tif err != nil {\n\t\treturn err\n\t}\n\tif bifrost.Building() {\n\t\treturn nil\n\t}\n\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\tdefer stop()\n\tdefer func() {\n\t\tcloseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\t\tdefer cancel()\n\t\t_ = app.Close(closeCtx)\n\t}()\n\tpageMux := http.NewServeMux()\n\tif err := app.Register(pageMux); err != nil {\n\t\treturn err\n\t}\n\tmux := http.NewServeMux()\n" + registrations.String() + "\tmux.Handle(\"/\", pageMux)\n\t" + serve + "\n}\n\nfunc redirectTrailingSlash(next http.Handler) http.Handler {\n\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n\t\tpath := r.URL.Path\n\t\tif len(path) < 2 || !strings.HasSuffix(path, \"/\") {\n\t\t\tnext.ServeHTTP(w, r)\n\t\t\treturn\n\t\t}\n\t\ttarget := *r.URL\n\t\ttarget.Path = strings.TrimSuffix(path, \"/\")\n\t\thttp.Redirect(w, r, target.String(), http.StatusPermanentRedirect)\n\t})\n}\n\nfunc serve(ctx context.Context, handler http.Handler) error {\n\taddr := os.Getenv(\"BIFROST_ADDR\")\n\tif addr == \"\" {\n\t\taddr = \":8080\"\n\t}\n\tflag.StringVar(&addr, \"addr\", addr, \"HTTP listen address\")\n\tflag.Parse()\n\tserver := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10*time.Second}\n\tdone := make(chan error, 1)\n\tgo func() { done <- server.ListenAndServe() }()\n\tselect {\n\tcase err := <-done:\n\t\tif errors.Is(err, http.ErrServerClosed) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\tcase <-ctx.Done():\n\t}\n\tshutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\tdefer cancel()\n\tif err := server.Shutdown(shutdownCtx); err != nil {\n\t\t_ = server.Close()\n\t\treturn err\n\t}\n\terr := <-done\n\tif errors.Is(err, http.ErrServerClosed) {\n\t\treturn nil\n\t}\n\treturn err\n}\n"
 	formatted, err := format.Source([]byte(source))
 	if err != nil {
 		return err

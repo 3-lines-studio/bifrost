@@ -260,7 +260,7 @@ func runDev(args []string) error {
 		child.Stdout = os.Stdout
 		child.Stderr = os.Stderr
 		child.Stdin = os.Stdin
-		child.Env = append(os.Environ(), "BIFROST_DEV_DIR="+devDir, fmt.Sprintf("BIFROST_VITE_PORT=%d", *vitePort), "BIFROST_VITE_SOCKET="+socket, "BIFROST_VITE_CONFIG="+*viteConfig)
+		child.Env = append(os.Environ(), "BIFROST_DEV_DIR="+devDir, fmt.Sprintf("BIFROST_VITE_PORT=%d", *vitePort), "BIFROST_VITE_SOCKET="+socket, "BIFROST_VITE_CONFIG="+*viteConfig, "BIFROST_GO_DEV=1")
 		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		return child.Start()
 	}
@@ -442,14 +442,14 @@ func runTemplateDev(app *appRouter, projectRoot, routeRoot string, interval time
 
 func templateDevelopmentEnv() []string {
 	env := os.Environ()
-	filtered := make([]string, 0, len(env))
+	filtered := make([]string, 0, len(env)+1)
 	for _, value := range env {
-		if strings.HasPrefix(value, "BIFROST_DEV_DIR=") || strings.HasPrefix(value, "BIFROST_VITE_") || strings.HasPrefix(value, "BIFROST_EXTERNAL_VITE=") {
+		if strings.HasPrefix(value, "BIFROST_DEV_DIR=") || strings.HasPrefix(value, "BIFROST_VITE_") || strings.HasPrefix(value, "BIFROST_EXTERNAL_VITE=") || strings.HasPrefix(value, "BIFROST_GO_DEV=") {
 			continue
 		}
 		filtered = append(filtered, value)
 	}
-	return filtered
+	return append(filtered, "BIFROST_GO_DEV=1")
 }
 
 func publicTreeStamp(projectRoot string) (string, error) {
