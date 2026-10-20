@@ -64,6 +64,25 @@ func TestTemplateRendererComposesLayoutsAndHead(t *testing.T) {
 	}
 }
 
+func TestTemplateRendererDoesNotCommitOnBodyError(t *testing.T) {
+	renderer, err := newTemplateRenderer(&protocol.HTMLAssets{
+		Page: protocol.TemplateSource{
+			Path:   "app/page.html",
+			Source: `{{define "head"}}<title>Broken</title>{{end}}<h1>before</h1>{{template "missing" .}}`,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &templateTestSink{}
+	if err := renderer.Render(context.Background(), renderRequest{}, sink); err == nil {
+		t.Fatal("expected a template error")
+	}
+	if sink.started {
+		t.Fatal("head was committed before the body error")
+	}
+}
+
 func TestTemplateRendererExposesParamsAndEscapesProps(t *testing.T) {
 	renderer, err := newTemplateRenderer(&protocol.HTMLAssets{
 		Page: protocol.TemplateSource{
