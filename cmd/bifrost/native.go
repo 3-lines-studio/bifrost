@@ -2560,8 +2560,8 @@ func nativeOverlayHas(overlay, name string) bool {
 
 const nativeLayoutBody = `import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
-import { BackHandler, Keyboard, StyleSheet, View } from "react-native";
+import { useEffect } from "react";
+import { BackHandler, StyleSheet, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 // The back button of the phone, as the Escape of a browser: a dialog of the page
