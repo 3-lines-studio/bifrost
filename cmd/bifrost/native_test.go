@@ -703,6 +703,27 @@ func TestNativeMakesABlockThatScrollsAScrollView(t *testing.T) {
 	}
 }
 
+func TestNativeAFieldKeepsTheTextItIsGiven(t *testing.T) {
+	// Measured on the login of the app of the case: the address typed into the
+	// field of the web was clipped in half, because a native input keeps the
+	// padding of its font around a line the page sized.
+	for _, said := range []string{"includeFontPadding: false", "textAlignVertical: \"center\" as const", "INPUT_FIT"} {
+		if !strings.Contains(nativeTextModule, said) {
+			t.Fatalf("a field of the page clips what is typed: %q", said)
+		}
+	}
+}
+
+func TestNativeADrawingOfThePageIsFetchedAndPainted(t *testing.T) {
+	// The logo of the app of the case is an svg, and the image of a target is not
+	// a drawing: the navbar painted nothing where the brand is.
+	for _, said := range []string{"SvgUri", `/\.svg(\?|#|$)/i.test(uri)`, "function imageUri(src: unknown)"} {
+		if !strings.Contains(nativeHostBody, said) {
+			t.Fatalf("a drawing of the page paints nothing: %q", said)
+		}
+	}
+}
+
 func TestNativeLeavesOutAPlaceThatIsNotANumber(t *testing.T) {
 	// A page that places a popup works out where it goes by measuring the page,
 	// and what it measured travels as a style of a browser: a box fixed to the
@@ -2333,7 +2354,7 @@ func TestNativeAnSvgIsADrawingTheTargetCanPaint(t *testing.T) {
 	}
 	host := nativeHost("")
 	for _, wanted := range []string{
-		`import Svg, { Circle, ClipPath, Defs, Ellipse, G, Line, LinearGradient, Mask, Path, Polygon, Polyline, RadialGradient, Rect, Stop, Symbol as SymbolTag, Use } from "react-native-svg";`,
+		`import Svg, { Circle, ClipPath, Defs, Ellipse, G, Line, LinearGradient, Mask, Path, Polygon, Polyline, RadialGradient, Rect, Stop, SvgUri, Symbol as SymbolTag, Use } from "react-native-svg";`,
 		"svg: SvgRoot,",
 		"path: SvgPath,",
 		"g: SvgG,",

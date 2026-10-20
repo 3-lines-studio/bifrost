@@ -555,12 +555,24 @@ function StickyViewBox({ style, children, ...rest }: HostProps) {
   );
 }
 
+// A field of the web is a box the page sized, and the text of a native input sits
+// in the middle of its line with the padding of the font around it: a field with
+// the height of the page clipped the top of what was typed. Measured on the login
+// of the app of the case, the address was cut in half.
+const INPUT_FIT = { includeFontPadding: false, textAlignVertical: "center" as const, paddingVertical: 0 };
+
 function InputBox({ style, children, ...rest }: HostProps) {
   const carried = useContext(Carried);
   const own = inheritedText(carried, style);
+  // The line height a rule of the page asked for is the line of a browser, and a
+  // native input keeps its own: with both, the line is taller than the box the
+  // page sized and the top of what was typed is cut. Measured on the login of the
+  // app of the case.
+  const text = { ...(textStyle(own, families) as Record<string, unknown>) };
+  delete text.lineHeight;
   return (
     <Carried.Provider value={own}>
-      <TextInput {...withoutClass(rest)} style={[placed(style), textStyle(own, families)]}>{children}</TextInput>
+      <TextInput {...withoutClass(rest)} style={[placed(style), text, INPUT_FIT]}>{children}</TextInput>
     </Carried.Provider>
   );
 }
@@ -3490,7 +3502,7 @@ import { Dimensions, Image, Linking, Modal, Platform, ScrollView, StyleSheet } f
 import DateTimePicker from "@react-native-community/datetimepicker";
 import Slider from "@react-native-community/slider";
 import * as DocumentPicker from "expo-document-picker";
-import Svg, { Circle, ClipPath, Defs, Ellipse, G, Line, LinearGradient, Mask, Path, Polygon, Polyline, RadialGradient, Rect, Stop, Symbol as SymbolTag, Use } from "react-native-svg";
+import Svg, { Circle, ClipPath, Defs, Ellipse, G, Line, LinearGradient, Mask, Path, Polygon, Polyline, RadialGradient, Rect, Stop, SvgUri, Symbol as SymbolTag, Use } from "react-native-svg";
 import { styled } from "react-native-css/native";
 import { StyledAnimatedView as AnimatedView, StyledPressable as Pressable, StyledStickyView as StickyView, StyledText as Text, StyledTextInput as TextInput, StyledView as View, useInheritedColor } from "./text";
 import { ORIGIN } from "./origin";
@@ -3907,7 +3919,33 @@ function imageSource(src: unknown): unknown {
   return { uri: src };
 }
 
-function ImageTag({ src, alt, ...rest }: { src?: unknown; alt?: string } & Record<string, unknown>) {
+// A picture of the web can be a drawing, and the image of a target is not one:
+// the logo of the app of the case is an svg, and it painted nothing. The drawing
+// is fetched and painted by the svg renderer, at the size the page asked for.
+function imageUri(src: unknown): string | null {
+  const source = imageSource(src) as { uri?: string } | number | undefined;
+  if (source === undefined || typeof source === "number" || typeof source.uri !== "string") {
+    return null;
+  }
+  return source.uri;
+}
+
+function sizeOf(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const size = Number(value);
+    return Number.isFinite(size) ? size : undefined;
+  }
+  return undefined;
+}
+
+function ImageTag({ src, alt, width, height, ...rest }: { src?: unknown; alt?: string; width?: unknown; height?: unknown } & Record<string, unknown>) {
+  const uri = imageUri(src);
+  if (uri !== null && /\.svg(\?|#|$)/i.test(uri)) {
+    return <SvgUri uri={uri} width={sizeOf(width)} height={sizeOf(height)} accessibilityLabel={alt} />;
+  }
   return <Image source={imageSource(src) as never} accessibilityLabel={alt} {...rest} />;
 }
 
