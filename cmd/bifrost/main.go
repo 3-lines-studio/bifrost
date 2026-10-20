@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/3-lines-studio/bifrost"
@@ -76,10 +78,18 @@ func runBuild(args []string) error {
 	}
 	var app *appRouter
 	options := builder.Options{Package: packagePath, Dir: *dir, Output: *output, StaticWorkers: *staticWorkers, SourceMaps: *sourceMaps, ViteConfig: *viteConfig, OnDescribe: func(description protocol.DescribeResult) {
-		printRouteTable(description, app.routeRows(), app.routeParams(), false)
+		if err := printRouteTable(description, app.routeRows(), app.routeParams(), false); err != nil {
+			fmt.Fprintln(os.Stderr, "bifrost: route table:", err)
+		}
 	}, Version: bifrost.Version}
 	projectRoot, routeRoot, isAppRouter, err := appRouterRoots(*dir, packagePath)
 	if err != nil {
+		return err
+	}
+	if _, err := exec.LookPath("bun"); err != nil {
+		return errors.New("bifrost: Bun is required for the build; install it from https://bun.sh")
+	}
+	if err := requireViteInstalled(projectRoot); err != nil {
 		return err
 	}
 	if isAppRouter {

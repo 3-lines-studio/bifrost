@@ -14,6 +14,7 @@ Go 1.25+ and Bun 1.3+.
 
 - `make test`: gofmt check and all Go tests. Run before every push.
 - `make vet`: `go vet ./...`.
+- `make lint`: `golangci-lint run ./...`.
 - `make gate`: App Router release gate; builds a throwaway app and exercises it (~10s).
 - `make demo`: builds `example/app-router-demo` and runs 74 curl assertions.
 - `make dev-integration`: development loop; HMR, Go restart, Vite bridge, route add and remove.

@@ -1,4 +1,4 @@
-.PHONY: check test race vet gate demo bench fuzz throughput integration dev-integration reproducible
+.PHONY: check test race vet lint gate demo bench fuzz throughput integration dev-integration reproducible
 
 check: test race vet gate demo
 
@@ -11,6 +11,9 @@ race:
 
 vet:
 	go vet ./...
+
+lint:
+	golangci-lint run ./...
 
 demo:
 	$(MAKE) -C example/app-router-demo check
