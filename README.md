@@ -15,7 +15,7 @@ cd myapp
 bifrost dev .
 ```
 
-`init` writes an App Router project and runs `go mod tidy` and `bun install`. `--no-install` skips those installs.
+`init` writes an App Router project and an `AGENTS.md`, then runs `go mod tidy` and `bun install`. `--no-install` skips those installs.
 
 | Command | Does |
 | --- | --- |

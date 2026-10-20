@@ -192,6 +192,53 @@ func Load(r *http.Request) (any, error) {
 `,
 		"app/style.css": `@import "tailwindcss";
 `,
+		"AGENTS.md": `# AGENTS.md
+
+This is a Bifrost App Router app: file-based React served by Go.
+
+## Commands
+
+    bifrost dev .
+    bifrost build .
+    bifrost routes --json .
+    go test ./...
+
+The dev server listens on :8080; BIFROST_ADDR changes the address. The build writes .bifrost/bifrost-app. If bifrost is not installed, run the same commands with go run github.com/3-lines-studio/bifrost/cmd/bifrost@latest.
+
+## Routes
+
+app/ is the route root. A directory is a route when it contains page.tsx.
+
+- slug_/: one segment parameter.
+- slug__/: catch-all; must be last.
+- name~/: route group, not in the URL.
+- _name/: private, never routed.
+
+## Files
+
+- page.tsx: exports Page (or default) and optionally Head.
+- page.go: exports Load(r *http.Request) (any, error) and optionally Cache() string.
+- layout.tsx: exports Layout({ children }) and stays mounted.
+- template.tsx, loading.tsx, error.tsx, not-found.tsx: optional views.
+- route.go: exports Get, Post, Put, Patch, Delete, Head, Options handlers.
+- middleware.go: exports Middleware(next http.Handler) http.Handler.
+- public/: served as is.
+
+Do not edit .bifrost/: it is build output.
+
+## Data
+
+Pages receive params, searchParams, and pathname merged into the loader props. A loader returns a map or bifrost.PageData whose Props is a map; return bifrost.NotFound() for a 404. Loader props reach the browser: never return secrets.
+
+Page components are client components and cannot be async. Deferred UI uses Suspense.
+
+## Metadata and navigation
+
+- export const metadata = { title, description, openGraph, robots, alternates, keywords }; layouts and pages merge from the outside in.
+- generateMetadata(props) may be async.
+- Only page.tsx exports Head, and it cannot also export metadata.
+- Use <a href> for internal links. virtual:bifrost/navigation exports Link, navigate, replace, refresh, useRouter, useParams, usePathname, and useSearchParams.
+`,
 		".gitignore": `.bifrost/*
 !.bifrost/embed.placeholder
 node_modules/
