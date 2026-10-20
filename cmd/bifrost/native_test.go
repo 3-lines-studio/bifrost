@@ -730,8 +730,9 @@ func TestNativeAPictureThatFadesInIsPainted(t *testing.T) {
 	// from -- "Cannot read property 'remove' of undefined".
 	for _, said := range []string{
 		`const hidden = typeof className === "string" && /\bopacity-0\b/.test(className);`,
-		`onLoad as (event: unknown) => void`,
-		`currentTarget: node`,
+		`(handler as (event: unknown) => void)({ ...(event as Record<string, unknown>), target: node, currentTarget: node });`,
+		`const loaded = withNode(onLoad);`,
+		`const failed = withNode(onError);`,
 	} {
 		if !strings.Contains(nativeHostBody, said) {
 			t.Fatalf("a picture that fades in crashes its page: %q", said)
