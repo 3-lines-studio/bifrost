@@ -491,7 +491,7 @@ func TestNativeHTMLIsReadIntoTheTagsTheMapPaints(t *testing.T) {
 	for _, wanted := range []string{
 		// The tree is read into the components of the table, and a tag with no
 		// component keeps its text instead of taking the render down with it.
-		"const component = hostComponent(element.tag)",
+		`const component = element.tag === "p" ? Box : hostComponent(element.tag);`,
 		"return createElement(Fragment, { key }, ...(children as []))",
 		// The classes of the HTML are the classes of the app: a browser writes
 		// `class` and nativewind reads `className`.
@@ -724,15 +724,15 @@ func TestNativeADrawingOfThePageIsFetchedAndPainted(t *testing.T) {
 	}
 }
 
-func TestNativeAParagraphIsABlock(t *testing.T) {
+func TestNativeAParagraphOfTheHTMLIsABlock(t *testing.T) {
 	// Measured on the body of a post of the app of the case: every paragraph came
-	// out as one run of text, because a p was painted inline and a browser paints
-	// it as a block with its own margins.
-	if !strings.Contains(nativeHostBody, `"p", "section"`) {
-		t.Fatal("a paragraph is not a block")
+	// out as one run of text. A p a page writes by hand flows inline with its
+	// links; a p of the HTML is the block a browser paints, with its own margins.
+	if !strings.Contains(nativeHostBody, `const component = element.tag === "p" ? Box : hostComponent(element.tag);`) {
+		t.Fatal("a paragraph of the HTML is painted inline")
 	}
-	if strings.Contains(nativeHostBody, `"mark", "p", "pre"`) {
-		t.Fatal("a paragraph is painted inline")
+	if !strings.Contains(nativeHostBody, `"mark", "p", "pre"`) {
+		t.Fatal("a paragraph a page writes by hand lost its inline flow")
 	}
 }
 
