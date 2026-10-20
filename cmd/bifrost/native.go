@@ -4849,14 +4849,11 @@ export function nativeProps(props: unknown, tag?: string): unknown {
   // only answered onClick left the menu closed. Measured on the language toggle
   // of the app of the case. The event a browser hands it is one the trigger can
   // read -- the left button, no ctrl -- and the press of a target stands for it.
-  if (typeof given.onPointerDown === "function") {
+  if (given.onPress === undefined && typeof given.onPointerDown === "function") {
     const down = given.onPointerDown as (event: unknown) => void;
     delete given.onPointerDown;
-    const pressed = given.onPress as ((event: unknown) => void) | undefined;
     given.onPress = (event: unknown) => {
-      const shaped = pressEvent({ ...pressEvent(event), button: 0, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, pointerType: "touch" });
-      pressed?.(shaped);
-      down(shaped);
+      down(pressEvent({ ...pressEvent(event), button: 0, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, pointerType: "touch" }));
     };
   } else {
     delete given.onPointerDown;

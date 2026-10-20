@@ -755,7 +755,7 @@ func TestNativeLeavesOutAPlaceThatIsNotANumber(t *testing.T) {
 	}
 	// A menu of the web opens when the pointer goes down, and a target has only a
 	// press: a trigger that listened to onPointerDown never opened.
-	if !strings.Contains(nativeHostBody, `typeof given.onPointerDown === "function"`) {
+	if !strings.Contains(nativeHostBody, `given.onPress === undefined && typeof given.onPointerDown === "function"`) {
 		t.Fatal("a menu that opens on a pointer never opens")
 	}
 	// Every box of the target goes through it too: the wrapper of a popup is a
