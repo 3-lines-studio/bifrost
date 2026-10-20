@@ -600,7 +600,7 @@ func TestNativeTakesTheTagOfASelectorDownToAClass(t *testing.T) {
 	if !strings.Contains(nativeReact, "component === undefined ? undefined : type") {
 		t.Fatal("the road through React.createElement does not pass the tag")
 	}
-	if !strings.Contains(nativeCSSWarnings, `withTagClasses(withoutAnimations(expanded), lostSelectors(config, projectRoot, filePath, options))`) {
+	if !strings.Contains(nativeCSSWarnings, `withTagClasses(withoutGrid(withoutAnimations(expanded)), lostSelectors(config, projectRoot, filePath, options))`) {
 		t.Fatal("the transformer does not run the rewrite on what the pipeline produced")
 	}
 	if !strings.Contains(nativeCSSWarnings, `options.platform === "web" || !isStylesheet(filePath)`) {
@@ -851,7 +851,7 @@ func TestNativeLeavesOutAPlaceThatIsNotANumber(t *testing.T) {
 	}
 	// A keyframes of the web needs an interpolator the runtime may not carry: the
 	// target paints without animation rather than stopping at the first press.
-	for _, said := range []string{"function withoutAnimations(css)", "withTagClasses(withoutAnimations(expanded)"} {
+	for _, said := range []string{"function withoutAnimations(css)", "withoutGrid(withoutAnimations(expanded))"} {
 		if !strings.Contains(nativeCSSWarnings, said) {
 			t.Fatalf("an animation of the web reaches the renderer: %q", said)
 		}
