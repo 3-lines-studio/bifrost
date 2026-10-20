@@ -200,18 +200,15 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 	if renderConcurrency < 0 {
 		return appRouter{}, errors.New("bifrost: render concurrency must not be negative")
 	}
-	routes, err := discoverRoutes(routeRoot)
-	if err != nil {
-		return appRouter{}, err
-	}
-	goDirs, err := discoverGoDirs(routeRoot)
-	if err != nil {
+	routes, routesErr := discoverRoutes(routeRoot)
+	goDirs, goDirsErr := discoverGoDirs(routeRoot)
+	if err := joinErrors(routesErr, goDirsErr); err != nil {
 		return appRouter{}, err
 	}
 	if len(routes) == 0 && len(goDirs) == 0 {
 		return appRouter{}, fmt.Errorf("bifrost: no page.tsx or route.go found under %s", routeRoot)
 	}
-	routes, err = appendNotFoundRoutes(routeRoot, routes)
+	routes, err := appendNotFoundRoutes(routeRoot, routes)
 	if err != nil {
 		return appRouter{}, err
 	}
@@ -318,8 +315,30 @@ func routeParams(routes []appRoute) map[string][]string {
 	return params
 }
 
+func joinErrors(errs ...error) error {
+	var lines []string
+	seen := make(map[string]bool)
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		for _, line := range strings.Split(err.Error(), "\n") {
+			if line == "" || seen[line] {
+				continue
+			}
+			seen[line] = true
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(lines, "\n"))
+}
+
 func discoverRoutes(root string) ([]appRoute, error) {
 	var routes []appRoute
+	var problems []error
 	patterns := make(map[string]string)
 	err := filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -341,7 +360,8 @@ func discoverRoutes(root string) ([]appRoute, error) {
 			if err != nil {
 				return err
 			}
-			return fmt.Errorf("bifrost: %s exports Head; keep it in page.tsx", filepath.ToSlash(relative))
+			problems = append(problems, fmt.Errorf("bifrost: %s exports Head; keep it in page.tsx", filepath.ToSlash(relative)))
+			return nil
 		}
 		directory := filepath.Dir(filePath)
 		relative, err := filepath.Rel(root, directory)
@@ -350,10 +370,12 @@ func discoverRoutes(root string) ([]appRoute, error) {
 		}
 		pattern, params, err := routePattern(relative)
 		if err != nil {
-			return fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err)
+			problems = append(problems, fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err))
+			return nil
 		}
 		if previous := patterns[pattern]; previous != "" {
-			return fmt.Errorf("bifrost: duplicate route %q from %s and %s", pattern, previous, filepath.ToSlash(relative))
+			problems = append(problems, fmt.Errorf("bifrost: duplicate route %q from %s and %s", pattern, previous, filepath.ToSlash(relative)))
+			return nil
 		}
 		patterns[pattern] = filepath.ToSlash(relative)
 		route := appRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, Params: params, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), HasHead: hasHeadExport(filePath)}
@@ -370,11 +392,15 @@ func discoverRoutes(root string) ([]appRoute, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := errors.Join(problems...); err != nil {
+		return nil, err
+	}
 	slices.SortFunc(routes, func(a, b appRoute) int { return strings.Compare(a.Pattern, b.Pattern) })
 	return routes, nil
 }
 
 func appendNotFoundRoutes(root string, routes []appRoute) ([]appRoute, error) {
+	var problems []error
 	err := filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -393,7 +419,8 @@ func appendNotFoundRoutes(root string, routes []appRoute) ([]appRoute, error) {
 		}
 		base, _, err := routePattern(relative)
 		if err != nil {
-			return err
+			problems = append(problems, fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err))
+			return nil
 		}
 		pattern := strings.TrimSuffix(base, "/{$}") + "/{path...}"
 		routes = append(routes, appRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), NotFoundPage: true})
@@ -402,11 +429,15 @@ func appendNotFoundRoutes(root string, routes []appRoute) ([]appRoute, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := errors.Join(problems...); err != nil {
+		return nil, err
+	}
 	slices.SortFunc(routes, func(a, b appRoute) int { return strings.Compare(a.Pattern, b.Pattern) })
 	return routes, nil
 }
 
 func discoverGoDirs(root string) ([]goDir, error) {
+	var problems []error
 	byDirectory := make(map[string]goDir)
 	err := filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -426,7 +457,8 @@ func discoverGoDirs(root string) ([]goDir, error) {
 		}
 		pattern, params, err := routePattern(relative)
 		if err != nil {
-			return fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err)
+			problems = append(problems, fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err))
+			return nil
 		}
 		directory := filepath.ToSlash(relative)
 		item := byDirectory[directory]
@@ -437,6 +469,9 @@ func discoverGoDirs(root string) ([]goDir, error) {
 		return nil
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := errors.Join(problems...); err != nil {
 		return nil, err
 	}
 	items := make([]goDir, 0, len(byDirectory))

@@ -179,6 +179,46 @@ func TestAppRouterPatternRejectsNextOnlySyntax(t *testing.T) {
 	}
 }
 
+func TestAppRouterReportsEveryRouteProblem(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"[slug]/page.tsx":  "export function Page() { return null }\n",
+		"[id]/page.tsx":    "export function Page() { return null }\n",
+		"posts/layout.tsx": "export function Head() { return null }\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := discoverRoutes(root)
+	if err == nil {
+		t.Fatal("broken routes were accepted")
+	}
+	for _, expected := range []string{"[slug]", "[id]", "layout.tsx exports Head"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("the failure lost %q:\n%s", expected, err)
+		}
+	}
+	if count := strings.Count(err.Error(), "bifrost:"); count != 3 {
+		t.Fatalf("the failure carried %d problems, want 3:\n%s", count, err)
+	}
+}
+
+func TestJoinErrorsDropsDuplicateLines(t *testing.T) {
+	err := joinErrors(fmt.Errorf("bifrost: one\nbifrost: two"), fmt.Errorf("bifrost: two\nbifrost: three"))
+	if got, want := err.Error(), "bifrost: one\nbifrost: two\nbifrost: three"; got != want {
+		t.Fatalf("join = %q, want %q", got, want)
+	}
+	if joinErrors(nil, nil) != nil {
+		t.Fatal("no errors did not stay nil")
+	}
+}
+
 func TestAppRouterPrivateDirectoriesAreNotRouted(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"page.tsx", "_components/Card.tsx"} {
