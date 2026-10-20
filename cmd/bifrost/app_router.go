@@ -1417,25 +1417,22 @@ func goPageHandlerSource(route appRoute, index int) string {
 	}
 	var source strings.Builder
 	fmt.Fprintf(&source, "func gopage%d(w http.ResponseWriter, r *http.Request) {\n", index)
-	if route.HasCache {
-		fmt.Fprintf(&source, "\tcache := %s.Cache()\n", route.Alias)
-	} else {
-		source.WriteString("\tcache := \"\"\n")
-	}
 	fmt.Fprintf(&source, "\tstarted := time.Now()\n\tprops, err := %s.Load(r)\n", route.Alias)
 	source.WriteString("\tbifrost.ObserveLoad(r.Context(), started, err)\n\tif err != nil {\n")
+	source.WriteString("\t\tif bifrost.DataRequested(r) {\n\t\t\tbifrost.WriteDataError(w, err)\n\t\t\treturn\n\t\t}\n")
 	if hasError || hasNotFound {
 		source.WriteString("\t\tif !bifrost.IsRedirect(err) {\n")
 		source.WriteString("\t\t\tstatus, ok := bifrost.ErrorStatus(err)\n\t\t\tif !ok {\n\t\t\t\tstatus = http.StatusInternalServerError\n\t\t\t}\n")
 		if hasNotFound {
-			fmt.Fprintf(&source, "\t\t\tif status == http.StatusNotFound {\n\t\t\t\tnode := %s(r)\n\t\t\t\tif node != nil {\n\t\t\t\t\twriteGoPage(w, status, node, cache)\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t}\n", notFoundCall)
+			fmt.Fprintf(&source, "\t\t\tif status == http.StatusNotFound {\n\t\t\t\tnode := %s(r)\n\t\t\t\tif node != nil {\n\t\t\t\t\trenderGoPage(w, r, status, node)\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t}\n", notFoundCall)
 		}
 		if hasError {
-			fmt.Fprintf(&source, "\t\t\tnode := %s(err, r)\n\t\t\tif node != nil {\n\t\t\t\twriteGoPage(w, status, node, cache)\n\t\t\t\treturn\n\t\t\t}\n", errorCall)
+			fmt.Fprintf(&source, "\t\t\tnode := %s(err, r)\n\t\t\tif node != nil {\n\t\t\t\trenderGoPage(w, r, status, node)\n\t\t\t\treturn\n\t\t\t}\n", errorCall)
 		}
 		source.WriteString("\t\t}\n")
 	}
 	source.WriteString("\t\tbifrost.WriteError(w, r, err)\n\t\treturn\n\t}\n")
+	source.WriteString("\tif bifrost.DataRequested(r) {\n\t\tif err := bifrost.WriteData(w, " + strconv.Quote(route.Pattern) + ", props, http.StatusOK); err != nil {\n\t\t\treturn\n\t\t}\n\t\treturn\n\t}\n")
 	fmt.Fprintf(&source, "\tnode := %s.Page(props)\n", route.Alias)
 	if route.HasLayout {
 		fmt.Fprintf(&source, "\tnode = %s.Layout(node, props)\n", route.Alias)
@@ -1448,7 +1445,7 @@ func goPageHandlerSource(route appRoute, index int) string {
 			fmt.Fprintf(&source, "\tnode = %s.Layout(node)\n", route.GoLayoutAlias[index])
 		}
 	}
-	source.WriteString("\twriteGoPage(w, http.StatusOK, node, cache)\n}\n\n")
+	source.WriteString("\trenderGoPage(w, r, http.StatusOK, node)\n}\n\n")
 	return source.String()
 }
 
@@ -1457,30 +1454,35 @@ func goPageHelpersSource() string {
 	Render(io.Writer) error
 }
 
-func writeGoPage(w http.ResponseWriter, status int, node goPageNode, cache string) {
+func writeGoPage(w http.ResponseWriter, status int, node goPageNode) error {
 	if node == nil {
+		err := errors.New("nil go page node")
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
+		return err
 	}
 	var body strings.Builder
 	if err := node.Render(&body); err != nil {
 		log.Printf("bifrost: render go page: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
+		return err
 	}
 	html := body.String()
 	if os.Getenv("BIFROST_GO_DEV") != "" {
 		html = injectGoPageReload(html)
 	}
-	if cache != "" {
-		w.Header().Set("Cache-Control", cache)
-	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	if _, err := w.Write([]byte("<!doctype html>")); err != nil {
-		return
+		return err
 	}
-	_, _ = w.Write([]byte(html))
+	_, err := w.Write([]byte(html))
+	return err
+}
+
+func renderGoPage(w http.ResponseWriter, r *http.Request, status int, node goPageNode) {
+	started := time.Now()
+	err := writeGoPage(w, status, node)
+	bifrost.ObserveRender(r.Context(), started, err)
 }
 
 func injectGoPageReload(html string) string {
@@ -1517,7 +1519,7 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 		if route.GoNotFound {
 			hasGoPage = true
 			importsByPath[route.ImportPath] = route.Alias
-			fmt.Fprintf(&loaders, "func gonotfound%d(w http.ResponseWriter, r *http.Request) {\n\twriteGoPage(w, http.StatusNotFound, %s.NotFound(r), \"\")\n}\n\n", index, route.Alias)
+			fmt.Fprintf(&loaders, "func gonotfound%d(w http.ResponseWriter, r *http.Request) {\n\trenderGoPage(w, r, http.StatusNotFound, %s.NotFound(r))\n}\n\n", index, route.Alias)
 			handler := fmt.Sprintf("http.HandlerFunc(gonotfound%d)", index)
 			for middlewareIndex := len(goDirs) - 1; middlewareIndex >= 0; middlewareIndex-- {
 				if goDirs[middlewareIndex].Middleware && directoryContains(goDirs[middlewareIndex].Directory, route.Directory) {
@@ -1546,7 +1548,11 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 					handler = goDirs[middlewareIndex].Alias + ".Middleware(" + handler + ")"
 				}
 			}
-			fmt.Fprintf(&declarations, "\t\t\tbifrost.Handler(%s, %s),\n", strconv.Quote(route.Pattern), handler)
+			declaration := fmt.Sprintf("bifrost.Handler(%s, %s)", strconv.Quote(route.Pattern), handler)
+			if route.HasCache {
+				declaration += ".WithCache(" + route.Alias + ".Cache())"
+			}
+			fmt.Fprintf(&declarations, "\t\t\t%s,\n", declaration)
 			continue
 		}
 		hasSegments = hasSegments || slices.ContainsFunc(route.Params, func(param routeParam) bool { return param.Segments })

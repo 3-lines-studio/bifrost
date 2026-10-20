@@ -134,7 +134,7 @@ Optional exports:
 
 App Router `middleware.go` wraps Go pages as well. A Go-only app does not need Bun or Vite: `bifrost build` and `bifrost dev` compile and restart the Go app, and dev rebuilds reload the page. Bifrost load hooks observe Go page `Load` calls; response hooks and middleware wrap the page handler. The `example/gomponents-app` app exercises typed props, nested layouts with request context, nested error and not-found views, Alpine, Tailwind, dynamic params, middleware, cache, and a root not-found page.
 
-Go pages are full HTML. Add Turbo Drive to the layout for client navigation; the example does. Without it, links do normal page loads. The React `?_data` protocol and client router do not apply. Go pages are server-rendered only: there is no static export and no `loading.tsx` equivalent; `Load` runs synchronously before `Page`.
+Go pages are full HTML. Add Turbo Drive to the layout for client navigation; the example does. Without it, links do normal page loads. Go pages also answer `Accept: application/vnd.bifrost.data+json` with the loader props as JSON; that is a data endpoint, not a client router. Go pages are server-rendered only: there is no static export and no `loading.tsx` equivalent; `Load` runs synchronously before `Page`.
 
 Go pages and React pages can coexist. A `page.go` next to `page.tsx` is still its loader. Shared Go layouts, errors, and not-found views live in `layout.go`, `error.go`, and `not-found.go`; page-specific layout/error functions can stay in `page.go`.
 

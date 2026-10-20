@@ -57,6 +57,12 @@ expect_status "dynamic param" 200 "/hello/world"
 expect_body "dynamic param body" "Hello, world" "/hello/world"
 expect_body "nested layout" "Nested layout" "/hello/world"
 expect_body "layout context" "Nested layout · world" "/hello/world"
+data=$(curl -sS --max-time 10 -H "Accept: application/vnd.bifrost.data+json" "$base/hello/world")
+if grep -qF '"Name":"world"' <<<"$data"; then
+  ok "data response"
+else
+  bad "data response" "no props in $data"
+fi
 expect_status "nested error" 503 "/hello/world?state=error"
 expect_body "nested error body" "Hello error" "/hello/world?state=error"
 expect_status "nested not found" 404 "/hello/world?state=missing"

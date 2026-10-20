@@ -8,7 +8,7 @@ type cacheControlHandler struct {
 }
 
 func (h *cacheControlHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
-	if w.Header().Get("Cache-Control") == "" {
+	if h.value != "" && w.Header().Get("Cache-Control") == "" {
 		w.Header().Set("Cache-Control", h.value)
 	}
 	h.next.ServeHTTP(w, request)

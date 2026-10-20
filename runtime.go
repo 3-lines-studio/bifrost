@@ -206,6 +206,9 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 		if len(app.hooks.loadHooks) > 0 {
 			handler = &loadObserverHandler{pattern: route.pattern, next: handler, hooks: app.hooks.loadHooks}
 		}
+		if len(app.hooks.renderHooks) > 0 {
+			handler = &renderObserverHandler{pattern: route.pattern, next: handler, hooks: app.hooks.renderHooks}
+		}
 		state.handlers[route.pattern] = handler
 	}
 	return state, nil
