@@ -52,7 +52,16 @@ func reportError(err error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: bifrost <build|dev|init|routes|version> [options]")
+	fmt.Fprintln(os.Stderr, "usage: bifrost <command> [options]")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "commands:")
+	fmt.Fprintln(os.Stderr, "  init [dir]     scaffold an App Router app")
+	fmt.Fprintln(os.Stderr, "  dev [dir]      development server with HMR")
+	fmt.Fprintln(os.Stderr, "  build [dir]    production build")
+	fmt.Fprintln(os.Stderr, "  routes [dir]   print the route table")
+	fmt.Fprintln(os.Stderr, "  version        print the version")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, `run "bifrost <command> --help" for the flags`)
 }
 
 func runBuild(args []string) error {
