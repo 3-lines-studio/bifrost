@@ -250,16 +250,6 @@ function withBifrost(config) {
     if (moduleName === "react" && !insideBifrost) {
       return { type: "sourceFile", filePath: react };
     }
-    // A bundle a page imports later is loaded from the bundler that served it,
-    // and the runtime of expo builds that url from location.origin when a
-    // document has one: this target has a document of its own, whose origin is
-    // the server of the app, and the split bundle of a login went there. The
-    // server answered an HTML page and the login failed with "Failed to load
-    // split bundle". Measured on the login of the app of the case. Without a
-    // document the runtime asks the dev server, which is the one that served it.
-    if (!insideBifrost && platform !== "web" && moduleName === "./buildUrlForBundle" && context.originModulePath.includes("expo/src/async-require/")) {
-      return { type: "sourceFile", filePath: path.join(bifrost, "build-url.ts") };
-    }
     for (const alias of aliases) {
       const under = underAlias(alias, moduleName);
       if (under !== null) {
@@ -1819,6 +1809,24 @@ function writeCookie(text) {
 
 const root = element();
 root.ownerDocument = root;
+
+// A popup of the web keeps itself inside the viewport by measuring it: the root
+// of the document is the box that clips, and a root with no size leaves the
+// middleware with nothing to shift against -- measured on the menu of the app of
+// the case, it opened at the edge of the screen and ran past it. The window of
+// the target is the viewport, and it is told from the host.
+const viewport = () => globalThis.__bifrostViewport ?? { width: 400, height: 800 };
+
+Object.defineProperty(root, "clientWidth", {
+  get: () => viewport().width,
+});
+Object.defineProperty(root, "clientHeight", {
+  get: () => viewport().height,
+});
+root.getBoundingClientRect = () => {
+  const { width, height } = viewport();
+  return { x: 0, y: 0, top: 0, left: 0, right: width, bottom: height, width, height };
+};
 
 // The root of the page is where a theme is written: the dark class and the
 // color-scheme property. Neither is a class or a property of anything here, so
@@ -3420,38 +3428,6 @@ for (const [name, component] of Object.entries(extraTags)) {
 }
 `
 
-const nativeBuildUrl = `import getDevServer from "react-native/Libraries/Core/Devtools/getDevServer";
-
-// A bundle a page imports later is loaded from the bundler that served the
-// document, and the runtime of expo builds that url from the origin of the
-// document when there is one. This target has a document of its own -- the one
-// the shim installs -- and its origin is the server of the app, so the split
-// bundle of a login went to the app server and the login failed with "Failed to
-// load split bundle". Measured on the login of the app of the case. The dev
-// server is the one that served the document, and it is asked here as the
-// runtime asks it when there is no document at all.
-function join(prefix: string, suffix: string): string {
-  return prefix.replace(/\/+$/, "") + "/" + suffix.replace(/^\/+/, "");
-}
-
-export function buildUrlForBundle(bundlePath: string): string {
-  if (/^https?:\/\//.test(bundlePath)) {
-    return bundlePath;
-  }
-  const server = getDevServer() as { url?: string };
-  const base = server.url ?? "";
-  // The path arrives relative to the bundle that is running -- ../../node_modules
-  // from the entry of the router -- and the segments of a path have to be settled
-  // before the server sees them: a request that still carries ../../ is a module
-  // the server cannot find. Measured on the login of the app of the case.
-  try {
-    return new URL(bundlePath, base).href;
-  } catch {
-    return join(base, bundlePath);
-  }
-}
-`
-
 const nativePlace = `// A page that places a popup works out where it goes by measuring the page, and
 // what it measured travels as a style of a browser: a box fixed to the viewport
 // and a transform of translate(544px, 130px). react-native has neither -- an
@@ -3468,7 +3444,22 @@ export function placed(style: unknown): unknown {
   }
   const given = { ...(style as Record<string, unknown>) };
   if (given.position === "fixed") {
-    given.position = "absolute";
+    // A popup of the web is fixed to the viewport and places itself with a
+    // transform. The target has a layer for those boxes and the box that brings
+    // its own place is laid out inside it: where a browser had a viewport, this
+    // has the layer of the portal.
+    if (given.transform !== undefined) {
+      delete given.transform;
+      delete given.top;
+      delete given.bottom;
+      delete given.maxHeight;
+      given.position = "absolute";
+      given.left = 0;
+      given.right = 0;
+      given.alignItems = "center";
+    } else {
+      given.position = "absolute";
+    }
   }
   for (const name of Object.keys(given)) {
     if (name.startsWith("--") || (name === "minWidth" && given[name] === "max-content")) {
@@ -3495,7 +3486,7 @@ export function placed(style: unknown): unknown {
 `
 
 const nativeHostHead = `import { Children, Fragment, cloneElement, createElement, isValidElement, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Image, Linking, Modal, Platform, ScrollView, StyleSheet } from "react-native";
+import { Dimensions, Image, Linking, Modal, Platform, ScrollView, StyleSheet } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import Slider from "@react-native-community/slider";
 import * as DocumentPicker from "expo-document-picker";
@@ -3524,6 +3515,15 @@ function navigate(href: string): void {
 // did in a browser: the box has the size the page gave it and clips what goes
 // past it.
 const SCROLL_FILLS = { flex: 1 };
+
+
+// A popup of the web keeps itself inside the viewport, and the viewport of the
+// target is the window of the device: the document shim asks for it here.
+const viewport = Dimensions.get("window");
+(globalThis as { __bifrostViewport?: { width: number; height: number } }).__bifrostViewport = { width: viewport.width, height: viewport.height };
+Dimensions.addEventListener("change", ({ window }) => {
+  (globalThis as { __bifrostViewport?: { width: number; height: number } }).__bifrostViewport = { width: window.width, height: window.height };
+});
 
 // A component of the web asks a React ref for a node of the document: a trigger
 // asks its closest form, a popover measures the trigger, focus guards walk the
@@ -4779,22 +4779,46 @@ export function nativeProps(props: unknown, tag?: string): unknown {
       given.children = painted(inner.__html);
     }
   }
+  // A handler of the web reads the event it is given -- the element it happened
+  // in, the pointer, the default it can prevent -- and a press of the target
+  // carries none of those. It is handed the shape a handler reads, with the node
+  // of the shim as the element: measured on the arrow of a select, "Cannot read
+  // property 'currentTarget' of undefined" stopped the first menu the app opened.
+  const pressEvent = (event: unknown) => {
+    const node = (globalThis as { document?: { createElement?: (tag: string) => unknown } }).document?.createElement?.("button") ?? {};
+    const given = event !== null && typeof event === "object" ? (event as Record<string, unknown>) : {};
+    return {
+      ...given,
+      target: given.target ?? node,
+      currentTarget: given.currentTarget ?? node,
+      preventDefault: () => undefined,
+      stopPropagation: () => undefined,
+      nativeEvent: given.nativeEvent ?? { button: 0, pointerType: "touch" },
+    };
+  };
   if (typeof given.onClick === "function") {
-    const click = given.onClick as () => void;
+    const click = given.onClick as (event: unknown) => void;
     delete given.onClick;
-    const pressed = given.onPress as (() => void) | undefined;
-    given.onPress = pressed === undefined ? click : () => { pressed(); click(); };
+    const pressed = given.onPress as ((event: unknown) => void) | undefined;
+    given.onPress = (event: unknown) => {
+      const shaped = pressEvent(event);
+      pressed?.(shaped);
+      click(shaped);
+    };
   }
   // A menu of the web opens on the pointer going down, not on the click that
   // follows: the trigger of a select listens to onPointerDown, and a press that
   // only answered onClick left the menu closed. Measured on the language toggle
   // of the app of the case. The event a browser hands it is one the trigger can
   // read -- the left button, no ctrl -- and the press of a target stands for it.
-  if (given.onPress === undefined && typeof given.onPointerDown === "function") {
+  if (typeof given.onPointerDown === "function") {
     const down = given.onPointerDown as (event: unknown) => void;
     delete given.onPointerDown;
-    given.onPress = () => {
-      down({ button: 0, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, pointerType: "touch", preventDefault: () => undefined, stopPropagation: () => undefined });
+    const pressed = given.onPress as ((event: unknown) => void) | undefined;
+    given.onPress = (event: unknown) => {
+      const shaped = pressEvent({ ...pressEvent(event), button: 0, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, pointerType: "touch" });
+      pressed?.(shaped);
+      down(shaped);
     };
   } else {
     delete given.onPointerDown;
@@ -5000,7 +5024,6 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/navigation.tsx", nativeNavigation},
 	{"bifrost/screen.tsx", nativeScreen},
 	{"bifrost/text-style.js", nativeTextStyle},
-	{"bifrost/build-url.ts", nativeBuildUrl},
 	{"bifrost/place.ts", nativePlace},
 	{"bifrost/text.tsx", nativeTextModule},
 	{"bifrost/types.d.ts", nativeTypes},

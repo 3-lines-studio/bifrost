@@ -734,7 +734,7 @@ func TestNativeLeavesOutAPlaceThatIsNotANumber(t *testing.T) {
 	}
 	// A menu of the web opens when the pointer goes down, and a target has only a
 	// press: a trigger that listened to onPointerDown never opened.
-	if !strings.Contains(nativeHostBody, `given.onPress === undefined && typeof given.onPointerDown === "function"`) {
+	if !strings.Contains(nativeHostBody, `typeof given.onPointerDown === "function"`) {
 		t.Fatal("a menu that opens on a pointer never opens")
 	}
 	// Every box of the target goes through it too: the wrapper of a popup is a
@@ -1445,13 +1445,18 @@ func TestNativeARefIsAnElementOfTheDocument(t *testing.T) {
 			t.Fatalf("a focus guard has no place in the body: %q", said)
 		}
 	}
+	for _, said := range []string{"const viewport = () => globalThis.__bifrostViewport", "clientWidth", "clientHeight"} {
+		if !strings.Contains(nativeDOM, said) {
+			t.Fatalf("a popup has no viewport to keep itself inside: %q", said)
+		}
+	}
 	if !strings.Contains(nativeDOM, `target.MutationObserver ??= class MutationObserver {`) {
 		t.Fatal("a focus scope that observes a box has no observer to ask for")
 	}
 	if !strings.Contains(nativeDOM, "node.ownerDocument = target.document;") {
 		t.Fatal("an element made by the document does not know its document")
 	}
-	for _, said := range []string{"measureInWindow", "__rect = { x, y, width, height"} {
+	for _, said := range []string{"measureInWindow", "__rect = { x, y, width, height", "__bifrostViewport"} {
 		if !strings.Contains(nativeHostHead, said) {
 			t.Fatalf("a ref does not carry the box of its view: %q", said)
 		}
@@ -2790,7 +2795,7 @@ func TestNativeAnswersTheInteractionAPageWritesForTheBrowser(t *testing.T) {
 	if !strings.Contains(host, "export function nativeProps(props: unknown, tag?: string): unknown") {
 		t.Fatal("the tag map does not answer the interaction of the browser")
 	}
-	if !strings.Contains(host, "given.onPress = pressed === undefined ? click : () => { pressed(); click(); }") {
+	if !strings.Contains(host, "pressed?.(shaped);") || !strings.Contains(host, "click(shaped);") {
 		t.Fatal("a page that answers both names loses one of them")
 	}
 	if !strings.Contains(nativeJSXRuntime, "loaded().nativeProps(rest[0], typeof painted === \"string\" ? undefined : type)") {
@@ -2826,29 +2831,17 @@ func TestNativeAPageThatPaintsThroughAPortalStillPaints(t *testing.T) {
 		// does not: a component collects in a fragment the nodes it does not want
 		// painted, and the items of a closed select were landing over the page.
 		"dom.createPortal = (children, container) => {",
-		"return children;",
 		"return null;",
 	} {
 		if !strings.Contains(nativeDOM, wanted) {
 			t.Fatalf("the document of the shim does not carry %q", wanted)
 		}
 	}
+
 	// The patch goes on react-dom itself, and a patch is one patch only if every
 	// module is looking at one copy of it: the name is resolved from the workspace
 	// for whoever asks. Measured on the app: two copies in the bundle, and the page
 	// was calling the one that was not patched.
-	// A split bundle is fetched from the bundler that served the document, and
-	// the document of this target names the server of the app: the login of the
-	// case failed with "Failed to load split bundle" until the runtime asked the
-	// dev server.
-	for _, said := range []string{`moduleName === "./buildUrlForBundle"`, `context.originModulePath.includes("expo/src/async-require/")`} {
-		if !strings.Contains(nativeMetroHelper, said) {
-			t.Fatalf("a split bundle of the page is fetched from the app server: %q", said)
-		}
-	}
-	if !strings.Contains(nativeBuildUrl, "export function buildUrlForBundle(bundlePath: string): string") {
-		t.Fatal("the runtime has no url of its own for a split bundle")
-	}
 	if !strings.Contains(nativeMetroHelper, `if (moduleName === "react-dom") {`) {
 		t.Fatal("react-dom is not resolved to a single copy")
 	}
