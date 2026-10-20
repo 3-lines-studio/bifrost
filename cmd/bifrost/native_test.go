@@ -1494,7 +1494,7 @@ func TestNativeARefIsAnElementOfTheDocument(t *testing.T) {
 			t.Fatalf("a focus guard has no place in the body: %q", said)
 		}
 	}
-	for _, said := range []string{"const viewport = () => globalThis.__bifrostViewport", "clientWidth", "clientHeight"} {
+	for _, said := range []string{"const viewport = () => globalThis.__bifrostViewport", "clientWidth", "clientHeight", `Object.defineProperty(target, "innerWidth"`} {
 		if !strings.Contains(nativeDOM, said) {
 			t.Fatalf("a popup has no viewport to keep itself inside: %q", said)
 		}
@@ -2843,6 +2843,11 @@ func TestNativeAnswersTheInteractionAPageWritesForTheBrowser(t *testing.T) {
 	host := nativeHost("")
 	if !strings.Contains(host, "export function nativeProps(props: unknown, tag?: string): unknown") {
 		t.Fatal("the tag map does not answer the interaction of the browser")
+	}
+	// A handler of the web asks the button of the event -- the left one -- and a
+	// press that said nothing clicked with a button no browser has.
+	if !strings.Contains(host, "button: given.button ?? 0,") {
+		t.Fatal("the press of a button is not the left button of a browser")
 	}
 	if !strings.Contains(host, "pressed?.(shaped);") || !strings.Contains(host, "click(shaped);") {
 		t.Fatal("a page that answers both names loses one of them")

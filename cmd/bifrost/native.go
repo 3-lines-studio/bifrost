@@ -2314,6 +2314,15 @@ onAddressChange(() => {
 const install = () => {
   const target = globalThis;
   target.window ??= target;
+  // A page asks how wide the window is to decide what to paint -- a menu of a
+  // phone instead of the one of a desktop -- and the window of the target is the
+  // one the host measured.
+  if (target.innerWidth === undefined) {
+    Object.defineProperty(target, "innerWidth", { configurable: true, get: () => viewport().width });
+  }
+  if (target.innerHeight === undefined) {
+    Object.defineProperty(target, "innerHeight", { configurable: true, get: () => viewport().height });
+  }
   // A control asks what a node is with instanceof -- the slider of a page asks
   // whether its form is an HTMLFormElement -- and a name that does not exist is a
   // ReferenceError and not a false. Measured on the app of the case: the first
@@ -4870,6 +4879,11 @@ export function nativeProps(props: unknown, tag?: string): unknown {
       ...given,
       target: given.target ?? node,
       currentTarget: given.currentTarget ?? node,
+      button: given.button ?? 0,
+      ctrlKey: given.ctrlKey ?? false,
+      metaKey: given.metaKey ?? false,
+      shiftKey: given.shiftKey ?? false,
+      altKey: given.altKey ?? false,
       preventDefault: () => undefined,
       stopPropagation: () => undefined,
       nativeEvent: given.nativeEvent ?? { button: 0, pointerType: "touch" },
