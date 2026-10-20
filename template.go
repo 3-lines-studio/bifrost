@@ -14,9 +14,10 @@ import (
 const bodyChunkSize = 32 << 10
 
 type templateRenderer struct {
-	page    *template.Template
-	layouts []*template.Template
-	head    []*template.Template
+	page     *template.Template
+	layouts  []*template.Template
+	errors   []*template.Template
+	notFound *template.Template
 }
 
 type templateData struct {
@@ -43,13 +44,19 @@ func newTemplateRenderer(assets *protocol.HTMLAssets) (*templateRenderer, error)
 		}
 		renderer.layouts = append(renderer.layouts, parsed)
 	}
-	for _, source := range renderer.layouts {
-		if source.Lookup("head") != nil {
-			renderer.head = append(renderer.head, source)
+	for _, source := range assets.Errors {
+		parsed, err := parseTemplate(source.Path, source.Source)
+		if err != nil {
+			return nil, err
 		}
+		renderer.errors = append(renderer.errors, parsed)
 	}
-	if page.Lookup("head") != nil {
-		renderer.head = append(renderer.head, page)
+	if assets.NotFound != nil {
+		parsed, err := parseTemplate(assets.NotFound.Path, assets.NotFound.Source)
+		if err != nil {
+			return nil, err
+		}
+		renderer.notFound = parsed
 	}
 	return renderer, nil
 }
@@ -87,9 +94,24 @@ func (r *templateRenderer) Render(ctx context.Context, request renderRequest, si
 		data.Pathname = pathname
 	}
 
+	view := r.page
+	if notFoundRequested(props) && r.notFound != nil {
+		view = r.notFound
+	} else if errorRequested(props) && len(r.errors) > 0 {
+		view = r.errors[errorIndex(props, len(r.errors))]
+	}
+
 	var head bytes.Buffer
-	for _, source := range r.head {
-		if err := source.ExecuteTemplate(&head, "head", data); err != nil {
+	for _, layout := range r.layouts {
+		if layout.Lookup("head") == nil {
+			continue
+		}
+		if err := layout.ExecuteTemplate(&head, "head", data); err != nil {
+			return err
+		}
+	}
+	if view.Lookup("head") != nil {
+		if err := view.ExecuteTemplate(&head, "head", data); err != nil {
 			return err
 		}
 	}
@@ -98,7 +120,7 @@ func (r *templateRenderer) Render(ctx context.Context, request renderRequest, si
 	}
 
 	var body bytes.Buffer
-	if err := r.page.Execute(&body, data); err != nil {
+	if err := view.Execute(&body, data); err != nil {
 		return err
 	}
 	for index := len(r.layouts) - 1; index >= 0; index-- {
@@ -127,3 +149,31 @@ func (r *templateRenderer) Render(ctx context.Context, request renderRequest, si
 }
 
 func (r *templateRenderer) Close(context.Context) error { return nil }
+
+func notFoundRequested(props map[string]any) bool {
+	value, ok := props["__bifrostNotFound"].(bool)
+	return ok && value
+}
+
+func errorRequested(props map[string]any) bool {
+	_, ok := props["__bifrostError"]
+	return ok
+}
+
+func errorIndex(props map[string]any, count int) int {
+	if count == 0 {
+		return 0
+	}
+	switch value := props["__bifrostErrorLevel"].(type) {
+	case float64:
+		index := int(value)
+		if index >= 0 && index < count {
+			return index
+		}
+	case int:
+		if value >= 0 && value < count {
+			return value
+		}
+	}
+	return count - 1
+}

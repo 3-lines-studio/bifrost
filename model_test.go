@@ -310,3 +310,42 @@ func TestTemplateRouteScript(t *testing.T) {
 		})
 	}
 }
+
+func TestTemplateRouteErrorViews(t *testing.T) {
+	app, err := newApp(Config{
+		SourceRoot: t.TempDir(),
+		Routes: []Route{
+			Server("/", "app/page.html", nil).
+				WithErrors("app/error.html", "app/blog/error.html").
+				WithNotFound("app/not-found.html"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(app.spec.Routes[0].Errors, ","), "app/error.html,app/blog/error.html"; got != want {
+		t.Fatalf("errors = %q, want %q", got, want)
+	}
+	if got, want := app.spec.Routes[0].NotFound, "app/not-found.html"; got != want {
+		t.Fatalf("not found = %q, want %q", got, want)
+	}
+	cases := []struct {
+		name  string
+		route Route
+		want  string
+	}{
+		{"non-html errors", Server("/", "app/page.tsx", nil).WithErrors("app/error.html"), "non-html"},
+		{"non-html not found", Server("/", "app/page.tsx", nil).WithNotFound("app/not-found.html"), "non-html"},
+		{"tsx error", Server("/", "app/page.html", nil).WithErrors("app/error.tsx"), "must use .html"},
+		{"tsx not found", Server("/", "app/page.html", nil).WithNotFound("app/not-found.tsx"), "must use .html"},
+		{"error escape", Server("/", "app/page.html", nil).WithErrors("../error.html"), "escapes"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := newApp(Config{SourceRoot: t.TempDir(), Routes: []Route{test.route}})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}

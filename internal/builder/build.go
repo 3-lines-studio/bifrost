@@ -493,7 +493,7 @@ func htmlRoute(route protocol.RouteSpec) bool {
 }
 
 func templateViewID(route protocol.RouteSpec) string {
-	return digest(route.View + "\x00html\x00" + strings.Join(route.Layouts, "\x00") + "\x00" + route.Script)
+	return digest(route.View + "\x00html\x00" + strings.Join(route.Layouts, "\x00") + "\x00" + route.Script + "\x00" + strings.Join(route.Errors, "\x00") + "\x00" + route.NotFound)
 }
 
 func attachHTMLViews(views []protocol.BuiltView, htmlViews []protocol.BuiltView) []protocol.BuiltView {
@@ -535,11 +535,27 @@ func collectHTMLViews(sourceRoot string, spec protocol.Spec, routeViews map[stri
 			}
 			layouts = append(layouts, source)
 		}
+		errors := make([]protocol.TemplateSource, 0, len(route.Errors))
+		for _, errorView := range route.Errors {
+			source, err := readTemplateSource(sourceRoot, errorView)
+			if err != nil {
+				return nil, err
+			}
+			errors = append(errors, source)
+		}
+		var notFound *protocol.TemplateSource
+		if route.NotFound != "" {
+			source, err := readTemplateSource(sourceRoot, route.NotFound)
+			if err != nil {
+				return nil, err
+			}
+			notFound = &source
+		}
 		byID[id] = protocol.BuiltView{
 			ID:     id,
 			Source: route.View,
 			Mode:   "html",
-			HTML:   &protocol.HTMLAssets{Page: page, Layouts: layouts},
+			HTML:   &protocol.HTMLAssets{Page: page, Layouts: layouts, Errors: errors, NotFound: notFound},
 		}
 	}
 	ids := make([]string, 0, len(byID))

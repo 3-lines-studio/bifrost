@@ -64,6 +64,8 @@ type Route struct {
 	cacheControl string
 	layouts      []string
 	script       string
+	errorViews   []string
+	notFoundView string
 }
 
 func Server(pattern, view string, load Loader) Route {
@@ -109,5 +111,15 @@ func (r Route) WithLayouts(layouts ...string) Route {
 
 func (r Route) WithScript(script string) Route {
 	r.script = script
+	return r
+}
+
+func (r Route) WithErrors(views ...string) Route {
+	r.errorViews = slices.Clone(views)
+	return r
+}
+
+func (r Route) WithNotFound(view string) Route {
+	r.notFoundView = view
 	return r
 }

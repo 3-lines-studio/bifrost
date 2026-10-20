@@ -109,11 +109,7 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 			if err != nil {
 				return nil, fmt.Errorf("bifrost: compile route %q templates: %w", pattern, err)
 			}
-			clientAssets := view.Client
-			if devDir != "" && clientAssets.Entry.Path != "" {
-				clientFile := filepath.Join(devDir, "entries", view.ID+"-client.tsx")
-				clientAssets = protocol.AssetSet{Entry: protocol.FileRef{Path: (&url.URL{Path: dochtml.DevPrefix + "@fs" + filepath.ToSlash(clientFile)}).EscapedPath()}}
-			}
+			clientAssets := developmentClientAssets(view, devDir)
 			shell := dochtml.NewPlainShell()
 			if clientAssets.Entry.Path != "" {
 				shell, err = dochtml.NewScriptShell(clientAssets)
@@ -121,17 +117,31 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 					return nil, fmt.Errorf("bifrost: compile route %q shell: %w", pattern, err)
 				}
 			}
+			notFoundShell := dochtml.NewPlainShell()
+			for _, candidate := range manifest.views {
+				if candidate.Source != declaration.notFoundView || candidate.Client.Entry.Path == "" {
+					continue
+				}
+				notFoundAssets := developmentClientAssets(candidate, devDir)
+				notFoundShell, err = dochtml.NewScriptShell(notFoundAssets)
+				if err != nil {
+					return nil, fmt.Errorf("bifrost: compile route %q not-found shell: %w", pattern, err)
+				}
+				break
+			}
 			state.serverPatterns["GET "+pattern] = struct{}{}
 			handler = &serverPageHandler{
-				pattern:      pattern,
-				load:         declaration.load,
-				entry:        view.Source,
-				shell:        shell,
-				render:       templates,
-				hooks:        app.hooks,
-				limits:       app.limits,
-				logger:       app.logger,
-				cacheControl: declaration.cacheControl,
+				pattern:       pattern,
+				load:          declaration.load,
+				entry:         view.Source,
+				shell:         shell,
+				notFoundShell: notFoundShell,
+				template:      true,
+				render:        templates,
+				hooks:         app.hooks,
+				limits:        app.limits,
+				logger:        app.logger,
+				cacheControl:  declaration.cacheControl,
 			}
 		} else {
 			clientAssets := view.Client
@@ -229,11 +239,39 @@ type serverPageHandler struct {
 	load            Loader
 	entry           string
 	shell           dochtml.Shell
+	notFoundShell   dochtml.Shell
+	template        bool
 	render          renderer
 	hooks           registeredHooks
 	limits          Limits
 	logger          *slog.Logger
 	cacheControl    string
+}
+
+func developmentClientAssets(view protocol.BuiltView, devDir string) protocol.AssetSet {
+	if devDir == "" || view.Client.Entry.Path == "" {
+		return view.Client
+	}
+	clientFile := filepath.Join(devDir, "entries", view.ID+"-client.tsx")
+	return protocol.AssetSet{Entry: protocol.FileRef{Path: (&url.URL{Path: dochtml.DevPrefix + "@fs" + filepath.ToSlash(clientFile)}).EscapedPath()}}
+}
+
+func pagePropExists(props json.RawMessage, name string) bool {
+	var values map[string]any
+	if err := json.Unmarshal(props, &values); err != nil {
+		return false
+	}
+	_, exists := values[name]
+	return exists
+}
+
+func pagePropTrue(props json.RawMessage, name string) bool {
+	var values map[string]any
+	if err := json.Unmarshal(props, &values); err != nil {
+		return false
+	}
+	value, ok := values[name].(bool)
+	return ok && value
 }
 
 func (h *serverPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {

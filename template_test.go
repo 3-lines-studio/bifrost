@@ -126,3 +126,51 @@ func TestTemplateRendererStreamsBodyChunks(t *testing.T) {
 		t.Fatalf("body length = %d", sink.body.Len())
 	}
 }
+
+func TestTemplateRendererSelectsErrorAndNotFoundViews(t *testing.T) {
+	notFound := protocol.TemplateSource{Path: "app/not-found.html", Source: `{{define "head"}}<title>missing</title>{{end}}<p>missing</p>`}
+	renderer, err := newTemplateRenderer(&protocol.HTMLAssets{
+		Page:    protocol.TemplateSource{Path: "app/page.html", Source: `{{define "head"}}<title>page</title>{{end}}<h1>page</h1>`},
+		Layouts: []protocol.TemplateSource{{Path: "app/layout.html", Source: `<main>{{.Content}}</main>`}},
+		Errors: []protocol.TemplateSource{
+			{Path: "app/error.html", Source: `{{define "head"}}<title>root error</title>{{end}}<p>root</p>`},
+			{Path: "app/blog/error.html", Source: `{{define "head"}}<title>blog error</title>{{end}}<p>blog</p>`},
+		},
+		NotFound: &notFound,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name  string
+		props map[string]any
+		head  string
+		body  string
+	}{
+		{"blog error", map[string]any{"__bifrostError": "boom", "__bifrostErrorLevel": 1}, `<title>blog error</title>`, `<main><p>blog</p></main>`},
+		{"nearest error", map[string]any{"__bifrostError": "boom"}, `<title>blog error</title>`, `<main><p>blog</p></main>`},
+		{"root error", map[string]any{"__bifrostError": "boom", "__bifrostErrorLevel": 0}, `<title>root error</title>`, `<main><p>root</p></main>`},
+		{"not found", map[string]any{"__bifrostNotFound": true}, `<title>missing</title>`, `<main><p>missing</p></main>`},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			props, err := json.Marshal(test.props)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sink := &templateTestSink{}
+			if err := renderer.Render(context.Background(), renderRequest{Props: props}, sink); err != nil {
+				t.Fatal(err)
+			}
+			if got := sink.head.String(); got != test.head {
+				t.Fatalf("head = %q, want %q", got, test.head)
+			}
+			if got := sink.body.String(); got != test.body {
+				t.Fatalf("body = %q, want %q", got, test.body)
+			}
+			if strings.Contains(sink.head.String(), "page") || strings.Contains(sink.body.String(), "page</h1>") {
+				t.Fatalf("page rendered on %s", test.name)
+			}
+		})
+	}
+}

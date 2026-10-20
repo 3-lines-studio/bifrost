@@ -469,3 +469,37 @@ func TestAttachHTMLViewsKeepsClientAssets(t *testing.T) {
 		t.Fatalf("view = %+v", merged[0])
 	}
 }
+
+func TestCollectHTMLViewsIncludesErrorsAndNotFound(t *testing.T) {
+	root := t.TempDir()
+	for name, source := range map[string]string{
+		"app/page.html":      "<h1>page</h1>",
+		"app/error.html":     "<h1>error</h1>",
+		"app/not-found.html": "<h1>missing</h1>",
+	} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spec := protocol.Spec{Routes: []protocol.RouteSpec{
+		{Pattern: "/", View: "app/page.html", Kind: "server", Errors: []string{"app/error.html"}, NotFound: "app/not-found.html"},
+	}}
+	routeViews := map[string]string{"/": templateViewID(spec.Routes[0])}
+	views, err := collectHTMLViews(root, spec, routeViews)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || views[0].HTML == nil {
+		t.Fatalf("views = %+v", views)
+	}
+	if len(views[0].HTML.Errors) != 1 || views[0].HTML.Errors[0].Path != "app/error.html" {
+		t.Fatalf("errors = %+v", views[0].HTML.Errors)
+	}
+	if views[0].HTML.NotFound == nil || views[0].HTML.NotFound.Path != "app/not-found.html" {
+		t.Fatalf("not found = %+v", views[0].HTML.NotFound)
+	}
+}

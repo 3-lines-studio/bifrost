@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/3-lines-studio/bifrost/internal/dochtml"
 	"github.com/3-lines-studio/bifrost/internal/protocol"
 )
 
@@ -74,5 +75,13 @@ func (h *serverPageHandler) newSink(w http.ResponseWriter, request *http.Request
 			limits: h.limits,
 		}
 	}
-	return &httpRenderSink{writer: w, shell: h.shell, props: props, document: document, status: status, limits: h.limits, cacheControl: h.cacheControl}
+	shell := h.shell
+	if h.template {
+		if pagePropTrue(props, "__bifrostNotFound") {
+			shell = h.notFoundShell
+		} else if pagePropExists(props, "__bifrostError") {
+			shell = dochtml.NewPlainShell()
+		}
+	}
+	return &httpRenderSink{writer: w, shell: shell, props: props, document: document, status: status, limits: h.limits, cacheControl: h.cacheControl}
 }

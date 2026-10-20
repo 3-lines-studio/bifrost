@@ -315,3 +315,39 @@ func TestValidateManifestAcceptsHTMLScriptView(t *testing.T) {
 		t.Fatalf("client entry = %q", got)
 	}
 }
+
+func TestValidateManifestAcceptsHTMLViewErrors(t *testing.T) {
+	app, err := newApp(Config{
+		SourceRoot: t.TempDir(),
+		Routes: []Route{
+			Server("/", "app/page.html", nil).
+				WithErrors("app/error.html").
+				WithNotFound("app/not-found.html"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	notFound := protocol.TemplateSource{Path: "app/not-found.html", Source: "<h1>missing</h1>"}
+	view := protocol.BuiltView{
+		ID:     digestString("html-error-view"),
+		Source: "app/page.html",
+		Mode:   "html",
+		HTML: &protocol.HTMLAssets{
+			Page:     protocol.TemplateSource{Path: "app/page.html", Source: "<h1>page</h1>"},
+			Errors:   []protocol.TemplateSource{{Path: "app/error.html", Source: "<h1>error</h1>"}},
+			NotFound: &notFound,
+		},
+	}
+	manifest := protocol.Manifest{
+		Schema:    protocol.Schema,
+		SpecHash:  app.specHash,
+		BuildID:   digestString("build"),
+		Toolchain: protocol.Toolchain{Bifrost: "1.1.0"},
+		Views:     []protocol.BuiltView{view},
+		Routes:    []protocol.BuiltRoute{{Pattern: "/", Kind: "server", ViewID: view.ID}},
+	}
+	if _, err := validateManifest(fstest.MapFS{}, app.spec, app.specHash, manifest); err != nil {
+		t.Fatal(err)
+	}
+}
