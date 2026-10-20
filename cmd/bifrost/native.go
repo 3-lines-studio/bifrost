@@ -3549,7 +3549,13 @@ export function placed(style: unknown): unknown {
       given.right = 0;
       given.alignItems = "center";
     } else {
+      // A box fixed to the viewport with no place of its own -- the picture that
+      // backs the top of a page -- is laid out at the top of what scrolls, and
+      // not stretched to the height of that content: the bottom of the viewport
+      // is not the bottom of the page. Measured on the hero of an event of picsel:
+      // the picture grew with the page it was behind.
       given.position = "absolute";
+      delete given.bottom;
     }
   }
   for (const name of Object.keys(given)) {
@@ -4939,6 +4945,11 @@ function measured(className: unknown): Record<string, unknown> | undefined {
   }
   for (const match of className.matchAll(/(?:^|\s)aspect-\[(\d+)\/(\d+)\]/g)) {
     style.aspectRatio = Number(match[1]) / Number(match[2]);
+  }
+  // A screen is the window the page is in, and a target asks the host for it.
+  const screen = (globalThis as { __bifrostViewport?: { width: number; height: number } }).__bifrostViewport ?? { width: 0, height: 0 };
+  for (const match of className.matchAll(/(?:^|\s)(h|w|min-h|min-w|max-h|max-w)-(?:screen|dvh|dvw|svh|svw|lvh|lvw)(?:\s|$)/g)) {
+    style[lengths[match[1]]] = match[1].charAt(0) === "h" || match[1].endsWith("-h") ? screen.height : screen.width;
   }
   return Object.keys(style).length === 0 ? undefined : style;
 }

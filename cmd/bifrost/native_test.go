@@ -755,6 +755,7 @@ func TestNativeASizeWrittenInTheClassIsPainted(t *testing.T) {
 		"function measured(className: unknown)",
 		`"min-h": "minHeight",`,
 		`/(?:^|\s)aspect-\[(\d+)\/(\d+)\]/g`,
+		`(?:screen|dvh|dvw|svh|svw|lvh|lvw)`,
 		"const size = measured(given.className);",
 	} {
 		if !strings.Contains(nativeHostBody, said) {
@@ -827,6 +828,14 @@ func TestNativeKeepsTheCookieTheServerSets(t *testing.T) {
 		if !strings.Contains(nativeNet, said) {
 			t.Fatalf("the target forgets the cookie of the server: %q", said)
 		}
+	}
+}
+
+func TestNativeABackgroundOfTheViewportStaysAtTheTop(t *testing.T) {
+	// Measured on the hero of an event of picsel: the fixed picture that backs the
+	// page stretched to the height of the content it was behind.
+	if !strings.Contains(nativePlace, "delete given.bottom;") {
+		t.Fatal("a box fixed to the viewport is stretched with the page")
 	}
 }
 
