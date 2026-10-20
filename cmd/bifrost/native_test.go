@@ -751,6 +751,27 @@ func TestNativeAVideoIsATagWithoutAView(t *testing.T) {
 	}
 }
 
+func TestNativeTheHistoryOfTheWindowDoesNotLoadThePage(t *testing.T) {
+	// Measured on the search of an event of picsel: the page wrote the address of
+	// the search and the client loaded the page again, over and over.
+	for _, said := range []string{
+		"export function rememberAddress(next: string): void {",
+	} {
+		if !strings.Contains(nativeRouteHead+nativeRouteRest, said) {
+			t.Fatalf("the address of the window is not written: %q", said)
+		}
+	}
+	for _, said := range []string{
+		"const remember = (to) => {",
+		"remember(to);",
+		"rememberAddress(target.slice(ORIGIN.length) || \"/\");",
+	} {
+		if !strings.Contains(nativeDOM, said) {
+			t.Fatalf("the history of the window loads the page: %q", said)
+		}
+	}
+}
+
 func TestNativeAPictureThatFadesInIsPainted(t *testing.T) {
 	// Measured on the cards of a profile of picsel: the picture takes off the
 	// class that hid it when the load arrives, and there is no node to take it

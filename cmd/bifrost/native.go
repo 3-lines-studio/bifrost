@@ -2093,7 +2093,7 @@ class ResizeObserver {
 // talks to, so the url a page builds out of window.location.origin is the one
 // the browser would have built.
 const { ORIGIN } = require("./origin");
-const { getAddress, setAddress, hasPage, onAddressChange } = require("./route");
+const { getAddress, setAddress, hasPage, onAddressChange, rememberAddress } = require("./route");
 const { refresh } = require("./refresh");
 const { follow } = require("./intent");
 
@@ -2180,6 +2180,18 @@ const absolute = (to) => {
 // ask for is a move of the router -- the back button, a gesture, a link -- and
 // that is the one a page hears as popstate, the same as in a browser.
 let moving = false;
+
+// The address a page writes with the history of the window: the document it has
+// stays, and only the address changes. Measured on the search of an event of the
+// case: writing the address navigated, the page loaded again and the search ran
+// in a circle.
+const remember = (to) => {
+  const target = absolute(String(to));
+  if (target.indexOf(ORIGIN) !== 0) {
+    return;
+  }
+  rememberAddress(target.slice(ORIGIN.length) || "/");
+};
 
 const go = (to, replace) => {
   const target = absolute(String(to));
@@ -2270,17 +2282,15 @@ const history = {
       pushed.push(true);
       return;
     }
-    // A navigation of its own cuts whatever was pushed on top, and a page that
-    // pushed nothing loses nothing.
     pushed.length = 0;
-    go(to, false);
+    remember(to);
   },
   replaceState(next, _title, to) {
     state = next === undefined ? null : next;
     if (to === undefined || to === null || to === "") {
       return;
     }
-    go(to, true);
+    remember(to);
   },
   back() {
     if (pushed.length > 0) {
@@ -5919,6 +5929,15 @@ export function setAddress(next: string): void {
 
 export function getAddress(): string {
   return address;
+}
+
+// A page of the web changes the address of the window without going anywhere --
+// the filters it keeps in the query, the id of a share it writes -- and the
+// document it has does not load again. Measured on the search of an event of the
+// case: the page wrote the address after the search and the client loaded the
+// page again, over and over.
+export function rememberAddress(next: string): void {
+  address = next;
 }
 
 // A change the shim did not ask for is a move of the router -- the back button,
