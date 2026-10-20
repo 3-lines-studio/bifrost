@@ -120,7 +120,7 @@ A `components/<name>/` directory with `<name>.html`, optional `<name>.css`, and 
 {{component "row" .Props.row "tr"}}
 ```
 
-The value passed at the call becomes the dot; it is ordinary Go template data. There is no props schema. Defaults and optional sections use the template language:
+The value passed at the call becomes the dot; it is ordinary Go template data. There is no separate component schema. Defaults and optional sections use the template language:
 
 ```html
 <h2>{{.Title}}</h2>
