@@ -2025,7 +2025,7 @@ func TestNativeShimAnswersWhereThePageIs(t *testing.T) {
 	}
 	for _, said := range []string{
 		`const { ORIGIN } = require("./origin");`,
-		`const { getAddress, setAddress, hasPage, onAddressChange } = require("./route");`,
+		`const { getAddress, setAddress, hasPage, onAddressChange, rememberAddress } = require("./route");`,
 		"target.location ??= location;",
 		"target.history ??= history;",
 		"return ORIGIN + getAddress();",
