@@ -26,7 +26,7 @@ func Load(r *http.Request) (Props, error) {
 
 func Page(props Props) g.Node {
 	return g.Group{
-		h.H1(h.Class("text-3xl font-semibold"), g.Text("Hello, "+props.Name)),
-		h.A(h.Href("/"), h.Class("mt-4 inline-block text-sky-300"), g.Text("Back")),
+		h.H1(h.Class("hello__title"), g.Text("Hello, "+props.Name)),
+		h.A(h.Href("/"), h.Class("back"), g.Text("Back")),
 	}
 }

@@ -56,19 +56,19 @@ func Load(r *http.Request) (Props, error) {
 func Page(props Props) g.Node {
 	return g.Group{
 		h.Header(
-			h.Class("space-y-3"),
-			h.P(h.Class("text-xs font-semibold uppercase tracking-[0.3em] text-sky-300"), g.Text("Go page")),
-			h.H1(h.Class("text-3xl font-semibold tracking-tight"), g.Text("Gomponents + Alpine + Tailwind")),
-			h.P(h.Class("max-w-2xl text-slate-400"), g.Text("One page.go with the loader, the page, and its components.")),
+			h.Class("hero"),
+			h.P(h.Class("hero__kicker"), g.Text("Go page")),
+			h.H1(h.Class("hero__title"), g.Text("Gomponents + Alpine + vanilla CSS")),
+			h.P(h.Class("hero__lede"), g.Text("One page.go with the loader, the page, and its components.")),
 		),
 		h.Div(
-			h.Class("flex flex-wrap items-center gap-4"),
+			h.Class("toolbar"),
 			Dropdown("Open menu", props.Menu),
 			Counter(),
 		),
 		UserCard(props.User),
 		h.Section(
-			h.Class("grid gap-4 sm:grid-cols-2"),
+			h.Class("cards"),
 			g.Map(props.Cards, func(card CardProps) g.Node {
 				return Card(card)
 			}),
@@ -78,8 +78,8 @@ func Page(props Props) g.Node {
 
 func UserCard(user User) g.Node {
 	return h.Section(
-		h.Class("space-y-4"),
-		h.H2(h.Class("text-sm font-semibold uppercase tracking-widest text-slate-500"), g.Text("Parent passes variables")),
+		h.Class("section"),
+		h.H2(h.Class("section__title"), g.Text("Parent passes variables")),
 		Card(CardProps{
 			Title:   user.Name,
 			Summary: user.Bio,
@@ -99,14 +99,14 @@ func Card(props CardProps) g.Node {
 		kicker = "Component"
 	}
 	return h.Article(
-		h.Class("rounded-xl border border-slate-800 bg-slate-900 p-5"),
-		h.P(h.Class("mb-2 text-xs font-semibold uppercase tracking-widest text-sky-300"), g.Text(kicker)),
-		h.H2(h.Class("text-lg font-semibold text-slate-100"), g.Text(props.Title)),
-		h.P(h.Class("mt-1 text-sm text-slate-400"), g.Text(summary)),
+		h.Class("card"),
+		h.P(h.Class("card__kicker"), g.Text(kicker)),
+		h.H2(h.Class("card__title"), g.Text(props.Title)),
+		h.P(h.Class("card__summary"), g.Text(summary)),
 		g.If(len(props.Tags) > 0,
-			h.Ul(h.Class("mt-4 flex flex-wrap gap-2"),
+			h.Ul(h.Class("card__tags"),
 				g.Map(props.Tags, func(tag string) g.Node {
-					return h.Li(h.Class("rounded-full border border-slate-700 px-2 py-0.5 text-xs text-slate-400"), g.Text(tag))
+					return h.Li(h.Class("tag"), g.Text(tag))
 				}),
 			),
 		),
@@ -117,22 +117,22 @@ func Dropdown(label string, items []MenuItem) g.Node {
 	return h.Div(
 		g.Attr("x-data", "{ open: false }"),
 		g.Attr("@click.outside", "open = false"),
-		h.Class("relative inline-block"),
+		h.Class("dropdown"),
 		h.Button(
 			h.Type("button"),
 			g.Attr("@click", "open = !open"),
 			g.Attr(":aria-expanded", "open"),
-			h.Class("rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-100"),
+			h.Class("dropdown__button"),
 			g.Text(label),
 		),
 		h.Div(
 			g.Attr("x-show", "open"),
 			g.Attr("x-cloak", ""),
-			h.Class("absolute left-0 z-10 mt-2 w-48 rounded-lg border border-slate-700 bg-slate-900 p-1 shadow-xl"),
+			h.Class("dropdown__menu"),
 			g.Map(items, func(item MenuItem) g.Node {
 				return h.A(
 					h.Href(item.Href),
-					h.Class("block rounded-md px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"),
+					h.Class("dropdown__item"),
 					g.Text(item.Label),
 				)
 			}),
@@ -143,16 +143,16 @@ func Dropdown(label string, items []MenuItem) g.Node {
 func Counter() g.Node {
 	return h.Div(
 		g.Attr("x-data", "{ count: 0 }"),
-		h.Class("flex items-center gap-3"),
+		h.Class("counter"),
 		h.Button(
 			h.Type("button"),
 			g.Attr("@click", "count++"),
-			h.Class("rounded-lg bg-sky-400 px-4 py-2 text-sm font-semibold text-slate-950"),
+			h.Class("counter__button"),
 			g.Text("Increment"),
 		),
 		h.Output(
 			g.Attr("x-text", "count"),
-			h.Class("text-sm text-slate-400"),
+			h.Class("counter__value"),
 			g.Text("0"),
 		),
 	)

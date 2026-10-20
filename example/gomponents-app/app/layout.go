@@ -18,8 +18,8 @@ func Layout(content g.Node) g.Node {
 			h.StyleEl(g.Raw("[x-cloak]{display:none!important}")),
 		),
 		h.Body(
-			h.Class("min-h-screen bg-slate-950 text-slate-100"),
-			h.Main(h.Class("mx-auto max-w-4xl space-y-10 px-6 py-12"), content),
+			h.Class("page"),
+			h.Main(h.Class("shell"), content),
 		),
 	)
 }

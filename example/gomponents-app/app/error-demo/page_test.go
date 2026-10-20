@@ -15,7 +15,7 @@ func TestPageWrapsContentInLayout(t *testing.T) {
 	if err := Layout(Page(props), props).Render(&output); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "<main><p") || !strings.Contains(output.String(), "ok") {
+	if !strings.Contains(output.String(), `class="status__panel"`) || !strings.Contains(output.String(), "ok") {
 		t.Fatalf("layout output:\n%s", output.String())
 	}
 }

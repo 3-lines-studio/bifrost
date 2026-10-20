@@ -29,34 +29,40 @@ func Cache() string {
 }
 
 func Page(props Props) g.Node {
-	return h.P(h.Class("text-slate-300"), g.Text(props.Message))
+	return h.P(h.Class("status__text"), g.Text(props.Message))
 }
 
 func Layout(content g.Node, props Props) g.Node {
 	return h.HTML(
-		h.Head(h.TitleEl(g.Text("Error demo"))),
-		h.Body(h.Class("bg-slate-950 p-12 text-slate-100"), h.Main(content)),
+		h.Head(h.TitleEl(g.Text("Error demo")), h.Link(h.Rel("stylesheet"), h.Href("/styles.css"))),
+		h.Body(h.Class("page status"), h.Main(h.Class("status__panel"), content)),
 	)
 }
 
 func Error(err error, r *http.Request) g.Node {
 	return h.HTML(
-		h.Head(h.TitleEl(g.Text("Custom error"))),
+		h.Head(h.TitleEl(g.Text("Custom error")), h.Link(h.Rel("stylesheet"), h.Href("/styles.css"))),
 		h.Body(
-			h.Class("bg-slate-950 p-12 text-slate-100"),
-			h.H1(g.Text("Custom error")),
-			h.P(h.Class("text-slate-400"), g.Text(err.Error())),
+			h.Class("page status"),
+			h.Main(
+				h.Class("status__panel"),
+				h.H1(h.Class("status__title"), g.Text("Custom error")),
+				h.P(h.Class("status__text"), g.Text(err.Error())),
+			),
 		),
 	)
 }
 
 func NotFound(r *http.Request) g.Node {
 	return h.HTML(
-		h.Head(h.TitleEl(g.Text("Custom not found"))),
+		h.Head(h.TitleEl(g.Text("Custom not found")), h.Link(h.Rel("stylesheet"), h.Href("/styles.css"))),
 		h.Body(
-			h.Class("bg-slate-950 p-12 text-slate-100"),
-			h.H1(g.Text("Custom not found")),
-			h.P(h.Class("text-slate-400"), g.Text(r.URL.Path)),
+			h.Class("page status"),
+			h.Main(
+				h.Class("status__panel"),
+				h.H1(h.Class("status__title"), g.Text("Custom not found")),
+				h.P(h.Class("status__text"), g.Text(r.URL.Path)),
+			),
 		),
 	)
 }

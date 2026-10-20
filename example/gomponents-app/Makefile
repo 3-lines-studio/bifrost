@@ -1,15 +1,9 @@
 APP := .
 
-.PHONY: build css css-watch dev serve check
+.PHONY: build dev serve check
 
 build:
 	go run ../../cmd/bifrost build $(APP)
-
-css:
-	bunx @tailwindcss/cli@4.3.3 -i assets/tailwind.css -o public/styles.css --minify
-
-css-watch:
-	bunx @tailwindcss/cli@4.3.3 -i assets/tailwind.css -o public/styles.css --watch
 
 dev:
 	go run ../../cmd/bifrost dev $(APP)

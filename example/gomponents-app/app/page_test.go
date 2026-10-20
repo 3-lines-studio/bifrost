@@ -36,7 +36,7 @@ func TestLayoutWrapsContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := output.String()
-	for _, expected := range []string{"bg-slate-950", "/styles.css"} {
+	for _, expected := range []string{`class="page"`, "/styles.css"} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("missing %q in layout:\n%s", expected, html)
 		}
