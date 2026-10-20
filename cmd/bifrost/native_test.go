@@ -739,6 +739,28 @@ func TestNativeAPictureThatFadesInIsPainted(t *testing.T) {
 	}
 }
 
+func TestNativeAButtonPutsItsIconBesideItsLabel(t *testing.T) {
+	// Measured on the button that creates a discount of picsel: the icon was
+	// painted over the label, because a press lays its children in a column.
+	if !strings.Contains(nativeHostBody, "const row = Children.count(children) > 1 ?") {
+		t.Fatal("the icon of a button is not beside its label")
+	}
+}
+
+func TestNativeARowSpacesItsChildren(t *testing.T) {
+	// Measured on the tabs of the discounts page of picsel: space-x-4 is a margin
+	// on the siblings of a child, and the target has no siblings to name.
+	for _, said := range []string{
+		"function spaced(className: unknown)",
+		"gap.columnGap = Number(x[1]) * 4;",
+		"const gap = spaced(given.className);",
+	} {
+		if !strings.Contains(nativeHostBody, said) {
+			t.Fatalf("a row of the page has no space between its children: %q", said)
+		}
+	}
+}
+
 func TestNativeAHeadingIsABlock(t *testing.T) {
 	// A browser paints a heading as a block with its own margins; measured on the
 	// coupons page of picsel: the title and the sentence under it came out in one

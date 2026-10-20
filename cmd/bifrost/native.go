@@ -3816,7 +3816,11 @@ function Anchor({ href, children, className, onPress, ref, ...rest }: { href?: s
 }
 
 function Button({ children, type, className, onPress, ref, ...rest }: { children?: ReactNode; type?: unknown; className?: unknown; onPress?: unknown; ref?: unknown } & Record<string, unknown>) {
-  return <Pressable ref={useElementRef(ref)} accessibilityRole="button" className={className as string} onPress={usePress(type, onPress as (() => void) | undefined)} {...rest}>{textRuns(children, className)}</Pressable>;
+  // A button of the web paints its icon beside its label; a native press lays its
+  // children in a column and the two came out one over the other. Measured on the
+  // button that creates a discount of the app of the case.
+  const row = Children.count(children) > 1 ? { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, columnGap: 6 } : undefined;
+  return <Pressable ref={useElementRef(ref)} accessibilityRole="button" className={className as string} style={row} onPress={usePress(type, onPress as (() => void) | undefined)} {...rest}>{textRuns(children, className)}</Pressable>;
 }
 
 // A form of the web app keeps its fields and submits them, because there is no
@@ -4858,6 +4862,30 @@ NAMED.summary = Summary;
 //
 // And the place of an element that a page worked out by measuring the page: see
 // placed, below.
+// A row of the web spaces its children with a rule that names the sibling of a
+// child -- space-x-4 is a margin on everything but the first -- and a target has
+// no siblings to name: the classes are a style of one box. The space the classes
+// ask for is a gap of that box. Measured on the tabs of the discounts page of the
+// app of the case: two buttons of a row came out touching.
+function spaced(className: unknown): Record<string, number> | undefined {
+  if (typeof className !== "string") {
+    return undefined;
+  }
+  const x = /(?:^|\s)space-x-(\d+(?:\.\d+)?)(?:\s|$)/.exec(className);
+  const y = /(?:^|\s)space-y-(\d+(?:\.\d+)?)(?:\s|$)/.exec(className);
+  if (x === null && y === null) {
+    return undefined;
+  }
+  const gap: Record<string, number> = {};
+  if (x !== null) {
+    gap.columnGap = Number(x[1]) * 4;
+  }
+  if (y !== null) {
+    gap.rowGap = Number(y[1]) * 4;
+  }
+  return gap;
+}
+
 export function nativeProps(props: unknown, tag?: string): unknown {
   if (props === null || typeof props !== "object") {
     return props;
@@ -4937,6 +4965,10 @@ export function nativeProps(props: unknown, tag?: string): unknown {
   // measurements can honestly name.
   if (given.style !== undefined) {
     given.style = placed(given.style);
+  }
+  const gap = spaced(given.className);
+  if (gap !== undefined) {
+    given.style = given.style === undefined ? gap : [given.style, gap];
   }
   // The tag the page wrote an element of its own as. It arrives only when the
   // element is painted by a component of this table -- a name this table does not
