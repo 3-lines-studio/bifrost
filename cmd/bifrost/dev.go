@@ -75,7 +75,9 @@ func runDev(args []string) error {
 	}
 	if *prepareOnly {
 		options := builder.Options{Package: packagePath, Dir: buildDir, Development: true, ExternalDevelopment: true, SourceMaps: false, ViteConfig: *viteConfig, OnDescribe: func(description protocol.DescribeResult) {
-			printRouteTable(description, router.routeRows(), router.routeParams(), false)
+			if err := printRouteTable(description, router.routeRows(), router.routeParams(), false); err != nil {
+				reportDevError("route table", err)
+			}
 		}, Version: bifrost.Version}
 		if router != nil {
 			options.Output = router.Output
@@ -213,7 +215,9 @@ func runDev(args []string) error {
 
 	buildAndStart := func() error {
 		options := builder.Options{Package: packagePath, Dir: buildDir, Development: true, SourceMaps: false, ViteConfig: *viteConfig, OnDescribe: func(description protocol.DescribeResult) {
-			printRouteTable(description, router.routeRows(), router.routeParams(), false)
+			if err := printRouteTable(description, router.routeRows(), router.routeParams(), false); err != nil {
+				reportDevError("route table", err)
+			}
 			sourceRoot = description.SourceRoot
 			if err := writeRoutesFile(filepath.Join(socketDir, "routes.json"), description.Spec.Routes); err != nil {
 				reportDevError("write development routes", err)
