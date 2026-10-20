@@ -546,7 +546,8 @@ func goTreeStamp(root string) (string, error) {
 		if name == generatedEmbedSource {
 			return nil
 		}
-		if filepath.Ext(name) != ".go" && name != "go.mod" && name != "go.sum" && name != "package.json" && name != "bun.lock" {
+		extension := filepath.Ext(name)
+		if extension != ".go" && extension != ".html" && name != "go.mod" && name != "go.sum" && name != "package.json" && name != "bun.lock" {
 			return nil
 		}
 		info, err := entry.Info()
