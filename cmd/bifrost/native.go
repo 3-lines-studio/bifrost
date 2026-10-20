@@ -4954,6 +4954,20 @@ function measured(className: unknown): Record<string, unknown> | undefined {
   return Object.keys(style).length === 0 ? undefined : style;
 }
 
+// A grid of the web places its items across the block axis, and the items of a
+// grid stretch to the column they are in. The target has no grid: the class is
+// painted as the column of a phone, and the whole of a card stopped being the
+// width of its box and grew to six thousand pixels of height -- measured on the
+// card of an event -- because items-start of the grid became a cross-axis
+// alignment of the column. The items of a grid stretch, and that is what is
+// asked for here, over whatever alignment the class of the item says.
+function gridStretch(className: unknown): Record<string, unknown> | undefined {
+  if (typeof className !== "string" || !/(?:^|\s)grid(?:\s|$)/.test(className)) {
+    return undefined;
+  }
+  return { alignItems: "stretch" };
+}
+
 export function nativeProps(props: unknown, tag?: string): unknown {
   if (props === null || typeof props !== "object") {
     return props;
@@ -5049,6 +5063,10 @@ export function nativeProps(props: unknown, tag?: string): unknown {
   const size = measured(given.className);
   if (size !== undefined) {
     given.style = given.style === undefined ? size : [given.style, size];
+  }
+  const stretch = gridStretch(given.className);
+  if (stretch !== undefined) {
+    given.style = given.style === undefined ? stretch : [given.style, stretch];
   }
   // The tag the page wrote an element of its own as. It arrives only when the
   // element is painted by a component of this table -- a name this table does not

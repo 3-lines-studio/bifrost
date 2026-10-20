@@ -761,6 +761,20 @@ func TestNativeAButtonPutsItsIconBesideItsLabel(t *testing.T) {
 	}
 }
 
+func TestNativeAGridStretchesItsItems(t *testing.T) {
+	// Measured on the card of an event of picsel: items-start of a grid became a
+	// cross-axis alignment of the column and the card grew to 6567 px.
+	for _, said := range []string{
+		"function gridStretch(className: unknown)",
+		`return { alignItems: "stretch" };`,
+		"const stretch = gridStretch(given.className);",
+	} {
+		if !strings.Contains(nativeHostBody, said) {
+			t.Fatalf("a grid does not stretch its items: %q", said)
+		}
+	}
+}
+
 func TestNativeASizeWrittenInTheClassIsPainted(t *testing.T) {
 	// Measured on the card of an event of picsel: the aspect of the card was not
 	// applied and the picture that fills it grew to the whole screen.
