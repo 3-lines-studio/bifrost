@@ -9,11 +9,11 @@
 </div>
 <section class="panel" x-data="clock" x-init="load()">
   <h2>API + Alpine</h2>
-  <p>Go time: <strong x-text="time"></strong></p>
+  <p>Go time: <strong x-text="time">loading…</strong></p>
   <button type="button" @click="load()" :disabled="busy">Refresh</button>
 </section>
 <section class="panel" x-data="{ count: 0 }">
   <h2>Alpine state</h2>
-  <p>Count: <strong x-text="count"></strong></p>
+  <p>Count: <strong x-text="count">0</strong></p>
   <button type="button" @click="count++">Increment</button>
 </section>

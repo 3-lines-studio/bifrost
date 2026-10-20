@@ -1,20 +1,6 @@
 if (!window.__vanillaReady) {
   window.__vanillaReady = true;
 
-  document.addEventListener("turbo:load", () => {
-    document.querySelectorAll("[data-nav]").forEach((link) => {
-      if (link.getAttribute("href") === location.pathname) {
-        link.setAttribute("aria-current", "page");
-      } else {
-        link.removeAttribute("aria-current");
-      }
-    });
-    const boot = document.getElementById("boot");
-    if (boot) {
-      boot.textContent = "Turbo + Alpine";
-    }
-  });
-
   document.addEventListener("alpine:init", () => {
     Alpine.data("clock", () => ({
       time: "",

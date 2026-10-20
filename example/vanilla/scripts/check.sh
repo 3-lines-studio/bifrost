@@ -48,6 +48,8 @@ done
 echo "server"
 expect_status "home" 200 "/"
 expect_body "home renders Go" "Bifrost vanilla" "/"
+expect_body "ssr active nav" 'aria-current="page"' "/"
+expect_body "ssr alpine fallback" "loading" "/"
 expect_header "root middleware" "X-Vanilla" "1" "/"
 expect_status "about group" 200 "/about"
 expect_body "about group body" "marketing~/about" "/about"

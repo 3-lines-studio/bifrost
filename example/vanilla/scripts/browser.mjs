@@ -14,7 +14,7 @@ const check = (name, condition) => {
 
 try {
   await page.goto(`${base}/`, { waitUntil: "networkidle" });
-  await page.waitForFunction(() => document.querySelector("section.panel strong")?.textContent?.length > 0);
+  await page.waitForFunction(() => /\d{4}-\d\d-\d\dT/.test(document.querySelector("section.panel strong")?.textContent || ""), null, { timeout: 5000 });
   check("home title", (await page.title()) === "Bifrost vanilla");
   check("Go API feeds Alpine", (await page.locator("section.panel strong").first().textContent()).includes("T"));
   check("boot tag", (await page.locator("#boot").textContent()) === "Turbo + Alpine");
