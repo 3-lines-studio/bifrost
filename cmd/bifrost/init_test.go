@@ -12,9 +12,18 @@ func TestRunInitCreatesFormattedScaffoldAndRefusesOverwrite(t *testing.T) {
 	if err := runInit([]string{"--no-install", target}); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"app/layout.tsx", "app/page.tsx", "app/page.go", "app/style.css", "package.json", "vite.config.ts", "bifrost.d.ts"} {
+	for _, name := range []string{"app/layout.tsx", "app/page.tsx", "app/page.go", "app/style.css", "AGENTS.md", "package.json", "vite.config.ts", "bifrost.d.ts"} {
 		if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(name))); err != nil {
 			t.Fatalf("the scaffold is missing %s: %v", name, err)
+		}
+	}
+	guide, err := os.ReadFile(filepath.Join(target, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"bifrost dev .", "page.tsx", "slug__/", "bifrost.NotFound()"} {
+		if !strings.Contains(string(guide), expected) {
+			t.Fatalf("AGENTS.md does not contain %q", expected)
 		}
 	}
 	pageData, err := os.ReadFile(filepath.Join(target, "app", "page.go"))
