@@ -9,8 +9,8 @@ import (
 )
 
 // dataMediaType asks a server route for the props its loader produced instead
-// of a rendered document. A native client renders the same view itself, so it
-// needs the loader's data and nothing the renderer would add.
+// of a rendered document. A client that renders the same view itself needs the
+// loader's data and nothing the renderer would add.
 const dataMediaType = "application/vnd.bifrost.data+json"
 
 type dataPage struct {

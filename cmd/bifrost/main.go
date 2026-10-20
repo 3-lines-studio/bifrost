@@ -26,8 +26,6 @@ func main() {
 		err = runDev(os.Args[2:])
 	case "init":
 		err = runInit(os.Args[2:])
-	case "native":
-		err = runNative(os.Args[2:])
 	case "routes":
 		err = runRoutes(os.Args[2:])
 	case "version":
@@ -54,7 +52,7 @@ func reportError(err error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: bifrost <build|dev|init|native|routes|version> [options]")
+	fmt.Fprintln(os.Stderr, "usage: bifrost <build|dev|init|routes|version> [options]")
 }
 
 func runBuild(args []string) error {
