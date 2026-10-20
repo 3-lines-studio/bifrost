@@ -10,6 +10,39 @@ import (
 	"testing"
 )
 
+func TestDataIsAskedForInAListOfMediaTypes(t *testing.T) {
+	// A server that reads the whole header as one string -- the context of a page
+	// that only loads for a document, a middleware of an app -- sees a request for
+	// a document only if the client also says it takes anything. Measured on
+	// picsel: the session of the login never reached the props of the page.
+	for _, accept := range []string{
+		dataMediaType,
+		dataMediaType + ", */*",
+		"*/*, " + dataMediaType + ";q=0.9",
+		"text/html, " + dataMediaType,
+	} {
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.Header.Set("Accept", accept)
+		if !dataRequested(request) {
+			t.Fatalf("%q is not read as a data request", accept)
+		}
+	}
+	for _, accept := range []string{"", "text/html", "application/json", "*/*"} {
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		if accept != "" {
+			request.Header.Set("Accept", accept)
+		}
+		if dataRequested(request) {
+			t.Fatalf("%q is read as a data request", accept)
+		}
+	}
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	request.Header.Set("Accept", dataMediaType)
+	if dataRequested(request) {
+		t.Fatal("a POST is read as a data request")
+	}
+}
+
 func TestDataReturnsLoaderPropsWithoutRendering(t *testing.T) {
 	rendered := false
 	render := &fakeRenderer{render: func(_ context.Context, _ renderRequest, _ renderSink) error {

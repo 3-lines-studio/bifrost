@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/3-lines-studio/bifrost/internal/protocol"
 )
@@ -30,8 +31,24 @@ type dataError struct {
 	Status int    `json:"status"`
 }
 
+// An Accept header is a list of media types with optional parameters, and the
+// data type is one of them: a client that asks for the props and also says it
+// takes anything is asking for the props, and the server that reads the header
+// as one string would have missed it.
 func dataRequested(request *http.Request) bool {
-	return request.Method == http.MethodGet && request.Header.Get("Accept") == dataMediaType
+	if request.Method != http.MethodGet {
+		return false
+	}
+	for _, part := range strings.Split(request.Header.Get("Accept"), ",") {
+		media := strings.TrimSpace(part)
+		if before, _, found := strings.Cut(media, ";"); found {
+			media = strings.TrimSpace(before)
+		}
+		if media == dataMediaType {
+			return true
+		}
+	}
+	return false
 }
 
 func writeDataPage(w http.ResponseWriter, pattern string, props json.RawMessage, document Document, status, errorFallbacks int) error {

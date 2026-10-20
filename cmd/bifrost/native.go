@@ -2835,7 +2835,13 @@ export async function loadPage(pathname: string): Promise<PageResult> {
   // pushing an anonymous client to the login page. The runtime follows it and
   // only reports where it landed, so a moved url is the redirect, and rendering
   // the destination under the path that was asked for would be a silent lie.
-  const response = await fetch(ORIGIN + pathname, { headers: { Accept: DATA_MEDIA_TYPE } });
+  // The accept asks for the props and also takes anything, because a server that
+  // reads the header as one string -- a context of the page that only loads for
+  // a document, a middleware of an app -- has to see that the request is one it
+  // would have answered with a page. Measured on picsel: its context, and with it
+  // the user of the session, loaded only for a text/html or */* accept, so every
+  // page after the login was the page of a guest.
+  const response = await fetch(ORIGIN + pathname, { headers: { Accept: DATA_MEDIA_TYPE + ", */*" } });
   const target = redirectTarget(response, pathname);
   if (target !== undefined) {
     return { kind: "redirect", href: target };
