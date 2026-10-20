@@ -54,41 +54,26 @@ func Load(r *http.Request) (Props, error) {
 }
 
 func Page(props Props) g.Node {
-	return h.HTML(
-		g.Attr("lang", "en"),
-		h.Head(
-			h.Meta(h.Charset("utf-8")),
-			h.Meta(h.Name("viewport"), h.Content("width=device-width, initial-scale=1")),
-			h.TitleEl(g.Text("Gomponents App Router")),
-			h.Script(h.Src("https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4")),
-			h.Script(h.Defer(), h.Src("https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js")),
-			h.StyleEl(g.Raw("[x-cloak]{display:none!important}")),
+	return g.Group{
+		h.Header(
+			h.Class("space-y-3"),
+			h.P(h.Class("text-xs font-semibold uppercase tracking-[0.3em] text-sky-300"), g.Text("Go page")),
+			h.H1(h.Class("text-3xl font-semibold tracking-tight"), g.Text("Gomponents + Alpine + Tailwind")),
+			h.P(h.Class("max-w-2xl text-slate-400"), g.Text("One page.go with the loader, the page, and its components.")),
 		),
-		h.Body(
-			h.Class("min-h-screen bg-slate-950 text-slate-100"),
-			h.Main(
-				h.Class("mx-auto max-w-4xl space-y-10 px-6 py-12"),
-				h.Header(
-					h.Class("space-y-3"),
-					h.P(h.Class("text-xs font-semibold uppercase tracking-[0.3em] text-sky-300"), g.Text("Go page")),
-					h.H1(h.Class("text-3xl font-semibold tracking-tight"), g.Text("Gomponents + Alpine + Tailwind")),
-					h.P(h.Class("max-w-2xl text-slate-400"), g.Text("One page.go with the loader, the page, and its components.")),
-				),
-				h.Div(
-					h.Class("flex flex-wrap items-center gap-4"),
-					Dropdown("Open menu", props.Menu),
-					Counter(),
-				),
-				UserCard(props.User),
-				h.Section(
-					h.Class("grid gap-4 sm:grid-cols-2"),
-					g.Map(props.Cards, func(card CardProps) g.Node {
-						return Card(card)
-					}),
-				),
-			),
+		h.Div(
+			h.Class("flex flex-wrap items-center gap-4"),
+			Dropdown("Open menu", props.Menu),
+			Counter(),
 		),
-	)
+		UserCard(props.User),
+		h.Section(
+			h.Class("grid gap-4 sm:grid-cols-2"),
+			g.Map(props.Cards, func(card CardProps) g.Node {
+				return Card(card)
+			}),
+		),
+	}
 }
 
 func UserCard(user User) g.Node {

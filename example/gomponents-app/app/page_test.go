@@ -23,10 +23,22 @@ func TestPageRendersTypedComponents(t *testing.T) {
 		"Card 01",
 		`x-data="{ open: false }"`,
 		`@click="count++"`,
-		"bg-slate-950",
 	} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("missing %q in:\n%s", expected, html)
+		}
+	}
+}
+
+func TestLayoutWrapsContent(t *testing.T) {
+	var output bytes.Buffer
+	if err := Layout(Page(Props{})).Render(&output); err != nil {
+		t.Fatal(err)
+	}
+	html := output.String()
+	for _, expected := range []string{"bg-slate-950", "tailwindcss"} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("missing %q in layout:\n%s", expected, html)
 		}
 	}
 }
