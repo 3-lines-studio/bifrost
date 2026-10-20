@@ -54,6 +54,7 @@ type appRoute struct {
 	Template     bool
 	Layouts      []string
 	Script       string
+	Partials     string
 }
 
 type goDir struct {
@@ -541,6 +542,9 @@ func writeViews(projectRoot, routeRoot string, routes []appRoute) error {
 		if routes[index].Template {
 			routes[index].View = projectRelativeView(projectRoot, routeRoot, routes[index].View)
 			routes[index].Layouts = inheritedHTMLLayouts(projectRoot, routeRoot, routes[index].Directory)
+			if fileExists(filepath.Join(routeRoot, "partials.html")) {
+				routes[index].Partials = projectRelativeView(projectRoot, routeRoot, "partials.html")
+			}
 			if routes[index].Script != "" {
 				routes[index].Script = projectRelativeView(projectRoot, routeRoot, routes[index].Script)
 			}
@@ -1250,6 +1254,9 @@ func routeOptions(route appRoute) string {
 	}
 	if route.Script != "" {
 		options.WriteString(".WithScript(" + strconv.Quote(route.Script) + ")")
+	}
+	if route.Template && route.Partials != "" {
+		options.WriteString(".WithPartials(" + strconv.Quote(route.Partials) + ")")
 	}
 	if route.Template && len(route.ErrorViews) > 0 {
 		options.WriteString(".WithErrors(")

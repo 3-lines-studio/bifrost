@@ -321,6 +321,7 @@ func TestValidateManifestAcceptsHTMLViewErrors(t *testing.T) {
 		SourceRoot: t.TempDir(),
 		Routes: []Route{
 			Server("/", "app/page.html", nil).
+				WithPartials("app/partials.html").
 				WithErrors("app/error.html").
 				WithNotFound("app/not-found.html"),
 		},
@@ -335,6 +336,7 @@ func TestValidateManifestAcceptsHTMLViewErrors(t *testing.T) {
 		Mode:   "html",
 		HTML: &protocol.HTMLAssets{
 			Page:     protocol.TemplateSource{Path: "app/page.html", Source: "<h1>page</h1>"},
+			Partials: &protocol.TemplateSource{Path: "app/partials.html", Source: `{{define "nav"}}<nav></nav>{{end}}`},
 			Errors:   []protocol.TemplateSource{{Path: "app/error.html", Source: "<h1>error</h1>"}},
 			NotFound: &notFound,
 		},

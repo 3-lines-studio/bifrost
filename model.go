@@ -220,6 +220,20 @@ func validateRoutes(sourceRoot string, routes []Route) ([]Route, error) {
 			route.script = normalized
 		}
 
+		if route.partials != "" {
+			if !template {
+				return nil, fmt.Errorf("bifrost: route %q uses partials with a non-html view", route.pattern)
+			}
+			normalized, err := normalizeView(sourceRoot, route.partials)
+			if err != nil {
+				return nil, fmt.Errorf("bifrost: route %q partials: %w", route.pattern, err)
+			}
+			if !htmlView(normalized) {
+				return nil, fmt.Errorf("bifrost: route %q partials %q must use .html", route.pattern, route.partials)
+			}
+			route.partials = normalized
+		}
+
 		if len(route.errorViews) > 0 || route.notFoundView != "" {
 			if !template {
 				return nil, fmt.Errorf("bifrost: route %q uses error views with a non-html view", route.pattern)
@@ -349,6 +363,7 @@ func makeBuildSpec(routes []Route) (protocol.Spec, string, error) {
 			Navigation: route.navigation,
 			Layouts:    slices.Clone(route.layouts),
 			Script:     route.script,
+			Partials:   route.partials,
 			Errors:     slices.Clone(route.errorViews),
 			NotFound:   route.notFoundView,
 		}

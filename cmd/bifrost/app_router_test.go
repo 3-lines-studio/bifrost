@@ -1296,6 +1296,7 @@ func TestAppRouterDiscoversHTMLErrors(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{
 		"page.html",
+		"partials.html",
 		"error.html",
 		"not-found.html",
 		"not-found.js",
@@ -1332,6 +1333,9 @@ func TestAppRouterDiscoversHTMLErrors(t *testing.T) {
 	if home.NotFoundView != "not-found.html" {
 		t.Fatalf("home not found = %q", home.NotFoundView)
 	}
+	if home.Partials != "partials.html" {
+		t.Fatalf("home partials = %q", home.Partials)
+	}
 	blog := byPattern["/blog"]
 	if got, want := strings.Join(blog.ErrorViews, ","), "error.html,blog/error.html"; got != want {
 		t.Fatalf("blog errors = %q, want %q", got, want)
@@ -1339,8 +1343,11 @@ func TestAppRouterDiscoversHTMLErrors(t *testing.T) {
 	if blog.NotFoundView != "not-found.html" {
 		t.Fatalf("blog not found = %q", blog.NotFoundView)
 	}
+	if blog.Partials != "partials.html" {
+		t.Fatalf("blog partials = %q", blog.Partials)
+	}
 	notFound := byPattern["/{path...}"]
-	if !notFound.NotFoundPage || notFound.Script != "not-found.js" || len(notFound.ErrorViews) != 0 {
+	if !notFound.NotFoundPage || notFound.Script != "not-found.js" || len(notFound.ErrorViews) != 0 || notFound.Partials != "partials.html" {
 		t.Fatalf("not found route = %+v", notFound)
 	}
 	generated := filepath.Join(root, ".bifrost", "app")
@@ -1357,7 +1364,7 @@ func TestAppRouterDiscoversHTMLErrors(t *testing.T) {
 	text := string(source)
 	for _, expected := range []string{
 		`.WithErrors("error.html", "blog/error.html").WithNotFound("not-found.html"),`,
-		`.WithScript("not-found.js"),`,
+		`.WithScript("not-found.js").WithPartials("partials.html"),`,
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("generated main does not contain %q:\n%s", expected, text)

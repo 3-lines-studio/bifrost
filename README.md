@@ -48,6 +48,7 @@ One trailing `_` is a one-segment parameter. Two are a catch-all, which must be 
 - `page.go` exports `Load(r *http.Request) (any, error)` and optionally `Cache() string`.
 - `layout.tsx` exports `Layout`, wraps the routes below it, and stays mounted across navigation.
 - `layout.html` wraps `page.html` routes and receives `.Content`.
+- `partials.html` defines shared templates for the HTML tree.
 - `template.tsx` exports `Template`, wraps like a layout, and remounts on navigation.
 - `loading.tsx` exports `Loading`, shown while a navigation to that subtree runs.
 - `error.tsx` exports `Error({ error, reset })`; `reset` re-fetches the route. `error.html` is its Go template equivalent.
@@ -97,6 +98,14 @@ func Load(r *http.Request) (any, error) {
 Templates receive `.Props`, `.Params`, `.SearchParams`, and `.Pathname`. `layout.html` wraps the page and receives `.Content`; `{{define "head"}}` blocks are collected from the outside in. Loaders, middleware, caching, `?_data`, and Markdown work the same as for React pages.
 
 `error.html` is inherited like `layout.html`; the nearest one renders loader errors inside the route layouts with `__bifrostError` and `__bifrostErrorLevel` in props. `not-found.html` renders unmatched URLs and a loader `bifrost.NotFound()`, with `pathname` in props. A sibling `not-found.js` or `not-found.ts` is the not-found client entry.
+
+A root `partials.html` defines templates shared by every HTML layout, page, error view, and not-found view:
+
+```html
+{{define "nav"}}<nav>Bifrost</nav>{{end}}
+```
+
+Use `{{template "nav" .}}` from any template. Partials can use the current data and other partials, but cannot define `head`.
 
 A sibling `page.js` or `page.ts` becomes the client entry. Vite builds it, so imports, TypeScript, and CSS imports work:
 

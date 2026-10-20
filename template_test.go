@@ -174,3 +174,44 @@ func TestTemplateRendererSelectsErrorAndNotFoundViews(t *testing.T) {
 		})
 	}
 }
+
+func TestTemplateRendererSharesPartials(t *testing.T) {
+	partials := protocol.TemplateSource{
+		Path:   "app/partials.html",
+		Source: `{{define "nav"}}<nav>{{.Props.title}}</nav>{{end}}{{define "meta"}}<meta name="app" content="{{.Props.title}}">{{end}}`,
+	}
+	renderer, err := newTemplateRenderer(&protocol.HTMLAssets{
+		Page: protocol.TemplateSource{Path: "app/page.html", Source: `{{template "nav" .}}<h1>{{.Props.title}}</h1>`},
+		Layouts: []protocol.TemplateSource{
+			{Path: "app/layout.html", Source: `{{define "head"}}{{template "meta" .}}{{end}}<main>{{.Content}}</main>`},
+		},
+		Partials: &partials,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	props, err := json.Marshal(map[string]any{"title": "Hola"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &templateTestSink{}
+	if err := renderer.Render(context.Background(), renderRequest{Props: props}, sink); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := sink.head.String(), `<meta name="app" content="Hola">`; got != want {
+		t.Fatalf("head = %q, want %q", got, want)
+	}
+	if got, want := sink.body.String(), `<main><nav>Hola</nav><h1>Hola</h1></main>`; got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+}
+
+func TestTemplateRendererRejectsHeadInPartials(t *testing.T) {
+	partials := protocol.TemplateSource{Path: "app/partials.html", Source: `{{define "head"}}x{{end}}`}
+	if _, err := newTemplateRenderer(&protocol.HTMLAssets{
+		Page:     protocol.TemplateSource{Path: "app/page.html", Source: "<h1>x</h1>"},
+		Partials: &partials,
+	}); err == nil {
+		t.Fatal("head in partials was accepted")
+	}
+}

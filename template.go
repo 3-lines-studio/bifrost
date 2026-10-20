@@ -32,41 +32,55 @@ func newTemplateRenderer(assets *protocol.HTMLAssets) (*templateRenderer, error)
 	if assets == nil {
 		return nil, errors.New("bifrost: html view has no templates")
 	}
-	page, err := parseTemplate(assets.Page.Path, assets.Page.Source)
+	base := template.New("partials")
+	if assets.Partials != nil {
+		parsed, err := base.Parse(assets.Partials.Source)
+		if err != nil {
+			return nil, fmt.Errorf("bifrost: parse %s: %w", assets.Partials.Path, err)
+		}
+		if parsed.Lookup("head") != nil {
+			return nil, fmt.Errorf("bifrost: %s cannot define head", assets.Partials.Path)
+		}
+		base = parsed
+	}
+	parse := func(source protocol.TemplateSource) (*template.Template, error) {
+		cloned, err := base.Clone()
+		if err != nil {
+			return nil, err
+		}
+		parsed, err := cloned.New(source.Path).Parse(source.Source)
+		if err != nil {
+			return nil, fmt.Errorf("bifrost: parse %s: %w", source.Path, err)
+		}
+		return parsed, nil
+	}
+	page, err := parse(assets.Page)
 	if err != nil {
 		return nil, err
 	}
 	renderer := &templateRenderer{page: page}
 	for _, layout := range assets.Layouts {
-		parsed, err := parseTemplate(layout.Path, layout.Source)
+		parsed, err := parse(layout)
 		if err != nil {
 			return nil, err
 		}
 		renderer.layouts = append(renderer.layouts, parsed)
 	}
 	for _, source := range assets.Errors {
-		parsed, err := parseTemplate(source.Path, source.Source)
+		parsed, err := parse(source)
 		if err != nil {
 			return nil, err
 		}
 		renderer.errors = append(renderer.errors, parsed)
 	}
 	if assets.NotFound != nil {
-		parsed, err := parseTemplate(assets.NotFound.Path, assets.NotFound.Source)
+		parsed, err := parse(*assets.NotFound)
 		if err != nil {
 			return nil, err
 		}
 		renderer.notFound = parsed
 	}
 	return renderer, nil
-}
-
-func parseTemplate(name, source string) (*template.Template, error) {
-	parsed, err := template.New(name).Parse(source)
-	if err != nil {
-		return nil, fmt.Errorf("bifrost: parse %s: %w", name, err)
-	}
-	return parsed, nil
 }
 
 func (r *templateRenderer) Render(ctx context.Context, request renderRequest, sink renderSink) error {

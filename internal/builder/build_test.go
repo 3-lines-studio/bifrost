@@ -474,6 +474,7 @@ func TestCollectHTMLViewsIncludesErrorsAndNotFound(t *testing.T) {
 	root := t.TempDir()
 	for name, source := range map[string]string{
 		"app/page.html":      "<h1>page</h1>",
+		"app/partials.html":  `{{define "nav"}}<nav></nav>{{end}}`,
 		"app/error.html":     "<h1>error</h1>",
 		"app/not-found.html": "<h1>missing</h1>",
 	} {
@@ -486,7 +487,7 @@ func TestCollectHTMLViewsIncludesErrorsAndNotFound(t *testing.T) {
 		}
 	}
 	spec := protocol.Spec{Routes: []protocol.RouteSpec{
-		{Pattern: "/", View: "app/page.html", Kind: "server", Errors: []string{"app/error.html"}, NotFound: "app/not-found.html"},
+		{Pattern: "/", View: "app/page.html", Kind: "server", Partials: "app/partials.html", Errors: []string{"app/error.html"}, NotFound: "app/not-found.html"},
 	}}
 	routeViews := map[string]string{"/": templateViewID(spec.Routes[0])}
 	views, err := collectHTMLViews(root, spec, routeViews)
@@ -495,6 +496,9 @@ func TestCollectHTMLViewsIncludesErrorsAndNotFound(t *testing.T) {
 	}
 	if len(views) != 1 || views[0].HTML == nil {
 		t.Fatalf("views = %+v", views)
+	}
+	if views[0].HTML.Partials == nil || views[0].HTML.Partials.Path != "app/partials.html" {
+		t.Fatalf("partials = %+v", views[0].HTML.Partials)
 	}
 	if len(views[0].HTML.Errors) != 1 || views[0].HTML.Errors[0].Path != "app/error.html" {
 		t.Fatalf("errors = %+v", views[0].HTML.Errors)

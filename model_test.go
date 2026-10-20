@@ -349,3 +349,35 @@ func TestTemplateRouteErrorViews(t *testing.T) {
 		})
 	}
 }
+
+func TestTemplateRoutePartials(t *testing.T) {
+	app, err := newApp(Config{
+		SourceRoot: t.TempDir(),
+		Routes: []Route{
+			Server("/", "app/page.html", nil).WithPartials("app/partials.html"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := app.spec.Routes[0].Partials, "app/partials.html"; got != want {
+		t.Fatalf("partials = %q, want %q", got, want)
+	}
+	cases := []struct {
+		name  string
+		route Route
+		want  string
+	}{
+		{"non-html", Server("/", "app/page.tsx", nil).WithPartials("app/partials.html"), "non-html"},
+		{"tsx", Server("/", "app/page.html", nil).WithPartials("app/partials.tsx"), "must use .html"},
+		{"escape", Server("/", "app/page.html", nil).WithPartials("../partials.html"), "escapes"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := newApp(Config{SourceRoot: t.TempDir(), Routes: []Route{test.route}})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}

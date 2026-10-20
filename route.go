@@ -64,6 +64,7 @@ type Route struct {
 	cacheControl string
 	layouts      []string
 	script       string
+	partials     string
 	errorViews   []string
 	notFoundView string
 }
@@ -111,6 +112,11 @@ func (r Route) WithLayouts(layouts ...string) Route {
 
 func (r Route) WithScript(script string) Route {
 	r.script = script
+	return r
+}
+
+func (r Route) WithPartials(view string) Route {
+	r.partials = view
 	return r
 }
 

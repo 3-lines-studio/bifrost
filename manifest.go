@@ -174,6 +174,13 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 			if !slices.Equal(errors, declared.Errors) {
 				return nil, fmt.Errorf("bifrost: manifest route %q error views do not match the app", route.Pattern)
 			}
+			partials := ""
+			if view.HTML.Partials != nil {
+				partials = view.HTML.Partials.Path
+			}
+			if partials != declared.Partials {
+				return nil, fmt.Errorf("bifrost: manifest route %q partials do not match the app", route.Pattern)
+			}
 			notFound := ""
 			if view.HTML.NotFound != nil {
 				notFound = view.HTML.NotFound.Path
@@ -350,6 +357,14 @@ func validateHTMLView(view protocol.BuiltView) error {
 			return fmt.Errorf("duplicate html layout %q", layout.Path)
 		}
 		seen[layout.Path] = struct{}{}
+	}
+	if view.HTML.Partials != nil {
+		if err := validateTemplateSource(*view.HTML.Partials); err != nil {
+			return err
+		}
+		if !strings.HasSuffix(view.HTML.Partials.Path, ".html") {
+			return fmt.Errorf("html partials %q must use .html", view.HTML.Partials.Path)
+		}
 	}
 	for _, errorView := range view.HTML.Errors {
 		if err := validateTemplateSource(errorView); err != nil {
