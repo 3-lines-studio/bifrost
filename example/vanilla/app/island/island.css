@@ -1,0 +1,9 @@
+#island-button {
+  font: inherit;
+  padding: 0.6rem 1rem;
+  border: 1px solid #6cc4ff;
+  border-radius: 0.5rem;
+  background: #0c1017;
+  color: #e6ebf2;
+  cursor: pointer;
+}

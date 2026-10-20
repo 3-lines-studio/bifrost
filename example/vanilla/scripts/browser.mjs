@@ -1,0 +1,63 @@
+import assert from "node:assert/strict";
+import { chromium } from "playwright-core";
+
+const base = "http://127.0.0.1:18801";
+const browser = await chromium.launch();
+const page = await browser.newPage();
+const errors = [];
+page.on("pageerror", (error) => errors.push(error.message));
+
+const check = (name, condition) => {
+  assert.ok(condition, name);
+  console.log(`  ok   ${name}`);
+};
+
+try {
+  await page.goto(`${base}/`, { waitUntil: "networkidle" });
+  await page.waitForFunction(() => document.querySelector("section.panel strong")?.textContent?.length > 0);
+  check("home title", (await page.title()) === "Bifrost vanilla");
+  check("Go API feeds Alpine", (await page.locator("section.panel strong").first().textContent()).includes("T"));
+  check("boot tag", (await page.locator("#boot").textContent()) === "Turbo + Alpine");
+
+  await page.evaluate(() => { window.__marker = "alive"; });
+  await page.click('a[href="/posts"]');
+  await page.waitForURL("**/posts");
+  check("posts title", (await page.title()).startsWith("Posts"));
+  check("Turbo kept the JS context", (await page.evaluate(() => window.__marker)) === "alive");
+  check("active nav", (await page.locator('a[aria-current="page"]').getAttribute("href")) === "/posts");
+
+  await page.click('a[href="/posts/hello"]');
+  await page.waitForURL("**/posts/hello");
+  check("post title", (await page.title()).startsWith("Hello, vanilla"));
+  check("post params", (await page.locator("h1").textContent()) === "Hello, vanilla");
+
+  await page.goBack();
+  await page.waitForURL("**/posts");
+  await page.goForward();
+  await page.waitForURL("**/posts/hello");
+  check("history", (await page.locator("h1").textContent()) === "Hello, vanilla");
+
+  await page.evaluate(() => window.Turbo.visit("/nope"));
+  await page.waitForFunction(() => document.querySelector("h1")?.textContent === "Not found");
+  check("404 via Turbo", (await page.evaluate(() => window.__marker)) === "alive");
+
+  await page.evaluate(() => window.Turbo.visit("/posts/boom"));
+  await page.waitForFunction(() => document.querySelector("h1")?.textContent === "Posts error");
+  check("nearest error view", (await page.evaluate(() => window.__marker)) === "alive");
+
+  await page.evaluate(() => window.Turbo.visit("/posts/missing"));
+  await page.waitForFunction(() => document.querySelector("h1")?.textContent === "Not found");
+  check("loader not found", (await page.evaluate(() => window.__marker)) === "alive");
+
+  await page.goto(`${base}/`, { waitUntil: "networkidle" });
+  await page.evaluate(() => { window.__marker = "alive"; });
+  await page.click('a[href="/island"]');
+  await page.waitForURL("**/island");
+  check("island full load", (await page.evaluate(() => window.__marker)) === undefined);
+  await page.click("#island-button");
+  check("page.ts island", /^\d\d:\d\d:\d\d$/.test(await page.locator("#island-output").textContent()));
+  check("no page errors", errors.length === 0);
+  console.log("all browser checks passed");
+} finally {
+  await browser.close();
+}

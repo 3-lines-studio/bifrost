@@ -1,0 +1,19 @@
+{{define "head"}}<title>Bifrost vanilla</title>{{end}}
+<h1>Bifrost vanilla</h1>
+<p class="lede">The App Router runs on Go; Turbo and Alpine handle the browser. {{.Props.posts}} posts loaded by Go.</p>
+<div class="cards">
+  <a href="/posts">Posts<small>loaders, nested layout, cache</small></a>
+  <a href="/docs">Docs<small>catch-all and Markdown</small></a>
+  <a href="/about">About<small>a ~ group</small></a>
+  <a href="/island">Island<small>page.ts, Vite and CSS</small></a>
+</div>
+<section class="panel" x-data="clock" x-init="load()">
+  <h2>API + Alpine</h2>
+  <p>Go time: <strong x-text="time"></strong></p>
+  <button type="button" @click="load()" :disabled="busy">Refresh</button>
+</section>
+<section class="panel" x-data="{ count: 0 }">
+  <h2>Alpine state</h2>
+  <p>Count: <strong x-text="count"></strong></p>
+  <button type="button" @click="count++">Increment</button>
+</section>

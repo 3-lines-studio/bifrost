@@ -1,0 +1,19 @@
+{{define "head"}}
+<script defer src="/site.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/@hotwired/turbo@8/dist/turbo.es2017-umd.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
+<link rel="stylesheet" href="/styles.css">
+{{end}}
+<header class="shell">
+  <a class="brand" href="/">bifrost <span class="tag">vanilla</span></a>
+  <nav class="crumbs">
+    <a href="/" data-nav>Home</a>
+    <a href="/posts" data-nav>Posts</a>
+    <a href="/docs" data-nav>Docs</a>
+    <a href="/about" data-nav>About</a>
+    <a href="/island" data-nav data-turbo="false">Island</a>
+  </nav>
+  <span id="boot" class="tag" data-turbo-permanent></span>
+</header>
+<main class="shell">{{.Content}}</main>
+<footer class="shell">Go + html/template + Turbo + Alpine. No React, no hydration.</footer>

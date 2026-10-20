@@ -1,0 +1,9 @@
+{{define "head"}}<title>Posts · Bifrost vanilla</title>{{end}}
+<h1>Posts</h1>
+<p class="lede">A Go loader, a cache header and a nested layout.</p>
+<ul class="cards">
+{{range .Props.posts}}
+  <li><a href="/posts/{{.Slug}}">{{.Title}}<small>{{.Summary}}</small></a></li>
+{{end}}
+</ul>
+<p class="note"><a href="/posts/boom">loader error 503</a> · <a href="/posts/missing">loader not found</a></p>
