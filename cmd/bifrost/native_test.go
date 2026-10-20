@@ -724,6 +724,19 @@ func TestNativeADrawingOfThePageIsFetchedAndPainted(t *testing.T) {
 	}
 }
 
+func TestNativeAFlexItemKeepsItsContent(t *testing.T) {
+	// Measured on the card of an event of picsel: the title asked for flex 1 and
+	// was painted nowhere, because a basis of zero is a height of zero.
+	for _, said := range []string{
+		`if (typeof given.className === "string" && /(?:^|\s)flex-1(?:\s|$)/.test(given.className))`,
+		`{ flexBasis: "auto" }`,
+	} {
+		if !strings.Contains(nativeHostBody, said) {
+			t.Fatalf("a flex item loses its content: %q", said)
+		}
+	}
+}
+
 func TestNativeAPictureThatFadesInIsPainted(t *testing.T) {
 	// Measured on the cards of a profile of picsel: the picture takes off the
 	// class that hid it when the load arrives, and there is no node to take it

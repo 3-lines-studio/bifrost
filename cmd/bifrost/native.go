@@ -5034,6 +5034,14 @@ export function nativeProps(props: unknown, tag?: string): unknown {
   if (given.style !== undefined) {
     given.style = placed(given.style);
   }
+  // A browser keeps the content of a flex item whose basis is zero: its auto
+  // minimum size grows it. The target has no such minimum, and a title that asks
+  // for the room that is left came out with no height at all -- measured on the
+  // card of an event of picsel, "Test" was painted nowhere. The class is what
+  // asks for the room, and the style of the class is not one this shim can edit.
+  if (typeof given.className === "string" && /(?:^|\s)flex-1(?:\s|$)/.test(given.className)) {
+    given.style = given.style === undefined ? { flexBasis: "auto" } : [given.style, { flexBasis: "auto" }];
+  }
   const gap = spaced(given.className);
   if (gap !== undefined) {
     given.style = given.style === undefined ? gap : [given.style, gap];
