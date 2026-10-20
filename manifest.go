@@ -371,7 +371,39 @@ func validateHTMLView(view protocol.BuiltView) error {
 			return fmt.Errorf("html not-found view %q must use .html", view.HTML.NotFound.Path)
 		}
 	}
+	seenComponents := make(map[string]struct{}, len(view.HTML.Components))
+	for _, component := range view.HTML.Components {
+		if !validComponentName(component.Name) {
+			return fmt.Errorf("invalid component name %q", component.Name)
+		}
+		if _, exists := seenComponents[component.Name]; exists {
+			return fmt.Errorf("duplicate component %q", component.Name)
+		}
+		seenComponents[component.Name] = struct{}{}
+		if err := validateTemplateSource(component.HTML); err != nil {
+			return err
+		}
+		if !strings.HasSuffix(component.HTML.Path, ".html") {
+			return fmt.Errorf("component %q must use .html", component.Name)
+		}
+	}
 	return nil
+}
+
+func validComponentName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for index, char := range name {
+		switch {
+		case char >= 'a' && char <= 'z':
+		case char >= '0' && char <= '9':
+		case char == '-' && index > 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func validateTemplateSource(source protocol.TemplateSource) error {

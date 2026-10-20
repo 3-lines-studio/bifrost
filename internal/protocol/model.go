@@ -86,10 +86,17 @@ type BuiltView struct {
 }
 
 type HTMLAssets struct {
-	Page     TemplateSource   `json:"page"`
-	Layouts  []TemplateSource `json:"layouts,omitempty"`
-	Errors   []TemplateSource `json:"errors,omitempty"`
-	NotFound *TemplateSource  `json:"notFound,omitempty"`
+	Page       TemplateSource    `json:"page"`
+	Layouts    []TemplateSource  `json:"layouts,omitempty"`
+	Errors     []TemplateSource  `json:"errors,omitempty"`
+	NotFound   *TemplateSource   `json:"notFound,omitempty"`
+	Components []ComponentSource `json:"components,omitempty"`
+}
+
+type ComponentSource struct {
+	Name string         `json:"name"`
+	HTML TemplateSource `json:"html"`
+	CSS  string         `json:"css,omitempty"`
 }
 
 type TemplateSource struct {

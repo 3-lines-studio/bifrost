@@ -1,0 +1,46 @@
+@scope ([data-bifrost-component="dropdown"]) {
+  :scope {
+    position: relative;
+    display: inline-block;
+  }
+
+  [x-cloak] {
+    display: none;
+  }
+
+  .dropdown__button {
+    font: inherit;
+    padding: 0.5rem 0.8rem;
+    border: 1px solid var(--line, #2a3140);
+    border-radius: 0.4rem;
+    background: #0c1017;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .dropdown__menu {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    left: 0;
+    z-index: 10;
+    min-width: 10rem;
+    padding: 0.35rem;
+    border: 1px solid var(--line, #2a3140);
+    border-radius: 0.45rem;
+    background: #0c1017;
+    box-shadow: 0 12px 30px rgb(0 0 0 / 35%);
+  }
+
+  .dropdown__item {
+    display: block;
+    padding: 0.4rem 0.55rem;
+    border-radius: 0.3rem;
+    color: inherit;
+    text-decoration: none;
+    font-size: 0.9rem;
+  }
+
+  .dropdown__item:hover {
+    background: #1a2230;
+  }
+}

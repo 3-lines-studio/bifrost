@@ -470,6 +470,36 @@ func TestAttachHTMLViewsKeepsClientAssets(t *testing.T) {
 	}
 }
 
+func TestCollectHTMLViewsIncludesComponents(t *testing.T) {
+	root := t.TempDir()
+	for name, source := range map[string]string{
+		"app/page.html":             "<h1>page</h1>",
+		"components/card/card.html": "<h2>{{.Title}}</h2>",
+		"components/card/card.css":  "@scope ([data-bifrost-component=\"card\"]) { :scope { color: red; } }",
+	} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spec := protocol.Spec{Routes: []protocol.RouteSpec{{Pattern: "/", View: "app/page.html", Kind: "server"}}}
+	routeViews := map[string]string{"/": templateViewID(spec.Routes[0])}
+	views, err := collectHTMLViews(root, spec, routeViews)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || views[0].HTML == nil || len(views[0].HTML.Components) != 1 {
+		t.Fatalf("views = %+v", views)
+	}
+	component := views[0].HTML.Components[0]
+	if component.Name != "card" || component.HTML.Path != "components/card/card.html" || !strings.Contains(component.CSS, "color: red") {
+		t.Fatalf("component = %+v", component)
+	}
+}
+
 func TestCollectHTMLViewsIncludesErrorsAndNotFound(t *testing.T) {
 	root := t.TempDir()
 	for name, source := range map[string]string{

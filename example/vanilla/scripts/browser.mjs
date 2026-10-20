@@ -56,6 +56,25 @@ try {
   check("island full load", (await page.evaluate(() => window.__marker)) === undefined);
   await page.click("#island-button");
   check("page.ts island", /^\d\d:\d\d:\d\d$/.test(await page.locator("#island-output").textContent()));
+
+  await page.goto(`${base}/`, { waitUntil: "networkidle" });
+  await page.evaluate(() => { window.__marker = "alive"; });
+  await page.click('a[href="/components-demo"]');
+  await page.waitForURL("**/components-demo");
+  check("components via Turbo", (await page.evaluate(() => window.__marker)) === "alive");
+  const cards = page.locator('div[data-bifrost-component="card"]');
+  check("20 component instances", (await cards.count()) === 20);
+  check("@scope applies", (await cards.first().evaluate((el) => getComputedStyle(el).borderTopWidth)) === "1px");
+  const dropdown = page.locator('div[data-bifrost-component="dropdown"]');
+  const menu = dropdown.locator(".dropdown__menu");
+  check("dropdown starts closed", !(await menu.isVisible()));
+  await dropdown.locator("button").click();
+  await page.waitForTimeout(150);
+  check("dropdown opens", await menu.isVisible());
+  await page.mouse.click(5, 200);
+  await page.waitForTimeout(150);
+  check("dropdown closes outside", !(await menu.isVisible()));
+
   check("no page errors", errors.length === 0);
   console.log("all browser checks passed");
 } finally {

@@ -1,0 +1,10 @@
+{{define "head"}}<title>Components · Bifrost vanilla</title>{{end}}
+<h1>Components</h1>
+<p class="lede">20 cards and a dropdown, rendered by Go with Alpine and <code>@scope</code>. No shadow DOM.</p>
+<div class="component-grid">
+  {{range .Props.items}}{{component "card" .}}{{end}}
+</div>
+<div class="panel">
+  <h2>Dropdown</h2>
+  {{component "dropdown" .Props.menu}}
+</div>

@@ -1,0 +1,10 @@
+<div class="dropdown" x-data="{ open: false }" @click.outside="open = false">
+  <button class="dropdown__button" type="button" @click="open = !open" :aria-expanded="open">
+    {{.Label}}
+  </button>
+  <div class="dropdown__menu" x-show="open" x-cloak x-transition>
+    {{range .Items}}
+      <a class="dropdown__item" href="{{.Href}}">{{.Label}}</a>
+    {{end}}
+  </div>
+</div>

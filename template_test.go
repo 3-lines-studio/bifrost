@@ -83,6 +83,42 @@ func TestTemplateRendererDoesNotCommitOnBodyError(t *testing.T) {
 	}
 }
 
+func TestTemplateRendererRendersComponentsAndCSS(t *testing.T) {
+	renderer, err := newTemplateRenderer(&protocol.HTMLAssets{
+		Page: protocol.TemplateSource{
+			Path:   "app/page.html",
+			Source: `<main>{{component "card" .Props.card}}</main>`,
+		},
+		Components: []protocol.ComponentSource{
+			{
+				Name: "card",
+				HTML: protocol.TemplateSource{
+					Path:   "components/card/card.html",
+					Source: `<h2 class="title">{{.Title}}</h2>`,
+				},
+				CSS: `@scope ([data-bifrost-component="card"]) { :scope { color: red; } }`,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	props, err := json.Marshal(map[string]any{"card": map[string]any{"Title": "Hola"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &templateTestSink{}
+	if err := renderer.Render(context.Background(), renderRequest{Props: props}, sink); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := sink.body.String(), `<main><div data-bifrost-component="card"><h2 class="title">Hola</h2></div></main>`; got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+	if !strings.Contains(sink.head.String(), `<style data-bifrost-components>`) || !strings.Contains(sink.head.String(), `color: red`) {
+		t.Fatalf("head = %q", sink.head.String())
+	}
+}
+
 func TestTemplateRendererExposesParamsAndEscapesProps(t *testing.T) {
 	renderer, err := newTemplateRenderer(&protocol.HTMLAssets{
 		Page: protocol.TemplateSource{

@@ -513,7 +513,50 @@ func attachHTMLViews(views []protocol.BuiltView, htmlViews []protocol.BuiltView)
 	return views
 }
 
+var componentNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+func collectComponents(sourceRoot string) ([]protocol.ComponentSource, error) {
+	root := filepath.Join(sourceRoot, "components")
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	components := make([]protocol.ComponentSource, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !componentNamePattern.MatchString(name) {
+			return nil, fmt.Errorf("bifrost: invalid component name %q", name)
+		}
+		html, err := readTemplateSource(sourceRoot, filepath.ToSlash(filepath.Join("components", name, name+".html")))
+		if err != nil {
+			return nil, err
+		}
+		css := ""
+		cssPath := filepath.Join(root, name, name+".css")
+		data, err := os.ReadFile(cssPath)
+		switch {
+		case err == nil:
+			css = string(data)
+		case !errors.Is(err, os.ErrNotExist):
+			return nil, err
+		}
+		components = append(components, protocol.ComponentSource{Name: name, HTML: html, CSS: css})
+	}
+	slices.SortFunc(components, func(a, b protocol.ComponentSource) int { return strings.Compare(a.Name, b.Name) })
+	return components, nil
+}
+
 func collectHTMLViews(sourceRoot string, spec protocol.Spec, routeViews map[string]string) ([]protocol.BuiltView, error) {
+	components, err := collectComponents(sourceRoot)
+	if err != nil {
+		return nil, err
+	}
 	byID := make(map[string]protocol.BuiltView)
 	for _, route := range spec.Routes {
 		if !htmlRoute(route) {
@@ -555,7 +598,7 @@ func collectHTMLViews(sourceRoot string, spec protocol.Spec, routeViews map[stri
 			ID:     id,
 			Source: route.View,
 			Mode:   "html",
-			HTML:   &protocol.HTMLAssets{Page: page, Layouts: layouts, Errors: errors, NotFound: notFound},
+			HTML:   &protocol.HTMLAssets{Page: page, Layouts: layouts, Errors: errors, NotFound: notFound, Components: components},
 		}
 	}
 	ids := make([]string, 0, len(byID))

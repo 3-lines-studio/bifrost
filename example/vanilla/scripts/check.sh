@@ -54,6 +54,23 @@ expect_header "root middleware" "X-Vanilla" "1" "/"
 expect_status "about group" 200 "/about"
 expect_body "about group body" "marketing~/about" "/about"
 expect_status "island" 200 "/island"
+
+echo "components"
+expect_status "components page" 200 "/components-demo"
+cards=$(curl -sS --max-time 10 "$base/components-demo" | grep -o '<div data-bifrost-component="card">' | wc -l | tr -d ' ')
+if [[ "$cards" == "20" ]]; then
+  ok "20 component instances"
+else
+  bad "20 component instances" "got $cards"
+fi
+styles=$(curl -sS --max-time 10 "$base/components-demo" | grep -o '<style data-bifrost-components>' | wc -l | tr -d ' ')
+if [[ "$styles" == "1" ]]; then
+  ok "component css once"
+else
+  bad "component css once" "got $styles"
+fi
+expect_body "component scope" '@scope ([data-bifrost-component="card"])' "/components-demo"
+expect_body "component dropdown" 'data-bifrost-component="dropdown"' "/components-demo"
 css=$(curl -sS --max-time 10 "$base/" | grep -oE '/styles\.[a-f0-9]{12}\.css' | head -1 || true)
 if [[ -n "$css" ]]; then
   ok "hashed css"

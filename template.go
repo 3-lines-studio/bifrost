@@ -14,10 +14,12 @@ import (
 const bodyChunkSize = 32 << 10
 
 type templateRenderer struct {
-	page     *template.Template
-	layouts  []*template.Template
-	errors   []*template.Template
-	notFound *template.Template
+	page         *template.Template
+	layouts      []*template.Template
+	errors       []*template.Template
+	notFound     *template.Template
+	components   map[string]*template.Template
+	componentCSS []string
 }
 
 type templateData struct {
@@ -32,15 +34,29 @@ func newTemplateRenderer(assets *protocol.HTMLAssets, funcs ...template.FuncMap)
 	if assets == nil {
 		return nil, errors.New("bifrost: html view has no templates")
 	}
-	var funcMap template.FuncMap
+	components := make(map[string]*template.Template)
+	funcMap := template.FuncMap{}
 	if len(funcs) > 0 {
-		funcMap = funcs[0]
+		for name, function := range funcs[0] {
+			funcMap[name] = function
+		}
+	}
+	funcMap["component"] = func(name string, data any) (template.HTML, error) {
+		component, exists := components[name]
+		if !exists {
+			return "", fmt.Errorf("bifrost: component %q not found", name)
+		}
+		var body bytes.Buffer
+		if err := component.Execute(&body, data); err != nil {
+			return "", err
+		}
+		return template.HTML(`<div data-bifrost-component="` + template.HTMLEscapeString(name) + `">` + body.String() + `</div>`), nil
 	}
 	page, err := parseTemplate(assets.Page.Path, assets.Page.Source, funcMap)
 	if err != nil {
 		return nil, err
 	}
-	renderer := &templateRenderer{page: page}
+	renderer := &templateRenderer{page: page, components: components}
 	for _, layout := range assets.Layouts {
 		parsed, err := parseTemplate(layout.Path, layout.Source, funcMap)
 		if err != nil {
@@ -61,6 +77,16 @@ func newTemplateRenderer(assets *protocol.HTMLAssets, funcs ...template.FuncMap)
 			return nil, err
 		}
 		renderer.notFound = parsed
+	}
+	for _, component := range assets.Components {
+		parsed, err := parseTemplate(component.HTML.Path, component.HTML.Source, funcMap)
+		if err != nil {
+			return nil, err
+		}
+		components[component.Name] = parsed
+		if component.CSS != "" {
+			renderer.componentCSS = append(renderer.componentCSS, component.CSS)
+		}
 	}
 	return renderer, nil
 }
@@ -122,6 +148,13 @@ func (r *templateRenderer) Render(ctx context.Context, request renderRequest, si
 		if err := view.ExecuteTemplate(&head, "head", data); err != nil {
 			return err
 		}
+	}
+	if len(r.componentCSS) > 0 {
+		head.WriteString(`<style data-bifrost-components>`)
+		for _, css := range r.componentCSS {
+			head.WriteString(css)
+		}
+		head.WriteString(`</style>`)
 	}
 
 	var body bytes.Buffer

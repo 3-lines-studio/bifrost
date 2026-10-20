@@ -111,6 +111,16 @@ The shell injects the props JSON and the built module; do not add your own entry
 
 A build with only `page.html` routes and no `page.js` skips Bun and Vite. `bifrost dev` works for pure HTML apps too: it rebuilds and restarts the Go app on `.html`, Go, and `public/` changes, without Vite.
 
+### Components
+
+A `components/<name>/` directory with `<name>.html` and optional `<name>.css` is available as `{{component "<name>" .}}`:
+
+```html
+{{component "card" .Props.card}}
+```
+
+Components render as normal DOM inside `<div data-bifrost-component="<name>">`; the value passed at the call becomes the dot. Component CSS is injected once per page; use `@scope` or prefixed classes. Alpine works inside components; there is no shadow DOM. `@scope` needs a modern browser, so keep prefixed classes or Tailwind as a fallback.
+
 ### Turbo and Alpine
 
 Turbo Drive adds client navigation, history, scroll and a progress bar to a template app without a client entry:

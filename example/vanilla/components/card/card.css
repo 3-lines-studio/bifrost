@@ -1,0 +1,20 @@
+@scope ([data-bifrost-component="card"]) {
+  :scope {
+    display: block;
+    border: 1px solid var(--line, #2a3140);
+    border-radius: 0.6rem;
+    padding: 1rem;
+    background: #0e141d;
+  }
+
+  .card__title {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+  }
+
+  .card__summary {
+    margin: 0;
+    color: var(--dim, #8b96a8);
+    font-size: 0.9rem;
+  }
+}

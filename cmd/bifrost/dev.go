@@ -453,7 +453,14 @@ func templateDevelopmentEnv() []string {
 }
 
 func publicTreeStamp(projectRoot string) (string, error) {
-	root := filepath.Join(projectRoot, "public")
+	return treeStamp(filepath.Join(projectRoot, "public"))
+}
+
+func componentTreeStamp(projectRoot string) (string, error) {
+	return treeStamp(filepath.Join(projectRoot, "components"))
+}
+
+func treeStamp(root string) (string, error) {
 	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
 		return "", nil
 	}
@@ -505,7 +512,11 @@ func developmentStamp(dir, routeRoot string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return sources + "\n" + routes + "\n" + public, nil
+	components, err := componentTreeStamp(dir)
+	if err != nil {
+		return "", err
+	}
+	return sources + "\n" + routes + "\n" + public + "\n" + components, nil
 }
 
 func routeTreeStamp(routeRoot string) (string, error) {
