@@ -1168,3 +1168,17 @@ func TestAppRouterRootsGoPage(t *testing.T) {
 		t.Fatalf("roots = %q, %q, %t", project, routes, ok)
 	}
 }
+
+func TestPrivateDirectoryRejectsGoPage(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "_private", "page.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := discoverRoutes(root); err == nil || !strings.Contains(err.Error(), "leading _") {
+		t.Fatalf("discoverRoutes error = %v", err)
+	}
+}

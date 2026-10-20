@@ -379,7 +379,7 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 		}
 		for _, method := range directory.HTTPMethods {
 			if method == "Get" || method == "Head" {
-				return appRouter{}, fmt.Errorf("bifrost: %s in %s/route.go conflicts with page.tsx", method, directory.Directory)
+				return appRouter{}, fmt.Errorf("bifrost: %s in %s/route.go conflicts with the page", method, directory.Directory)
 			}
 		}
 	}
@@ -1106,7 +1106,7 @@ func privateDirectory(directory string) error {
 		if walkErr != nil || offender != "" {
 			return walkErr
 		}
-		if !entry.IsDir() && (entry.Name() == "page.tsx" || entry.Name() == "route.go") {
+		if !entry.IsDir() && (entry.Name() == "page.tsx" || entry.Name() == "page.go" || entry.Name() == "route.go") {
 			offender = filePath
 		}
 		return nil
