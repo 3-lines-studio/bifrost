@@ -3588,10 +3588,10 @@ function useElementRef(ref: unknown) {
 
 const nativeHostBody = `
 // Blocks. They hold other blocks, which a View can.
-const BOXES = ["address", "article", "aside", "blockquote", "caption", "dd", "details", "dialog", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "header", "legend", "li", "main", "nav", "ol", "output", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul"];
+const BOXES = ["address", "article", "aside", "blockquote", "caption", "dd", "details", "dialog", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "header", "legend", "li", "main", "nav", "ol", "output", "p", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul"];
 
 // Everything whose content is text.
-const TEXTS = ["abbr", "b", "br", "cite", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6", "i", "label", "mark", "p", "pre", "q", "s", "small", "span", "strong", "time", "u"];
+const TEXTS = ["abbr", "b", "br", "cite", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6", "i", "label", "mark", "pre", "q", "s", "small", "span", "strong", "time", "u"];
 
 // Sheet links, metadata and scripts have nothing to paint.
 const HIDDEN = ["base", "desc", "head", "link", "meta", "noscript", "script", "style", "title"];

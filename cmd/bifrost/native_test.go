@@ -724,6 +724,18 @@ func TestNativeADrawingOfThePageIsFetchedAndPainted(t *testing.T) {
 	}
 }
 
+func TestNativeAParagraphIsABlock(t *testing.T) {
+	// Measured on the body of a post of the app of the case: every paragraph came
+	// out as one run of text, because a p was painted inline and a browser paints
+	// it as a block with its own margins.
+	if !strings.Contains(nativeHostBody, `"p", "section"`) {
+		t.Fatal("a paragraph is not a block")
+	}
+	if strings.Contains(nativeHostBody, `"mark", "p", "pre"`) {
+		t.Fatal("a paragraph is painted inline")
+	}
+}
+
 func TestNativeLeavesOutAPlaceThatIsNotANumber(t *testing.T) {
 	// A page that places a popup works out where it goes by measuring the page,
 	// and what it measured travels as a style of a browser: a box fixed to the
