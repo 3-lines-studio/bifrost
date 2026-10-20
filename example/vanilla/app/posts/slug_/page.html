@@ -1,0 +1,8 @@
+{{define "head"}}<title>{{.Props.post.Title}} · Bifrost vanilla</title>{{end}}
+<article>
+  <h1>{{.Props.post.Title}}</h1>
+  <p class="lede">{{.Props.post.Summary}}</p>
+  <p>{{.Props.post.Body}}</p>
+  <p class="tag">slug: {{.Params.slug}}</p>
+</article>
+<p><a href="/posts">All posts</a></p>

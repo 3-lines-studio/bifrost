@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -55,6 +56,7 @@ type runtimeState struct {
 	serverPatterns map[string]struct{}
 	files          map[string]protocol.FileRef
 	public         map[string]protocol.FileRef
+	hashedPublic   map[string]struct{}
 	devProxy       http.Handler
 }
 
@@ -69,6 +71,7 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 	if app == nil || manifest == nil {
 		return nil, errors.New("bifrost: incomplete runtime input")
 	}
+	public, hashedPublic, publicAssets := publicAssetIndex(manifest.public)
 	state := &runtimeState{
 		assets:         assets,
 		manifest:       manifest,
@@ -76,7 +79,8 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 		handlers:       make(map[string]http.Handler, len(app.routes)),
 		serverPatterns: make(map[string]struct{}),
 		files:          make(map[string]protocol.FileRef),
-		public:         manifest.public,
+		public:         public,
+		hashedPublic:   hashedPublic,
 	}
 	maps.Copy(state.files, manifest.clientFiles)
 	for _, route := range manifest.routes {
@@ -105,7 +109,7 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 			if declaration.kind != routeServer {
 				return nil, fmt.Errorf("bifrost: route %q with an html view must be a server route", pattern)
 			}
-			templates, err := newTemplateRenderer(view.HTML)
+			templates, err := newTemplateRenderer(view.HTML, template.FuncMap{"asset": publicAssetFunc(publicAssets)})
 			if err != nil {
 				return nil, fmt.Errorf("bifrost: compile route %q templates: %w", pattern, err)
 			}
@@ -532,9 +536,45 @@ func (h *clientPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 }
 
 type publicAssetHandler struct {
-	assets  fs.FS
-	file    protocol.FileRef
-	headers AssetHeaderHook
+	assets    fs.FS
+	file      protocol.FileRef
+	headers   AssetHeaderHook
+	immutable bool
+}
+
+func publicAssetIndex(assets map[string]protocol.FileRef) (map[string]protocol.FileRef, map[string]struct{}, map[string]string) {
+	public := make(map[string]protocol.FileRef, len(assets)*2)
+	hashed := make(map[string]struct{}, len(assets))
+	lookup := make(map[string]string, len(assets)*2)
+	for url, file := range assets {
+		public[url] = file
+		hashedURL := hashedPublicURL(url, file)
+		public[hashedURL] = file
+		hashed[hashedURL] = struct{}{}
+		lookup[url] = hashedURL
+		lookup[strings.TrimPrefix(url, "/")] = hashedURL
+	}
+	return public, hashed, lookup
+}
+
+func hashedPublicURL(url string, file protocol.FileRef) string {
+	extension := path.Ext(url)
+	hash := file.Hash
+	if len(hash) > 12 {
+		hash = hash[:12]
+	}
+	return strings.TrimSuffix(url, extension) + "." + hash + extension
+}
+
+func publicAssetFunc(lookup map[string]string) func(string) (string, error) {
+	return func(name string) (string, error) {
+		normalized := "/" + strings.TrimPrefix(name, "/")
+		hashed, exists := lookup[normalized]
+		if !exists {
+			return "", fmt.Errorf("bifrost: public asset %q not found", name)
+		}
+		return hashed, nil
+	}
 }
 
 func (h *publicAssetHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
@@ -546,7 +586,11 @@ func (h *publicAssetHandler) ServeHTTP(w http.ResponseWriter, request *http.Requ
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	serveArtifact(w, request, h.assets, h.file, contentType, "public, max-age=3600", h.headers, true)
+	cacheControl := "public, max-age=3600"
+	if h.immutable {
+		cacheControl = "public, max-age=31536000, immutable"
+	}
+	serveArtifact(w, request, h.assets, h.file, contentType, cacheControl, h.headers, true)
 }
 
 type assetHandler struct {

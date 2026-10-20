@@ -28,31 +28,35 @@ type templateData struct {
 	Content      template.HTML
 }
 
-func newTemplateRenderer(assets *protocol.HTMLAssets) (*templateRenderer, error) {
+func newTemplateRenderer(assets *protocol.HTMLAssets, funcs ...template.FuncMap) (*templateRenderer, error) {
 	if assets == nil {
 		return nil, errors.New("bifrost: html view has no templates")
 	}
-	page, err := parseTemplate(assets.Page.Path, assets.Page.Source)
+	var funcMap template.FuncMap
+	if len(funcs) > 0 {
+		funcMap = funcs[0]
+	}
+	page, err := parseTemplate(assets.Page.Path, assets.Page.Source, funcMap)
 	if err != nil {
 		return nil, err
 	}
 	renderer := &templateRenderer{page: page}
 	for _, layout := range assets.Layouts {
-		parsed, err := parseTemplate(layout.Path, layout.Source)
+		parsed, err := parseTemplate(layout.Path, layout.Source, funcMap)
 		if err != nil {
 			return nil, err
 		}
 		renderer.layouts = append(renderer.layouts, parsed)
 	}
 	for _, source := range assets.Errors {
-		parsed, err := parseTemplate(source.Path, source.Source)
+		parsed, err := parseTemplate(source.Path, source.Source, funcMap)
 		if err != nil {
 			return nil, err
 		}
 		renderer.errors = append(renderer.errors, parsed)
 	}
 	if assets.NotFound != nil {
-		parsed, err := parseTemplate(assets.NotFound.Path, assets.NotFound.Source)
+		parsed, err := parseTemplate(assets.NotFound.Path, assets.NotFound.Source, funcMap)
 		if err != nil {
 			return nil, err
 		}
@@ -61,8 +65,12 @@ func newTemplateRenderer(assets *protocol.HTMLAssets) (*templateRenderer, error)
 	return renderer, nil
 }
 
-func parseTemplate(name, source string) (*template.Template, error) {
-	parsed, err := template.New(name).Parse(source)
+func parseTemplate(name, source string, funcs template.FuncMap) (*template.Template, error) {
+	base := template.New(name)
+	if funcs != nil {
+		base = base.Funcs(funcs)
+	}
+	parsed, err := base.Parse(source)
 	if err != nil {
 		return nil, fmt.Errorf("bifrost: parse %s: %w", name, err)
 	}

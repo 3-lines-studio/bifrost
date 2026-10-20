@@ -111,6 +111,17 @@ The shell injects the props JSON and the built module; do not add your own entry
 
 A build with only `page.html` routes and no `page.js` skips Bun and Vite. `bifrost dev` works for pure HTML apps too: it rebuilds and restarts the Go app on `.html`, Go, and `public/` changes, without Vite.
 
+### Turbo and Alpine
+
+Turbo Drive adds client navigation, history, scroll and a progress bar to a template app without a client entry:
+
+```html
+<script defer src="https://cdn.jsdelivr.net/npm/@hotwired/turbo@8/dist/turbo.es2017-umd.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+```
+
+Keep global setup in the layout head and guard it so it runs once; use `turbo:load` for work that must run after each visit. Register `Alpine.data` on `alpine:init` before Alpine starts. `example/vanilla` is a complete app with Turbo, Alpine, a loader error, not-found, cache, Markdown, an API route and a `page.ts` island.
+
 ## Route handlers
 
 ```go
@@ -185,3 +196,11 @@ export function Layout({ children }: { children: ReactNode }) {
 ```
 
 `bifrost init` sets up Tailwind in `app/style.css`; Vite configuration lives in `vite.config.ts`.
+
+Go templates reference public files through `asset`, which returns a content-hashed URL:
+
+```html
+<link rel="stylesheet" href="{{asset "/styles.css"}}">
+```
+
+Hashed URLs are served with `Cache-Control: public, max-age=31536000, immutable`; the original `/styles.css` still works with a one-hour cache.
