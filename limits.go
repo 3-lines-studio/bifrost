@@ -10,8 +10,6 @@ const (
 	maxWireFrameBytes       = 16 << 20
 )
 
-// Limits bounds buffered, attacker-influenced render data. The streamed total
-// body size is not capped.
 type Limits struct {
 	MaxPropsBytes    int
 	MaxHeadBytes     int

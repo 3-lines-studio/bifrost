@@ -2,14 +2,12 @@ package bifrost
 
 import "slices"
 
-// RouteInfo is immutable route diagnostic data.
 type RouteInfo struct {
 	Pattern string
 	View    string
 	Kind    string
 }
 
-// Diagnostics describes the compiled app without exposing internal state.
 type Diagnostics struct {
 	SpecHash   string
 	Routes     []RouteInfo
@@ -17,7 +15,6 @@ type Diagnostics struct {
 	Production bool
 }
 
-// Diagnostics returns a snapshot suitable for a development route table.
 func (a *App) Diagnostics() Diagnostics {
 	if a == nil {
 		return Diagnostics{}

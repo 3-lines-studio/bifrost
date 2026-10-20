@@ -7,44 +7,35 @@ import (
 	"time"
 )
 
-// AppPlugin adds server routes, HTTP middleware, and runtime hooks during app
-// construction. Frontend plugins belong in vite.config.ts.
 type AppPlugin interface {
 	Name() string
 	Register(*AppRegistry) error
 }
 
-// Middleware is standard Go HTTP middleware.
 type Middleware func(http.Handler) http.Handler
 
-// ErrorHandler handles an error before Bifrost writes a response.
 type ErrorHandler func(http.ResponseWriter, *http.Request, error)
 
-// AssetHeaderHook may add or replace headers for built and public assets.
 type AssetHeaderHook func(http.Header, bool)
 
-// LoadEvent reports one completed loader call.
 type LoadEvent struct {
 	Pattern  string
 	Duration time.Duration
 	Err      error
 }
 
-// QueueEvent reports one renderer admission and queue wait.
 type QueueEvent struct {
 	Pattern string
 	Wait    time.Duration
 	Err     error
 }
 
-// RenderEvent reports one completed renderer call.
 type RenderEvent struct {
 	Pattern  string
 	Duration time.Duration
 	Err      error
 }
 
-// ResponseEvent reports one completed page response.
 type ResponseEvent struct {
 	Pattern  string
 	Status   int
@@ -53,17 +44,12 @@ type ResponseEvent struct {
 	Err      error
 }
 
-// LoadHook observes completed loader calls. It must not mutate request state.
 type LoadHook func(context.Context, LoadEvent)
 
-// QueueHook observes renderer admission and queue outcomes.
 type QueueHook func(context.Context, QueueEvent)
 
-// RenderHook observes completed renderer calls. It must not mutate render
-// state.
 type RenderHook func(context.Context, RenderEvent)
 
-// ResponseHook observes completed page responses.
 type ResponseHook func(context.Context, ResponseEvent)
 
 type registeredHooks struct {
@@ -81,8 +67,6 @@ type registryState struct {
 	hooks  registeredHooks
 }
 
-// AppRegistry contains typed server extension points. An AppRegistry is valid
-// only during AppPlugin.Register.
 type AppRegistry struct {
 	pluginName string
 	sealed     bool
@@ -98,8 +82,6 @@ func (r *AppRegistry) ready() error {
 	return nil
 }
 
-// AddRoutes adds normal Bifrost routes. They receive the same validation as
-// routes declared in Config.
 func (r *AppRegistry) AddRoutes(routes ...Route) error {
 	if err := r.ready(); err != nil {
 		return err
@@ -108,7 +90,6 @@ func (r *AppRegistry) AddRoutes(routes ...Route) error {
 	return nil
 }
 
-// Use appends standard HTTP middleware.
 func (r *AppRegistry) Use(middleware Middleware) error {
 	if err := r.ready(); err != nil {
 		return err
@@ -120,7 +101,6 @@ func (r *AppRegistry) Use(middleware Middleware) error {
 	return nil
 }
 
-// HandleErrors installs the app error handler. Only one plugin may install it.
 func (r *AppRegistry) HandleErrors(handler ErrorHandler) error {
 	if err := r.ready(); err != nil {
 		return err
@@ -135,8 +115,6 @@ func (r *AppRegistry) HandleErrors(handler ErrorHandler) error {
 	return nil
 }
 
-// AssetHeaders installs an asset response header hook. The bool argument is
-// true for a public/ file and false for a hashed build artifact.
 func (r *AppRegistry) AssetHeaders(hook AssetHeaderHook) error {
 	if err := r.ready(); err != nil {
 		return err
@@ -151,7 +129,6 @@ func (r *AppRegistry) AssetHeaders(hook AssetHeaderHook) error {
 	return nil
 }
 
-// OnLoad registers a typed loader observation hook.
 func (r *AppRegistry) OnLoad(hook LoadHook) error {
 	if err := r.ready(); err != nil {
 		return err
@@ -163,7 +140,6 @@ func (r *AppRegistry) OnLoad(hook LoadHook) error {
 	return nil
 }
 
-// OnQueue registers a typed renderer queue observation hook.
 func (r *AppRegistry) OnQueue(hook QueueHook) error {
 	if err := r.ready(); err != nil {
 		return err
@@ -175,7 +151,6 @@ func (r *AppRegistry) OnQueue(hook QueueHook) error {
 	return nil
 }
 
-// OnRender registers a typed renderer observation hook.
 func (r *AppRegistry) OnRender(hook RenderHook) error {
 	if err := r.ready(); err != nil {
 		return err
@@ -187,7 +162,6 @@ func (r *AppRegistry) OnRender(hook RenderHook) error {
 	return nil
 }
 
-// OnResponse registers a typed response observation hook.
 func (r *AppRegistry) OnResponse(hook ResponseHook) error {
 	if err := r.ready(); err != nil {
 		return err

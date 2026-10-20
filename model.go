@@ -18,33 +18,20 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/protocol"
 )
 
-// Config is the complete input to New. Its slices are copied during app
-// construction.
 type Config struct {
-	// SourceRoot is the directory against which frontend view paths resolve. An
-	// empty value means the current directory.
 	SourceRoot string
 	Routes     []Route
 	AppPlugins []AppPlugin
 
-	// Assets contains a production manifest and its referenced files. When it
-	// is nil, New creates a declaration-only app for build and development
-	// phases.
 	Assets fs.FS
 
-	// RenderConcurrency is the number of isolated production renderer processes.
-	// Each process handles one render at a time. Zero uses two processes. Development
-	// always uses one process because it owns one Vite module graph.
 	RenderConcurrency int
-	// RenderQueue bounds requests waiting for renderer capacity. Zero uses 64.
-	RenderQueue int
+	RenderQueue       int
 
 	Limits Limits
 	Logger *slog.Logger
 }
 
-// App is an immutable, validated application model. Runtime services are added
-// to this type after model compilation succeeds.
 type App struct {
 	sourceRoot string
 	routes     []Route
@@ -57,9 +44,6 @@ type App struct {
 	logger     *slog.Logger
 }
 
-// New validates declarations, runs plugin registration, and starts the
-// production runtime. Build phases may omit Assets; normal applications may
-// not.
 func New(config Config) (*App, error) {
 	app, err := newApp(config)
 	if err != nil {
@@ -155,8 +139,6 @@ func newApp(config Config) (*App, error) {
 	return app, nil
 }
 
-// MustNew is New with panic-on-error behavior for programs that treat invalid
-// app declarations as programmer errors.
 func MustNew(config Config) *App {
 	app, err := New(config)
 	if err != nil {

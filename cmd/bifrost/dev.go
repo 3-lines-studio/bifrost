@@ -118,9 +118,6 @@ func runDev(args []string) error {
 	var buildOutput string
 	devDir := filepath.Join(socketDir, "dev")
 
-	// reload reads the route tree again and regenerates the views from it. What
-	// the views hold is a path to each page, and a page that moved is a view that
-	// points at nothing.
 	reload := func(ctx context.Context) error {
 		next, err := prepareAppRouter(ctx, projectRoot, routeRoot, 0, 0)
 		if err != nil {
@@ -237,12 +234,6 @@ func runDev(args []string) error {
 		if err := ensureBridge(); err != nil {
 			return err
 		}
-		// The new binary is built next to the old one, and the old one is only
-		// stopped once the new one is there. Measured, the other order leaves the
-		// port with nothing behind it: a Go file saved mid-edit builds to an error,
-		// the app was already killed, and the development server answers nothing
-		// until the next successful rebuild. A binary that is being executed cannot
-		// be written over either, so each generation gets a path of its own.
 		generation++
 		nextBinary := childBinaryPath(socketDir, generation)
 		build := exec.Command("go", "build", "-o", nextBinary, packagePath)
@@ -296,12 +287,6 @@ func runDev(args []string) error {
 				continue
 			}
 			last = current
-			// The views are generated from the route tree, and a route that was added
-			// or removed is a different tree: the views already on disk point at files
-			// that are not there any more, and the build that reads them fails for good
-			// because nothing regenerates them. Measured: a deleted route left the
-			// server serving a view of it, and every later rebuild failed with
-			// "Could not resolve .../app/probe/page.tsx" until the process was killed.
 			if isAppRouter {
 				if err := reload(ctx); err != nil {
 					fmt.Fprintln(os.Stderr, "bifrost: reload routes:", err)
@@ -315,18 +300,10 @@ func runDev(args []string) error {
 	}
 }
 
-// childBinaryPath names one generation of the development binary. The previous
-// one is still executing while the next one is built, and a file a process is
-// running from cannot be written over.
 func childBinaryPath(socketDir string, generation int) string {
 	return filepath.Join(socketDir, fmt.Sprintf("app-%d", generation))
 }
 
-// developmentStamp is everything that makes the generated app different: the Go
-// sources it is built from, and *which* files the route tree has. What is inside
-// a page is not here on purpose -- a page is a module of the frontend and Vite
-// hands the new one to the browser without a rebuild -- but a page that appears
-// or disappears is a route, and a route is compiled in.
 func developmentStamp(dir, routeRoot string) (string, error) {
 	sources, err := goTreeStamp(dir)
 	if err != nil {
@@ -339,11 +316,6 @@ func developmentStamp(dir, routeRoot string) (string, error) {
 	return sources + "\n" + routes, nil
 }
 
-// routeTreeStamp names the files of the route tree, sorted so that the order a
-// directory happens to be read in is not a change. Measured: with only the Go
-// sources watched, `app/tempmedicion/page.tsx` was created and the route never
-// existed -- no rebuild, and a 404 -- until the server was restarted. A private
-// directory is left out the way the router leaves it out.
 func routeTreeStamp(routeRoot string) (string, error) {
 	absolute, err := filepath.Abs(routeRoot)
 	if err != nil {
@@ -380,12 +352,6 @@ func routeTreeStamp(routeRoot string) (string, error) {
 	return strings.Join(names, "\n"), nil
 }
 
-// claimDevelopmentServer takes the lock of a directory's development server, or
-// says which process holds it. The lock is a file whose only content is the pid
-// of the run that took it: measured, the message that came out of a taken lock
-// was "already running for this directory", which is the one thing the reader
-// already knew, and a run whose app had to be killed by hand left a lock with
-// nothing in it to find the process by.
 func claimDevelopmentServer(base, name, dir string) (*os.File, error) {
 	path := filepath.Join(base, name+".lock")
 	lock, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
@@ -405,7 +371,6 @@ func claimDevelopmentServer(base, name, dir string) (*os.File, error) {
 	return lock, nil
 }
 
-// heldBy reads the pid a lock file names, or nothing when it names none.
 func heldBy(path string) string {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -414,8 +379,6 @@ func heldBy(path string) string {
 	return strings.TrimSpace(string(content))
 }
 
-// requireViteInstalled fails early with an actionable message when Vite is
-// missing from node_modules at dir or any of its parents.
 func pruneStaleDevelopmentFiles(base, current string) {
 	entries, err := os.ReadDir(base)
 	if err != nil {
@@ -531,8 +494,6 @@ func bridgeHealthy(socket string) bool {
 	return response.StatusCode == http.StatusOK
 }
 
-// generatedEmbedSource is the Go file bifrost writes next to an app whose
-// package is the app itself, to embed its build.
 const generatedEmbedSource = "zz_bifrost_gen.go"
 
 func goTreeStamp(root string) (string, error) {
@@ -557,11 +518,6 @@ func goTreeStamp(root string) (string, error) {
 		}
 		name := entry.Name()
 		if name == generatedEmbedSource {
-			// What bifrost writes to embed the build of the app. It is rewritten at the
-			// start and at the end of every build, so watching it makes the build that
-			// just happened look like a change somebody made. Measured: a Go file saved
-			// mid-edit left the server rebuilding itself two and a half times a second,
-			// each one a go run of the whole app, until the file compiled again.
 			return nil
 		}
 		if filepath.Ext(name) != ".go" && name != "go.mod" && name != "go.sum" && name != "package.json" && name != "bun.lock" {

@@ -155,9 +155,6 @@ func TestDataKeepsRedirects(t *testing.T) {
 }
 
 func TestDataTellsTheClientHowDeepTheErrorViewsGo(t *testing.T) {
-	// A page can throw while it renders, and a client that renders the view
-	// itself is the one that has to fall into error.tsx. Which one it lands in
-	// is a number the server counts, so the answer has to travel with the props.
 	render := &fakeRenderer{render: func(_ context.Context, _ renderRequest, _ renderSink) error {
 		return errors.New("the renderer must not run for a data request")
 	}}

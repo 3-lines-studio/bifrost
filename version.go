@@ -4,9 +4,6 @@ import "runtime/debug"
 
 const modulePath = "github.com/3-lines-studio/bifrost"
 
-// Version identifies the Bifrost build tool in generated manifests. Release
-// binaries derive it from Go module build information. It remains mutable so a
-// release pipeline can set it with -ldflags when needed.
 var Version = detectedVersion()
 
 func detectedVersion() string {

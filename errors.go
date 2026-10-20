@@ -14,7 +14,6 @@ type redirectError struct {
 
 func (e redirectError) Error() string { return fmt.Sprintf("redirect to %s", e.url) }
 
-// Redirect returns a loader error that sends an HTTP redirect.
 func Redirect(url string, statuses ...int) error {
 	if url == "" {
 		return errors.New("bifrost: redirect URL is empty")
@@ -46,7 +45,6 @@ func (e notFoundError) Error() string {
 
 func (e notFoundError) Unwrap() error { return e.cause }
 
-// NotFound returns a loader error that sends a 404 response.
 func NotFound(causes ...error) error {
 	if len(causes) > 1 {
 		return errors.New("bifrost: not found accepts at most one cause")
