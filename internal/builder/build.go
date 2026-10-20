@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -559,16 +560,54 @@ func buildFrontend(ctx context.Context, describe protocol.DescribeResult, output
 	command.Stdin = bytes.NewReader(data)
 	command.Stdout = os.Stdout
 	said := new(bytes.Buffer)
-	command.Stderr = io.MultiWriter(os.Stderr, said)
+	command.Stderr = said
 	command.Env = append(os.Environ(), "BIFROST=1", "BIFROST_BUILD=1")
 	if err := command.Run(); err != nil {
 		return frontendBuildError(command, err, said.String())
 	}
+	if log := frontendWarnings(said.String()); log != "" {
+		fmt.Fprintln(os.Stderr, log)
+	}
 	return nil
 }
 
+var ansiEscape = regexp.MustCompile("\x1b\\[[0-9;?]*[a-zA-Z]")
+
+func cleanFrontendLog(text string) string {
+	text = ansiEscape.ReplaceAllString(text, "")
+	lines := strings.Split(text, "\n")
+	start := 0
+	for index, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "error:") {
+			start = index
+			break
+		}
+	}
+	kept := make([]string, 0, len(lines)-start)
+	for _, line := range lines[start:] {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "at ") || strings.HasPrefix(trimmed, "Bun v") {
+			continue
+		}
+		kept = append(kept, strings.TrimRight(line, "\r"))
+	}
+	return strings.TrimRight(strings.Join(kept, "\n"), "\n")
+}
+
+func frontendWarnings(text string) string {
+	blocks := strings.Split(cleanFrontendLog(text), "\n\n")
+	kept := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		if strings.Contains(block, ".bifrost/") {
+			continue
+		}
+		kept = append(kept, block)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n\n"))
+}
+
 func frontendBuildError(command *exec.Cmd, err error, said string) error {
-	tail := lastLines(said, 40)
+	tail := lastLines(cleanFrontendLog(said), 40)
 	if tail == "" {
 		return commandError(command, err)
 	}
