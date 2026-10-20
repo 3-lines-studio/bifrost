@@ -1235,3 +1235,59 @@ func TestGeneratedMainUsesHTMLayoutsWithoutNavigation(t *testing.T) {
 		t.Fatalf("generated main enables navigation for html views:\n%s", text)
 	}
 }
+
+func TestAppRouterDiscoversPageScript(t *testing.T) {
+	root := t.TempDir()
+	for name, source := range map[string]string{
+		"page.html":   "<h1>page</h1>",
+		"page.js":     "console.log('page')",
+		"layout.html": "<main>{{.Content}}</main>",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || routes[0].Script != "page.js" {
+		t.Fatalf("routes = %+v", routes)
+	}
+	if err := writeViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	if routes[0].Script != "page.js" {
+		t.Fatalf("script = %q", routes[0].Script)
+	}
+	app := &appRouter{Routes: routes}
+	if !app.needsFrontend() {
+		t.Fatal("page script did not require the frontend")
+	}
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), `.WithScript("page.js")`) {
+		t.Fatalf("generated main does not declare the page script:\n%s", source)
+	}
+}
+
+func TestAppRouterRejectsBothPageScripts(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"page.html", "page.js", "page.ts"} {
+		if err := os.WriteFile(filepath.Join(root, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := discoverRoutes(root); err == nil || !strings.Contains(err.Error(), "page.js and page.ts") {
+		t.Fatalf("error = %v", err)
+	}
+}

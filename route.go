@@ -63,6 +63,7 @@ type Route struct {
 	navigation   bool
 	cacheControl string
 	layouts      []string
+	script       string
 }
 
 func Server(pattern, view string, load Loader) Route {
@@ -103,5 +104,10 @@ func (r Route) WithCache(cacheControl string) Route {
 
 func (r Route) WithLayouts(layouts ...string) Route {
 	r.layouts = slices.Clone(layouts)
+	return r
+}
+
+func (r Route) WithScript(script string) Route {
+	r.script = script
 	return r
 }

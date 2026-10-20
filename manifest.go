@@ -71,21 +71,26 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 		return nil, errors.New("bifrost: manifest toolchain is incomplete")
 	}
 	hasFrontend := manifest.Runtime != nil
+	hasReact := false
 	for _, view := range manifest.Views {
 		if view.Mode != "html" {
+			hasReact = true
+		}
+		if view.Mode != "html" || view.Client.Entry.Path != "" {
 			hasFrontend = true
 		}
 	}
-	if hasFrontend {
-		if manifest.Toolchain.Bun == "" || manifest.Toolchain.Vite == "" || manifest.Toolchain.React == "" {
-			return nil, errors.New("bifrost: manifest toolchain is incomplete")
-		}
-		if !supportedMajorVersion(manifest.Toolchain.Vite, 8) {
-			return nil, fmt.Errorf("bifrost: unsupported Vite version %q; Bifrost requires Vite 8", manifest.Toolchain.Vite)
-		}
-		if !supportedReactVersion(manifest.Toolchain.React) {
-			return nil, fmt.Errorf("bifrost: unsupported React version %q; V1 requires React 19", manifest.Toolchain.React)
-		}
+	if hasFrontend && (manifest.Toolchain.Bun == "" || manifest.Toolchain.Vite == "") {
+		return nil, errors.New("bifrost: manifest toolchain is incomplete")
+	}
+	if hasFrontend && !supportedMajorVersion(manifest.Toolchain.Vite, 8) {
+		return nil, fmt.Errorf("bifrost: unsupported Vite version %q; Bifrost requires Vite 8", manifest.Toolchain.Vite)
+	}
+	if hasReact && manifest.Toolchain.React == "" {
+		return nil, errors.New("bifrost: manifest toolchain is incomplete")
+	}
+	if hasReact && !supportedReactVersion(manifest.Toolchain.React) {
+		return nil, fmt.Errorf("bifrost: unsupported React version %q; V1 requires React 19", manifest.Toolchain.React)
 	}
 
 	views := make(map[string]protocol.BuiltView, len(manifest.Views))
@@ -115,7 +120,7 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 				return nil, fmt.Errorf("bifrost: view %q: %w", view.ID, err)
 			}
 		}
-		if view.Mode != "html" {
+		if view.Client.Entry.Path != "" {
 			clientRefs := append([]protocol.FileRef{view.Client.Entry}, view.Client.Styles...)
 			clientRefs = append(clientRefs, view.Client.Imports...)
 			for _, file := range clientRefs {
@@ -161,6 +166,9 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 			}
 			if !slices.Equal(layouts, declared.Layouts) {
 				return nil, fmt.Errorf("bifrost: manifest route %q layouts do not match the app", route.Pattern)
+			}
+			if (declared.Script != "") != (view.Client.Entry.Path != "") {
+				return nil, fmt.Errorf("bifrost: manifest route %q script does not match the app", route.Pattern)
 			}
 		}
 		if err := validateViewForRoute(view, route.Kind); err != nil {
@@ -285,8 +293,27 @@ func validateBuiltView(view protocol.BuiltView) error {
 }
 
 func validateHTMLView(view protocol.BuiltView) error {
-	if view.Client.Entry.Path != "" || len(view.Client.Styles) > 0 || len(view.Client.Imports) > 0 || view.Server != nil {
-		return errors.New("html view cannot have client or server assets")
+	if view.Server != nil {
+		return errors.New("html view cannot have a server entry")
+	}
+	if view.Client.Entry.Path == "" {
+		if len(view.Client.Styles) > 0 || len(view.Client.Imports) > 0 {
+			return errors.New("html view has client files without an entry")
+		}
+	} else {
+		if err := validateFileRef(view.Client.Entry); err != nil {
+			return fmt.Errorf("invalid client entry: %w", err)
+		}
+		for _, style := range view.Client.Styles {
+			if err := validateFileRef(style); err != nil {
+				return err
+			}
+		}
+		for _, imported := range view.Client.Imports {
+			if err := validateFileRef(imported); err != nil {
+				return err
+			}
+		}
 	}
 	if view.HTML == nil {
 		return errors.New("html view has no templates")
@@ -427,15 +454,14 @@ func validDigest(value string) bool {
 }
 
 func viewFiles(view protocol.BuiltView) []protocol.FileRef {
-	if view.Mode == "html" {
-		return nil
-	}
 	serverFiles := 0
 	if view.Server != nil {
 		serverFiles = 1 + len(view.Server.Imports)
 	}
 	files := make([]protocol.FileRef, 0, 1+len(view.Client.Styles)+len(view.Client.Imports)+serverFiles)
-	files = append(files, view.Client.Entry)
+	if view.Client.Entry.Path != "" {
+		files = append(files, view.Client.Entry)
+	}
 	files = append(files, view.Client.Styles...)
 	files = append(files, view.Client.Imports...)
 	if view.Server != nil {

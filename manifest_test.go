@@ -271,3 +271,47 @@ func TestValidateManifestRejectsHTMLViewWithoutTemplates(t *testing.T) {
 		t.Fatal("manifest without html templates was accepted")
 	}
 }
+
+func TestValidateManifestAcceptsHTMLScriptView(t *testing.T) {
+	app, err := newApp(Config{
+		SourceRoot: t.TempDir(),
+		Routes: []Route{
+			Server("/", "app/page.html", nil).WithLayouts("app/layout.html").WithScript("app/page.js"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := fstest.MapFS{}
+	client := addFixtureFile(files, "dist/page.js", "client")
+	view := protocol.BuiltView{
+		ID:     digestString("html-script-view"),
+		Source: "app/page.html",
+		Mode:   "html",
+		Client: protocol.AssetSet{Entry: client},
+		HTML: &protocol.HTMLAssets{
+			Page:    protocol.TemplateSource{Path: "app/page.html", Source: "<h1>hello</h1>"},
+			Layouts: []protocol.TemplateSource{{Path: "app/layout.html", Source: "<main>{{.Content}}</main>"}},
+		},
+	}
+	manifest := protocol.Manifest{
+		Schema:   protocol.Schema,
+		SpecHash: app.specHash,
+		BuildID:  digestString("build"),
+		Toolchain: protocol.Toolchain{
+			Bifrost: "1.1.0",
+			Bun:     "1.3.0",
+			Vite:    "8.2.1",
+		},
+		ClientFiles: []protocol.FileRef{client},
+		Views:       []protocol.BuiltView{view},
+		Routes:      []protocol.BuiltRoute{{Pattern: "/", Kind: "server", ViewID: view.ID}},
+	}
+	compiled, err := validateManifest(files, app.spec, app.specHash, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := compiled.views[view.ID].Client.Entry.Path; got != client.Path {
+		t.Fatalf("client entry = %q", got)
+	}
+}

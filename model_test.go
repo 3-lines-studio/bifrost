@@ -278,3 +278,35 @@ func TestNormalizeViewAcceptsHTML(t *testing.T) {
 		t.Fatal("css view was accepted")
 	}
 }
+
+func TestTemplateRouteScript(t *testing.T) {
+	app, err := newApp(Config{
+		SourceRoot: t.TempDir(),
+		Routes: []Route{
+			Server("/", "app/page.html", nil).WithScript("app/page.js"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := app.spec.Routes[0].Script, "app/page.js"; got != want {
+		t.Fatalf("script = %q, want %q", got, want)
+	}
+	cases := []struct {
+		name  string
+		route Route
+		want  string
+	}{
+		{"non-html", Server("/", "app/page.tsx", nil).WithScript("app/page.js"), "non-html"},
+		{"extension", Server("/", "app/page.html", nil).WithScript("app/page.css"), ".js or .ts"},
+		{"escape", Server("/", "app/page.html", nil).WithScript("../page.js"), "escapes"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := newApp(Config{SourceRoot: t.TempDir(), Routes: []Route{test.route}})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}

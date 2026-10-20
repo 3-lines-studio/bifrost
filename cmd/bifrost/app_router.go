@@ -53,6 +53,7 @@ type appRoute struct {
 	NotFoundPage bool
 	Template     bool
 	Layouts      []string
+	Script       string
 }
 
 type goDir struct {
@@ -172,7 +173,7 @@ func (a *appRouter) routeRows() []routeRow {
 
 func (a *appRouter) needsFrontend() bool {
 	for _, route := range a.Routes {
-		if !route.Template {
+		if !route.Template || route.Script != "" {
 			return true
 		}
 	}
@@ -390,6 +391,14 @@ func discoverRoutes(root string) ([]appRoute, error) {
 		}
 		patterns[pattern] = filepath.ToSlash(relative)
 		route := appRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, Params: params, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), HasHead: hasHeadExport(filePath), Template: strings.HasSuffix(entry.Name(), ".html")}
+		if route.Template {
+			script, err := routeScript(root, directory)
+			if err != nil {
+				problems = append(problems, fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err))
+				return nil
+			}
+			route.Script = script
+		}
 		if _, err := os.Stat(filepath.Join(directory, "page.go")); err == nil {
 			route.PageGo = true
 			route.ImportPath = filepath.ToSlash(relative)
@@ -408,6 +417,23 @@ func discoverRoutes(root string) ([]appRoute, error) {
 	}
 	slices.SortFunc(routes, func(a, b appRoute) int { return strings.Compare(a.Pattern, b.Pattern) })
 	return routes, nil
+}
+
+func routeScript(root, directory string) (string, error) {
+	js := filepath.Join(directory, "page.js")
+	ts := filepath.Join(directory, "page.ts")
+	hasJS := fileExists(js)
+	hasTS := fileExists(ts)
+	if hasJS && hasTS {
+		return "", errors.New("page.js and page.ts cannot both exist")
+	}
+	if hasJS {
+		return filepath.ToSlash(strings.TrimPrefix(js, root+string(filepath.Separator))), nil
+	}
+	if hasTS {
+		return filepath.ToSlash(strings.TrimPrefix(ts, root+string(filepath.Separator))), nil
+	}
+	return "", nil
 }
 
 func appendNotFoundRoutes(root string, routes []appRoute) ([]appRoute, error) {
@@ -506,6 +532,9 @@ func writeViews(projectRoot, routeRoot string, routes []appRoute) error {
 		if routes[index].Template {
 			routes[index].View = projectRelativeView(projectRoot, routeRoot, routes[index].View)
 			routes[index].Layouts = inheritedHTMLLayouts(projectRoot, routeRoot, routes[index].Directory)
+			if routes[index].Script != "" {
+				routes[index].Script = projectRelativeView(projectRoot, routeRoot, routes[index].Script)
+			}
 			continue
 		}
 		wrappers := inheritedWrappers(routeRoot, routes[index].Directory)
@@ -1186,6 +1215,9 @@ func routeOptions(route appRoute) string {
 			options.WriteString(strconv.Quote(layout))
 		}
 		options.WriteString(")")
+	}
+	if route.Script != "" {
+		options.WriteString(".WithScript(" + strconv.Quote(route.Script) + ")")
 	}
 	if !route.Template {
 		options.WriteString(".WithNavigation()")

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -398,5 +399,73 @@ func TestCollectHTMLViews(t *testing.T) {
 	}
 	if len(view.HTML.Layouts) != 1 || view.HTML.Layouts[0].Path != "app/layout.html" {
 		t.Fatalf("layouts = %+v", view.HTML.Layouts)
+	}
+}
+
+func TestPlanViewsBuildsScriptEntry(t *testing.T) {
+	describe := protocol.DescribeResult{Spec: protocol.Spec{Routes: []protocol.RouteSpec{
+		{Pattern: "/", View: "app/page.html", Kind: "server", Layouts: []string{"app/layout.html"}, Script: "app/page.js"},
+	}}}
+	plans, routes, _, err := planViews(describe, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans = %d", len(plans))
+	}
+	plan := plans[0]
+	if plan.Mode != "script" || plan.Source != "app/page.js" || plan.ViewSource != "app/page.html" {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if routes["/"] != plan.ID {
+		t.Fatal("html route view id was not registered")
+	}
+}
+
+func TestWriteEntriesImportsScript(t *testing.T) {
+	sourceRoot := t.TempDir()
+	output := t.TempDir()
+	script := filepath.Join(sourceRoot, "app", "page.js")
+	if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, []byte("console.log('page')"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan := viewPlan{
+		ID:         digest("script"),
+		Source:     "app/page.js",
+		ViewSource: "app/page.html",
+		Mode:       "script",
+		ClientFile: filepath.Join(output, "entries", "script-client.tsx"),
+	}
+	if err := os.MkdirAll(filepath.Dir(plan.ClientFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeEntries(sourceRoot, output, []viewPlan{plan}, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(plan.ClientFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "import "+strconv.Quote(filepath.ToSlash(script))+";") {
+		t.Fatalf("script entry = %q", data)
+	}
+	if strings.Contains(string(data), "react-dom") {
+		t.Fatalf("script entry contains React: %q", data)
+	}
+}
+
+func TestAttachHTMLViewsKeepsClientAssets(t *testing.T) {
+	entry := protocol.FileRef{Path: "dist/app.js", Hash: "abc", Size: 1}
+	views := []protocol.BuiltView{{ID: "view", Source: "app/page.html", Mode: "html", Client: protocol.AssetSet{Entry: entry}}}
+	htmlViews := []protocol.BuiltView{{ID: "view", Source: "app/page.html", Mode: "html", HTML: &protocol.HTMLAssets{Page: protocol.TemplateSource{Path: "app/page.html", Source: "<h1>x</h1>"}}}}
+	merged := attachHTMLViews(views, htmlViews)
+	if len(merged) != 1 {
+		t.Fatalf("views = %d", len(merged))
+	}
+	if merged[0].Client.Entry != entry || merged[0].HTML == nil {
+		t.Fatalf("view = %+v", merged[0])
 	}
 }

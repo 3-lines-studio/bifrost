@@ -15,6 +15,7 @@ type RouteSpec struct {
 	Kind       string   `json:"kind"`
 	Navigation bool     `json:"navigation,omitempty"`
 	Layouts    []string `json:"layouts,omitempty"`
+	Script     string   `json:"script,omitempty"`
 }
 
 type DescribeResult struct {
