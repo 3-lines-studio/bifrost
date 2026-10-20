@@ -49,16 +49,21 @@ type renderer interface {
 }
 
 type runtimeState struct {
-	assets         fs.FS
-	manifest       *compiledManifest
-	renderer       renderer
-	handlers       map[string]http.Handler
-	serverPatterns map[string]struct{}
-	files          map[string]protocol.FileRef
-	public         map[string]protocol.FileRef
-	hashedPublic   map[string]struct{}
-	componentJS    map[string]string
-	devProxy       http.Handler
+	assets           fs.FS
+	manifest         *compiledManifest
+	renderer         renderer
+	handlers         map[string]http.Handler
+	serverPatterns   map[string]struct{}
+	files            map[string]protocol.FileRef
+	public           map[string]protocol.FileRef
+	hashedPublic     map[string]struct{}
+	componentScripts map[string]componentScript
+	devProxy         http.Handler
+}
+
+type componentScript struct {
+	source    string
+	immutable bool
 }
 
 func newDevelopmentProxy(port int) http.Handler {
@@ -72,28 +77,33 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 	if app == nil || manifest == nil {
 		return nil, errors.New("bifrost: incomplete runtime input")
 	}
-	componentJS := make(map[string]string)
+	componentScripts := make(map[string]componentScript)
 	for _, view := range manifest.views {
 		if view.HTML == nil {
 			continue
 		}
 		for _, component := range view.HTML.Components {
-			if component.JS != "" {
-				componentJS[component.Name] = component.JS
+			if component.JS == "" {
+				continue
+			}
+			entryURL := componentURL(component)
+			componentScripts[entryURL] = componentScript{source: component.JS, immutable: component.Hash != ""}
+			for _, imported := range component.Imports {
+				componentScripts[componentImportURL(component, imported.Path)] = componentScript{source: imported.Source, immutable: component.Hash != ""}
 			}
 		}
 	}
 	public, hashedPublic, publicAssets := publicAssetIndex(manifest.public)
 	state := &runtimeState{
-		assets:         assets,
-		manifest:       manifest,
-		renderer:       render,
-		handlers:       make(map[string]http.Handler, len(app.routes)),
-		serverPatterns: make(map[string]struct{}),
-		files:          make(map[string]protocol.FileRef),
-		public:         public,
-		hashedPublic:   hashedPublic,
-		componentJS:    componentJS,
+		assets:           assets,
+		manifest:         manifest,
+		renderer:         render,
+		handlers:         make(map[string]http.Handler, len(app.routes)),
+		serverPatterns:   make(map[string]struct{}),
+		files:            make(map[string]protocol.FileRef),
+		public:           public,
+		hashedPublic:     hashedPublic,
+		componentScripts: componentScripts,
 	}
 	maps.Copy(state.files, manifest.clientFiles)
 	for _, route := range manifest.routes {
@@ -104,6 +114,10 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 
 	devDir := os.Getenv("BIFROST_DEV_DIR")
 	if devDir != "" {
+		for url, script := range state.componentScripts {
+			script.immutable = false
+			state.componentScripts[url] = script
+		}
 		port, portErr := strconv.Atoi(os.Getenv("BIFROST_VITE_PORT"))
 		if portErr != nil || port < 1 || port > 65535 {
 			return nil, errors.New("bifrost: invalid BIFROST_VITE_PORT")
@@ -127,14 +141,21 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 				return nil, fmt.Errorf("bifrost: compile route %q templates: %w", pattern, err)
 			}
 			clientAssets := developmentClientAssets(view, devDir)
-			shell := dochtml.NewPlainShell()
+			plainShell := func() dochtml.Shell {
+				shell := dochtml.NewPlainShell()
+				if devDir != "" {
+					shell = shell.WithDevReload(manifest.manifest.BuildID)
+				}
+				return shell
+			}
+			shell := plainShell()
 			if clientAssets.Entry.Path != "" {
 				shell, err = dochtml.NewScriptShell(clientAssets)
 				if err != nil {
 					return nil, fmt.Errorf("bifrost: compile route %q shell: %w", pattern, err)
 				}
 			}
-			notFoundShell := dochtml.NewPlainShell()
+			notFoundShell := plainShell()
 			for _, candidate := range manifest.views {
 				if candidate.Source != declaration.notFoundView || candidate.Client.Entry.Path == "" {
 					continue
@@ -548,9 +569,13 @@ func (h *clientPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 	}
 }
 
-func writeComponentScript(w http.ResponseWriter, request *http.Request, source string) {
+func writeComponentScript(w http.ResponseWriter, request *http.Request, source string, immutable bool) {
+	cacheControl := "no-cache"
+	if immutable {
+		cacheControl = "public, max-age=31536000, immutable"
+	}
 	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", cacheControl)
 	w.WriteHeader(http.StatusOK)
 	if request.Method != http.MethodHead {
 		_, _ = io.WriteString(w, source)

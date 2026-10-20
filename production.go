@@ -137,12 +137,17 @@ func (a *App) Register(mux *http.ServeMux) (err error) {
 	}
 	mux.Handle("GET "+dochtml.AssetPrefix+"{path...}", &assetHandler{assets: a.runtime.assets, files: a.runtime.files, headers: a.hooks.assetHeaders})
 	mux.HandleFunc("GET "+componentRuntimePath, func(w http.ResponseWriter, request *http.Request) {
-		writeComponentScript(w, request, componentRuntime)
+		writeComponentScript(w, request, componentRuntime, false)
 	})
-	for name, source := range a.runtime.componentJS {
-		source := source
-		mux.HandleFunc("GET /_bifrost/components/"+name+".js", func(w http.ResponseWriter, request *http.Request) {
-			writeComponentScript(w, request, source)
+	componentURLs := make([]string, 0, len(a.runtime.componentScripts))
+	for url := range a.runtime.componentScripts {
+		componentURLs = append(componentURLs, url)
+	}
+	slices.Sort(componentURLs)
+	for _, url := range componentURLs {
+		script := a.runtime.componentScripts[url]
+		mux.HandleFunc("GET "+url, func(w http.ResponseWriter, request *http.Request) {
+			writeComponentScript(w, request, script.source, script.immutable)
 		})
 	}
 	publicURLs := make([]string, 0, len(a.runtime.public))

@@ -95,6 +95,16 @@ func NewPlainShell() Shell {
 	return Shell{afterHead: "</head><body>", suffix: "</body></html>"}
 }
 
+func (s Shell) WithDevReload(buildID string) Shell {
+	if buildID == "" {
+		return s
+	}
+	encoded, _ := json.Marshal(buildID)
+	script := `<script>(()=>{const build=` + string(encoded) + `;async function poll(){try{const response=await fetch("/_bifrost/build-id?wait="+build,{cache:"no-store"});if(!response.ok)throw new Error();if(await response.text()!==build){location.reload();return;}setTimeout(poll,0);}catch{setTimeout(poll,500);}}poll();})()</script>`
+	s.suffix = script + s.suffix
+	return s
+}
+
 func FrontendAssetURL(value string) string {
 	if strings.HasPrefix(value, "/") || strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
 		return value

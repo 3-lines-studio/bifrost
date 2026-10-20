@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -448,12 +449,16 @@ func waitForPhase(command *exec.Cmd, grace time.Duration) error {
 }
 
 func planViews(describe protocol.DescribeResult, output string, routeParams map[string][]string) ([]viewPlan, map[string]string, []clientRoute, error) {
+	componentDigest, err := componentTreeDigest(describe.SourceRoot)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	byKey := make(map[string]viewPlan)
 	routeViews := make(map[string]string, len(describe.Spec.Routes))
 	navigationViews := make(map[string]string, len(describe.Spec.Routes))
 	for _, route := range describe.Spec.Routes {
 		if htmlRoute(route) {
-			id := templateViewID(route)
+			id := templateViewID(route, componentDigest)
 			routeViews[route.Pattern] = id
 			if route.Script == "" {
 				continue
@@ -492,8 +497,12 @@ func htmlRoute(route protocol.RouteSpec) bool {
 	return strings.HasSuffix(strings.ToLower(route.View), ".html")
 }
 
-func templateViewID(route protocol.RouteSpec) string {
-	return digest(route.View + "\x00html\x00" + strings.Join(route.Layouts, "\x00") + "\x00" + route.Script + "\x00" + strings.Join(route.Errors, "\x00") + "\x00" + route.NotFound)
+func templateViewID(route protocol.RouteSpec, components ...string) string {
+	componentDigest := ""
+	if len(components) > 0 {
+		componentDigest = components[0]
+	}
+	return digest(route.View + "\x00html\x00" + strings.Join(route.Layouts, "\x00") + "\x00" + route.Script + "\x00" + strings.Join(route.Errors, "\x00") + "\x00" + route.NotFound + "\x00components\x00" + componentDigest)
 }
 
 func attachHTMLViews(views []protocol.BuiltView, htmlViews []protocol.BuiltView) []protocol.BuiltView {
@@ -513,7 +522,58 @@ func attachHTMLViews(views []protocol.BuiltView, htmlViews []protocol.BuiltView)
 	return views
 }
 
+func componentTreeDigest(sourceRoot string) (string, error) {
+	root := filepath.Join(sourceRoot, "components")
+	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	} else if err != nil {
+		return "", err
+	}
+	hash := sha256.New()
+	err := filepath.WalkDir(root, func(current string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if current == root {
+				return nil
+			}
+			if entry.Name() == "node_modules" || strings.HasPrefix(entry.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, current)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(current)
+		if err != nil {
+			return err
+		}
+		_, _ = hash.Write([]byte(filepath.ToSlash(relative)))
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write(data)
+		_, _ = hash.Write([]byte{0})
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil))[:12], nil
+}
+
 var componentNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+var componentPropPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var componentScriptSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+type componentPropsFile struct {
+	Defaults map[string]any `json:"defaults"`
+	Required []string       `json:"required"`
+}
 
 func collectComponents(sourceRoot string) ([]protocol.ComponentSource, error) {
 	root := filepath.Join(sourceRoot, "components")
@@ -555,10 +615,146 @@ func collectComponents(sourceRoot string) ([]protocol.ComponentSource, error) {
 		case !errors.Is(err, os.ErrNotExist):
 			return nil, err
 		}
-		components = append(components, protocol.ComponentSource{Name: name, HTML: html, CSS: css, JS: js})
+		defaults, required, err := readComponentProps(root, name)
+		if err != nil {
+			return nil, err
+		}
+		imports, err := collectComponentImports(root, name, js != "")
+		if err != nil {
+			return nil, err
+		}
+		hash := ""
+		if js != "" {
+			hash = componentScriptHash(js, imports)
+		}
+		components = append(components, protocol.ComponentSource{
+			Name:     name,
+			HTML:     html,
+			CSS:      css,
+			JS:       js,
+			Imports:  imports,
+			Hash:     hash,
+			Defaults: defaults,
+			Required: required,
+		})
 	}
 	slices.SortFunc(components, func(a, b protocol.ComponentSource) int { return strings.Compare(a.Name, b.Name) })
 	return components, nil
+}
+
+func readComponentProps(root, name string) (map[string]any, []string, error) {
+	propsPath := filepath.Join(root, name, name+".props.json")
+	data, err := os.ReadFile(propsPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	var file componentPropsFile
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&file); err != nil {
+		return nil, nil, fmt.Errorf("bifrost: component %q props: %w", name, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, nil, fmt.Errorf("bifrost: component %q props: trailing JSON", name)
+	}
+	for key := range file.Defaults {
+		if !componentPropPattern.MatchString(key) {
+			return nil, nil, fmt.Errorf("bifrost: component %q prop %q must be a template field name", name, key)
+		}
+	}
+	seen := make(map[string]struct{}, len(file.Required))
+	for _, key := range file.Required {
+		if !componentPropPattern.MatchString(key) {
+			return nil, nil, fmt.Errorf("bifrost: component %q required prop %q must be a template field name", name, key)
+		}
+		if _, exists := seen[key]; exists {
+			return nil, nil, fmt.Errorf("bifrost: component %q required prop %q is duplicated", name, key)
+		}
+		if _, exists := file.Defaults[key]; exists {
+			return nil, nil, fmt.Errorf("bifrost: component %q required prop %q has a default", name, key)
+		}
+		seen[key] = struct{}{}
+	}
+	return file.Defaults, file.Required, nil
+}
+
+func collectComponentImports(root, name string, hasEntry bool) ([]protocol.TemplateSource, error) {
+	dir := filepath.Join(root, name)
+	imports := make([]protocol.TemplateSource, 0)
+	err := filepath.WalkDir(dir, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if current == dir {
+				return nil
+			}
+			if entry.Name() == "node_modules" || strings.HasPrefix(entry.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return nil
+		}
+		relative, err := filepath.Rel(dir, current)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if relative == name+".js" {
+			return nil
+		}
+		extension := strings.ToLower(path.Ext(relative))
+		if extension != ".js" && extension != ".mjs" {
+			return nil
+		}
+		if !validComponentScriptPath(relative) {
+			return fmt.Errorf("bifrost: component %q has invalid script path %q", name, relative)
+		}
+		data, err := os.ReadFile(current)
+		if err != nil {
+			return err
+		}
+		imports = append(imports, protocol.TemplateSource{Path: relative, Source: string(data)})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(imports, func(a, b protocol.TemplateSource) int { return strings.Compare(a.Path, b.Path) })
+	if len(imports) > 0 && !hasEntry {
+		return nil, fmt.Errorf("bifrost: component %q has scripts but no %s.js entry", name, name)
+	}
+	return imports, nil
+}
+
+func validComponentScriptPath(value string) bool {
+	if value == "" || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") {
+		return false
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "" || segment == "." || segment == ".." || !componentScriptSegmentPattern.MatchString(segment) {
+			return false
+		}
+	}
+	return true
+}
+
+func componentScriptHash(entry string, imports []protocol.TemplateSource) string {
+	hash := sha256.New()
+	_, _ = hash.Write([]byte(entry))
+	for _, imported := range imports {
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write([]byte(imported.Path))
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write([]byte(imported.Source))
+	}
+	return hex.EncodeToString(hash.Sum(nil))[:12]
 }
 
 func collectHTMLViews(sourceRoot string, spec protocol.Spec, routeViews map[string]string) ([]protocol.BuiltView, error) {

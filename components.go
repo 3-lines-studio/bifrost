@@ -2,6 +2,7 @@ package bifrost
 
 import (
 	"regexp"
+	"strings"
 
 	"github.com/3-lines-studio/bifrost/internal/protocol"
 )
@@ -65,6 +66,8 @@ document.addEventListener("turbo:before-render", unmountAll);
 `
 
 var componentCallPattern = regexp.MustCompile(`\{\{-?\s*component\s+["']([a-z0-9-]+)["']`)
+var componentPropPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var componentScriptSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 var componentTags = map[string]struct{}{
 	"a":          {},
@@ -106,8 +109,42 @@ func validComponentTag(tag string) bool {
 	return exists
 }
 
-func componentURL(name string) string {
-	return "/_bifrost/components/" + name + ".js"
+func componentURL(component protocol.ComponentSource) string {
+	if component.Hash == "" {
+		return "/_bifrost/components/" + component.Name + "/" + component.Name + ".js"
+	}
+	return "/_bifrost/components/" + component.Name + "/" + component.Hash + "/" + component.Name + ".js"
+}
+
+func componentImportURL(component protocol.ComponentSource, relative string) string {
+	if component.Hash == "" {
+		return "/_bifrost/components/" + component.Name + "/" + relative
+	}
+	return "/_bifrost/components/" + component.Name + "/" + component.Hash + "/" + relative
+}
+
+func validComponentPropName(name string) bool {
+	return componentPropPattern.MatchString(name)
+}
+
+func validComponentScriptPath(value string) bool {
+	if value == "" || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") {
+		return false
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "" || segment == "." || segment == ".." || !componentScriptSegmentPattern.MatchString(segment) {
+			return false
+		}
+	}
+	return true
+}
+
+func componentScriptExtension(value string) string {
+	index := strings.LastIndexByte(value, '.')
+	if index < 0 {
+		return ""
+	}
+	return strings.ToLower(value[index:])
 }
 
 func usedComponentNames(sources []protocol.TemplateSource, components []protocol.ComponentSource) map[string]struct{} {

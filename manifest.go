@@ -386,6 +386,44 @@ func validateHTMLView(view protocol.BuiltView) error {
 		if !strings.HasSuffix(component.HTML.Path, ".html") {
 			return fmt.Errorf("component %q must use .html", component.Name)
 		}
+		if len(component.Imports) > 0 && component.JS == "" {
+			return fmt.Errorf("component %q has imports without a script", component.Name)
+		}
+		seenImports := make(map[string]struct{}, len(component.Imports))
+		for _, imported := range component.Imports {
+			if !validComponentScriptPath(imported.Path) {
+				return fmt.Errorf("component %q has invalid script path %q", component.Name, imported.Path)
+			}
+			if imported.Path == component.Name+".js" {
+				return fmt.Errorf("component %q imports its entry", component.Name)
+			}
+			extension := componentScriptExtension(imported.Path)
+			if extension != ".js" && extension != ".mjs" {
+				return fmt.Errorf("component %q script %q must use .js or .mjs", component.Name, imported.Path)
+			}
+			if _, exists := seenImports[imported.Path]; exists {
+				return fmt.Errorf("component %q has duplicate script %q", component.Name, imported.Path)
+			}
+			seenImports[imported.Path] = struct{}{}
+		}
+		for key := range component.Defaults {
+			if !validComponentPropName(key) {
+				return fmt.Errorf("component %q prop %q must be a template field name", component.Name, key)
+			}
+		}
+		seenRequired := make(map[string]struct{}, len(component.Required))
+		for _, key := range component.Required {
+			if !validComponentPropName(key) {
+				return fmt.Errorf("component %q required prop %q must be a template field name", component.Name, key)
+			}
+			if _, exists := seenRequired[key]; exists {
+				return fmt.Errorf("component %q required prop %q is duplicated", component.Name, key)
+			}
+			if _, exists := component.Defaults[key]; exists {
+				return fmt.Errorf("component %q required prop %q has a default", component.Name, key)
+			}
+			seenRequired[key] = struct{}{}
+		}
 	}
 	return nil
 }

@@ -94,10 +94,14 @@ type HTMLAssets struct {
 }
 
 type ComponentSource struct {
-	Name string         `json:"name"`
-	HTML TemplateSource `json:"html"`
-	CSS  string         `json:"css,omitempty"`
-	JS   string         `json:"js,omitempty"`
+	Name     string           `json:"name"`
+	HTML     TemplateSource   `json:"html"`
+	CSS      string           `json:"css,omitempty"`
+	JS       string           `json:"js,omitempty"`
+	Imports  []TemplateSource `json:"imports,omitempty"`
+	Hash     string           `json:"hash,omitempty"`
+	Defaults map[string]any   `json:"defaults,omitempty"`
+	Required []string         `json:"required,omitempty"`
 }
 
 type TemplateSource struct {

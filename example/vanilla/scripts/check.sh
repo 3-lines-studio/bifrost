@@ -58,10 +58,10 @@ expect_status "island" 200 "/island"
 echo "components"
 expect_status "components page" 200 "/components-demo"
 cards=$(curl -sS --max-time 10 "$base/components-demo" | grep -o '<div data-bifrost-component="card">' | wc -l | tr -d ' ')
-if [[ "$cards" == "20" ]]; then
-  ok "20 component instances"
+if [[ "$cards" == "21" ]]; then
+  ok "21 component instances"
 else
-  bad "20 component instances" "got $cards"
+  bad "21 component instances" "got $cards"
 fi
 styles=$(curl -sS --max-time 10 "$base/components-demo" | grep -o '<style data-bifrost-components>' | wc -l | tr -d ' ')
 if [[ "$styles" == "1" ]]; then
@@ -71,14 +71,33 @@ else
 fi
 expect_body "component scope" '@scope ([data-bifrost-component="card"])' "/components-demo"
 expect_body "component dropdown" 'data-bifrost-component="dropdown"' "/components-demo"
-expect_body "component js manifest" '"/_bifrost/components/counter.js"' "/components-demo"
-expect_status "component runtime" 200 "/_bifrost/component-runtime.js"
-expect_status "counter js" 200 "/_bifrost/components/counter.js"
+expect_body "component default prop" "Normal DOM, Alpine and @scope." "/components-demo"
+expect_body "component required prop" "Inline card" "/components-demo"
+expect_body "component list prop" "<li>go</li>" "/components-demo"
+expect_body "component runtime" "component-runtime.js" "/components-demo"
+expect_status "component runtime response" 200 "/_bifrost/component-runtime.js"
+counter_js=$(curl -sS --max-time 10 "$base/components-demo" | grep -oE '/_bifrost/components/counter/[a-f0-9]{12}/counter\.js' | head -1 || true)
+if [[ -n "$counter_js" ]]; then
+  ok "hashed component js"
+  expect_status "hashed component js response" 200 "$counter_js"
+  expect_header "hashed component js cache" "Cache-Control" "immutable" "$counter_js"
+  counter_import="${counter_js%/*}/lib/format.js"
+  expect_status "component js import" 200 "$counter_import"
+  expect_header "component js import cache" "Cache-Control" "immutable" "$counter_import"
+else
+  bad "hashed component js" "no hashed URL in the page"
+fi
 home_styles=$(curl -sS --max-time 10 "$base/" | grep -o '<style data-bifrost-components>' | wc -l | tr -d ' ' || true)
 if [[ "$home_styles" == "0" ]]; then
   ok "component css filtered from home"
 else
   bad "component css filtered from home" "got $home_styles"
+fi
+home_runtime=$(curl -sS --max-time 10 "$base/" | grep -c 'component-runtime.js' || true)
+if [[ "$home_runtime" == "0" ]]; then
+  ok "component js filtered from home"
+else
+  bad "component js filtered from home" "got $home_runtime"
 fi
 css=$(curl -sS --max-time 10 "$base/" | grep -oE '/styles\.[a-f0-9]{12}\.css' | head -1 || true)
 if [[ -n "$css" ]]; then

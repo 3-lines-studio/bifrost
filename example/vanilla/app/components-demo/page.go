@@ -6,11 +6,11 @@ import (
 )
 
 func Load(r *http.Request) (any, error) {
-	items := make([]map[string]string, 20)
+	items := make([]map[string]any, 20)
 	for index := range items {
-		items[index] = map[string]string{
-			"Title":   fmt.Sprintf("Card %02d", index+1),
-			"Summary": "Normal DOM, Alpine and @scope.",
+		items[index] = map[string]any{
+			"Title": fmt.Sprintf("Card %02d", index+1),
+			"Tags":  []string{"html", "css"},
 		}
 	}
 	return map[string]any{

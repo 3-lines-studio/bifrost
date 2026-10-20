@@ -473,10 +473,12 @@ func TestAttachHTMLViewsKeepsClientAssets(t *testing.T) {
 func TestCollectHTMLViewsIncludesComponents(t *testing.T) {
 	root := t.TempDir()
 	for name, source := range map[string]string{
-		"app/page.html":             "<h1>page</h1>",
-		"components/card/card.html": "<h2>{{.Title}}</h2>",
-		"components/card/card.css":  "@scope ([data-bifrost-component=\"card\"]) { :scope { color: red; } }",
-		"components/card/card.js":   "export function mount() { return () => {}; }",
+		"app/page.html":                   "<h1>page</h1>",
+		"components/card/card.html":       "<h2>{{.Title}}</h2>",
+		"components/card/card.css":        "@scope ([data-bifrost-component=\"card\"]) { :scope { color: red; } }",
+		"components/card/card.js":         "import { format } from './lib/format.js'; export function mount() { return format; }",
+		"components/card/card.props.json": `{"defaults":{"Summary":"Default"},"required":["Title"]}`,
+		"components/card/lib/format.js":   "export function format() { return ''; }",
 	} {
 		path := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -498,6 +500,68 @@ func TestCollectHTMLViewsIncludesComponents(t *testing.T) {
 	component := views[0].HTML.Components[0]
 	if component.Name != "card" || component.HTML.Path != "components/card/card.html" || !strings.Contains(component.CSS, "color: red") || !strings.Contains(component.JS, "export function mount") {
 		t.Fatalf("component = %+v", component)
+	}
+	if component.Hash == "" || len(component.Imports) != 1 || component.Imports[0].Path != "lib/format.js" {
+		t.Fatalf("component scripts = %+v", component)
+	}
+	if component.Defaults["Summary"] != "Default" || len(component.Required) != 1 || component.Required[0] != "Title" {
+		t.Fatalf("component props = %+v", component)
+	}
+}
+
+func TestCollectComponentsRejectsInvalidPropsAndOrphanScripts(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]string
+	}{
+		{name: "invalid json", files: map[string]string{"components/card/card.html": "<h2>card</h2>", "components/card/card.props.json": "{"}},
+		{name: "unknown field", files: map[string]string{"components/card/card.html": "<h2>card</h2>", "components/card/card.props.json": `{"default":{}}`}},
+		{name: "invalid prop", files: map[string]string{"components/card/card.html": "<h2>card</h2>", "components/card/card.props.json": `{"defaults":{"bad-name":""}}`}},
+		{name: "required prop with default", files: map[string]string{"components/card/card.html": "<h2>card</h2>", "components/card/card.props.json": `{"defaults":{"Title":""},"required":["Title"]}`}},
+		{name: "orphan script", files: map[string]string{"components/card/card.html": "<h2>card</h2>", "components/card/lib/format.js": "export const value = 1;"}},
+		{name: "bad import path", files: map[string]string{"components/card/card.html": "<h2>card</h2>", "components/card/card.js": "export function mount() {}", "components/card/lib/bad name.js": "export const value = 1;"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			for name, source := range test.files {
+				path := filepath.Join(root, filepath.FromSlash(name))
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := collectComponents(root); err == nil {
+				t.Fatal("invalid component was accepted")
+			}
+		})
+	}
+}
+
+func TestComponentTreeDigestChangesWithComponentFiles(t *testing.T) {
+	root := t.TempDir()
+	before, err := componentTreeDigest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "components", "card", "card.html")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("<h2>card</h2>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	after, err := componentTreeDigest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Fatal("component digest did not change")
+	}
+	if templateViewID(protocol.RouteSpec{View: "app/page.html"}, before) == templateViewID(protocol.RouteSpec{View: "app/page.html"}, after) {
+		t.Fatal("view id ignored the component digest")
 	}
 }
 

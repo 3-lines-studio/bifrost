@@ -250,6 +250,93 @@ func TestValidateManifestAcceptsHTMLViews(t *testing.T) {
 	}
 }
 
+func TestValidateManifestAcceptsComponentPropsAndScripts(t *testing.T) {
+	app, err := newApp(Config{
+		SourceRoot: t.TempDir(),
+		Routes:     []Route{Server("/", "app/page.html", nil)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := protocol.BuiltView{
+		ID:     digestString("html-component-view"),
+		Source: "app/page.html",
+		Mode:   "html",
+		HTML: &protocol.HTMLAssets{
+			Page: protocol.TemplateSource{Path: "app/page.html", Source: `<h1>{{component "card" .}}</h1>`},
+			Components: []protocol.ComponentSource{{
+				Name:     "card",
+				HTML:     protocol.TemplateSource{Path: "components/card/card.html", Source: `<h2>{{.Title}}</h2>`},
+				JS:       `export function mount() {}`,
+				Imports:  []protocol.TemplateSource{{Path: "lib/format.js", Source: `export const value = 1;`}},
+				Hash:     "abcdef012345",
+				Defaults: map[string]any{"Summary": "Default"},
+				Required: []string{"Title"},
+			}},
+		},
+	}
+	manifest := protocol.Manifest{
+		Schema:    protocol.Schema,
+		SpecHash:  app.specHash,
+		BuildID:   digestString("build"),
+		Toolchain: protocol.Toolchain{Bifrost: "1.1.0"},
+		Views:     []protocol.BuiltView{view},
+		Routes:    []protocol.BuiltRoute{{Pattern: "/", Kind: "server", ViewID: view.ID}},
+	}
+	if _, err := validateManifest(fstest.MapFS{}, app.spec, app.specHash, manifest); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateManifestRejectsInvalidComponents(t *testing.T) {
+	app, err := newApp(Config{
+		SourceRoot: t.TempDir(),
+		Routes:     []Route{Server("/", "app/page.html", nil)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name      string
+		component protocol.ComponentSource
+	}{
+		{name: "import without script", component: protocol.ComponentSource{Name: "card", Imports: []protocol.TemplateSource{{Path: "lib/format.js"}}}},
+		{name: "invalid import path", component: protocol.ComponentSource{Name: "card", JS: "export function mount() {}", Imports: []protocol.TemplateSource{{Path: "../format.js"}}}},
+		{name: "entry import", component: protocol.ComponentSource{Name: "card", JS: "export function mount() {}", Imports: []protocol.TemplateSource{{Path: "card.js"}}}},
+		{name: "non javascript import", component: protocol.ComponentSource{Name: "card", JS: "export function mount() {}", Imports: []protocol.TemplateSource{{Path: "card.css"}}}},
+		{name: "duplicate import", component: protocol.ComponentSource{Name: "card", JS: "export function mount() {}", Imports: []protocol.TemplateSource{{Path: "lib/format.js"}, {Path: "lib/format.js"}}}},
+		{name: "invalid default", component: protocol.ComponentSource{Name: "card", Defaults: map[string]any{"bad-name": ""}}},
+		{name: "duplicate required", component: protocol.ComponentSource{Name: "card", Required: []string{"Title", "Title"}}},
+		{name: "required with default", component: protocol.ComponentSource{Name: "card", Defaults: map[string]any{"Title": ""}, Required: []string{"Title"}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			component := test.component
+			component.HTML = protocol.TemplateSource{Path: "components/card/card.html", Source: `<h2>card</h2>`}
+			view := protocol.BuiltView{
+				ID:     digestString("html-component-view"),
+				Source: "app/page.html",
+				Mode:   "html",
+				HTML: &protocol.HTMLAssets{
+					Page:       protocol.TemplateSource{Path: "app/page.html", Source: `<h1>{{component "card" .}}</h1>`},
+					Components: []protocol.ComponentSource{component},
+				},
+			}
+			manifest := protocol.Manifest{
+				Schema:    protocol.Schema,
+				SpecHash:  app.specHash,
+				BuildID:   digestString("build"),
+				Toolchain: protocol.Toolchain{Bifrost: "1.1.0"},
+				Views:     []protocol.BuiltView{view},
+				Routes:    []protocol.BuiltRoute{{Pattern: "/", Kind: "server", ViewID: view.ID}},
+			}
+			if _, err := validateManifest(fstest.MapFS{}, app.spec, app.specHash, manifest); err == nil {
+				t.Fatal("invalid component was accepted")
+			}
+		})
+	}
+}
+
 func TestValidateManifestRejectsHTMLViewWithoutTemplates(t *testing.T) {
 	app, err := newApp(Config{
 		SourceRoot: t.TempDir(),

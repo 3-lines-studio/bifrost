@@ -58,3 +58,22 @@ func TestPlainShellHasNoScripts(t *testing.T) {
 		t.Fatalf("plain shell emitted a script:\n%s", output.String())
 	}
 }
+
+func TestPlainShellWithDevReload(t *testing.T) {
+	shell := NewPlainShell().WithDevReload("build-id")
+	var output bytes.Buffer
+	if err := shell.WritePreamble(&output, nil, protocol.DocumentAttributes{Lang: "en"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := shell.WriteSuffix(&output, nil); err != nil {
+		t.Fatal(err)
+	}
+	text := output.String()
+	if !strings.Contains(text, `const build="build-id"`) || !strings.Contains(text, `/_bifrost/build-id?wait=`) {
+		t.Fatalf("dev reload script missing: %s", text)
+	}
+	empty := NewPlainShell().WithDevReload("")
+	if strings.Contains(empty.suffix, "build-id") {
+		t.Fatal("empty build id emitted a reload script")
+	}
+}

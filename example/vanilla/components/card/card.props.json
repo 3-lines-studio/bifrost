@@ -1,0 +1,8 @@
+{
+  "defaults": {
+    "Kicker": "Component",
+    "Summary": "Normal DOM, Alpine and @scope.",
+    "Tags": []
+  },
+  "required": ["Title"]
+}

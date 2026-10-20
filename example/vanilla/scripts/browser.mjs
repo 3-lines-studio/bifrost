@@ -63,8 +63,12 @@ try {
   await page.waitForURL("**/components-demo");
   check("components via Turbo", (await page.evaluate(() => window.__marker)) === "alive");
   const cards = page.locator('div[data-bifrost-component="card"]');
-  check("20 component instances", (await cards.count()) === 20);
+  check("21 component instances", (await cards.count()) === 21);
   check("@scope applies", (await cards.first().evaluate((el) => getComputedStyle(el).borderTopWidth)) === "1px");
+  check("card default prop", (await cards.first().locator(".card__summary").textContent()) === "Normal DOM, Alpine and @scope.");
+  check("card required prop", (await cards.first().locator(".card__kicker").textContent()) === "Component");
+  const inlineCard = cards.filter({ hasText: "Inline card" });
+  check("card dict and list props", (await inlineCard.locator(".card__tags li").allTextContents()).join(",") === "go,alpine");
   const dropdown = page.locator('div[data-bifrost-component="dropdown"]');
   const menu = dropdown.locator(".dropdown__menu");
   check("dropdown starts closed", !(await menu.isVisible()));
@@ -90,6 +94,7 @@ try {
   await counterAgain.locator("button").click();
   check("component js has one listener", (await counterAgain.locator("[data-count]").textContent()) === "1");
 
+  for (const error of errors) console.log(`  page error: ${error}`);
   check("no page errors", errors.length === 0);
   console.log("all browser checks passed");
 } finally {

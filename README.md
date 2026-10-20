@@ -118,13 +118,28 @@ A `components/<name>/` directory with `<name>.html`, optional `<name>.css`, and 
 ```html
 {{component "card" .Props.card}}
 {{component "row" .Props.row "tr"}}
+{{component "card" (dict "Title" "Inline" "Tags" (list "go" "html"))}}
 ```
 
-The value passed at the call becomes the dot. The default wrapper is `<div data-bifrost-component="<name>">`; pass a tag as the third argument for table, list, or inline markup. Component CSS for the components used by the view is injected once per page; use `@scope` or prefixed classes. Alpine works inside components; there is no shadow DOM. `@scope` needs a modern browser, so keep prefixed classes or Tailwind as a fallback.
+The value passed at the call becomes the dot. Use `dict` and `list` for inline props; a loader map or struct works too. An optional `<name>.props.json` declares defaults and required props:
+
+```json
+{
+  "defaults": {
+    "Title": "Untitled",
+    "Tags": []
+  },
+  "required": ["Title"]
+}
+```
+
+Defaults fill missing keys and required keys fail the render when absent. Keys must be template field names. The default wrapper is `<div data-bifrost-component="<name>">`; pass a tag as the third argument for table, list, or inline markup. Component CSS for the components used by the view is injected once per page; use `@scope` or prefixed classes. Alpine works inside components; there is no shadow DOM. `@scope` needs a modern browser, so keep prefixed classes or Tailwind as a fallback.
 
 A component JS file exports `mount(root)` and can return a cleanup:
 
 ```js
+import { format } from "./lib/format.js";
+
 export function mount(root) {
   const button = root.querySelector("button");
   const onClick = () => button.classList.toggle("is-active");
@@ -133,7 +148,9 @@ export function mount(root) {
 }
 ```
 
-Bifrost loads the module, mounts each instance, and remounts after Turbo navigation. The wrapper is the root. Component calls are discovered statically, so use a literal name at the call site.
+Relative imports are served from the component directory. Only `.js` and `.mjs` files inside it are available; there is no bundling or bare module resolution. In production, the entry URL is hashed and immutable. Bifrost loads it, mounts each instance, and remounts after Turbo navigation. The wrapper is the root. Component calls are discovered statically, so use a literal name at the call site.
+
+`bifrost dev` restarts on component changes and reloads plain HTML pages; it does not hot-replace component modules.
 
 ### Turbo and Alpine
 

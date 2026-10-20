@@ -7,6 +7,14 @@
     background: #0e141d;
   }
 
+  .card__kicker {
+    margin: 0 0 0.35rem;
+    color: var(--accent, #7dd3fc);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
   .card__title {
     margin: 0 0 0.25rem;
     font-size: 1rem;
@@ -16,5 +24,22 @@
     margin: 0;
     color: var(--dim, #8b96a8);
     font-size: 0.9rem;
+  }
+
+  .card__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0.7rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .card__tags li {
+    padding: 0.15rem 0.4rem;
+    border: 1px solid var(--line, #2a3140);
+    border-radius: 999px;
+    color: var(--dim, #8b96a8);
+    font-size: 0.72rem;
   }
 }
