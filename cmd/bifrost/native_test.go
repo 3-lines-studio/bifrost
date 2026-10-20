@@ -737,6 +737,20 @@ func TestNativeAFlexItemKeepsItsContent(t *testing.T) {
 	}
 }
 
+func TestNativeAVideoIsATagWithoutAView(t *testing.T) {
+	// Measured on the viewer of a video of picsel: the runtime handed react-native
+	// the name video and the screen died instead of painting the sheet.
+	for _, said := range []string{
+		`video: Nothing,`,
+		`iframe: Nothing,`,
+		`canvas: Nothing,`,
+	} {
+		if !strings.Contains(nativeHostBody, said) {
+			t.Fatalf("a tag without a view crashes its page: %q", said)
+		}
+	}
+}
+
 func TestNativeAPictureThatFadesInIsPainted(t *testing.T) {
 	// Measured on the cards of a profile of picsel: the picture takes off the
 	// class that hid it when the load arrives, and there is no node to take it

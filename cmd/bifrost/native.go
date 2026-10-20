@@ -4833,6 +4833,20 @@ const NAMED: Record<string, unknown> = {
   option: Option,
   select: Select,
   textarea: Field,
+  // A tag the target has no view for: a browser plays a video, embeds a frame or
+  // draws a canvas, and a screen that asked for one died with "View config getter
+  // callback for component video must be a function". Nothing is painted, and the
+  // rest of the page keeps painting.
+  audio: Nothing,
+  canvas: Nothing,
+  embed: Nothing,
+  iframe: Nothing,
+  map: Nothing,
+  object: Nothing,
+  picture: Nothing,
+  source: Nothing,
+  track: Nothing,
+  video: Nothing,
 };
 for (const name of BOXES) {
   NAMED[name] = Box;
