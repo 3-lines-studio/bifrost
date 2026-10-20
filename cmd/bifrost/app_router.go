@@ -48,6 +48,7 @@ type appRoute struct {
 	GoNotFound      bool
 	GoLayouts       []string
 	GoLayoutAlias   []string
+	GoLayoutContext []bool
 	GoErrorPath     string
 	GoErrorAlias    string
 	GoNotFoundPath  string
@@ -333,11 +334,13 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 			if layout != "." {
 				importPath = modulePath + "/" + filepath.ToSlash(layout)
 			}
-			if !hasSymbol(ctx, moduleDir, importPath, "Layout") {
-				return appRouter{}, fmt.Errorf("bifrost: %s must export Layout", filepath.ToSlash(filepath.Join(layout, "layout.go")))
+			hasContext := hasSymbol(ctx, moduleDir, importPath, "LayoutContext")
+			if !hasContext && !hasSymbol(ctx, moduleDir, importPath, "Layout") {
+				return appRouter{}, fmt.Errorf("bifrost: %s must export Layout or LayoutContext", filepath.ToSlash(filepath.Join(layout, "layout.go")))
 			}
 			routes[index].GoLayouts = append(routes[index].GoLayouts, importPath)
 			routes[index].GoLayoutAlias = append(routes[index].GoLayoutAlias, importAlias(aliases, importPath))
+			routes[index].GoLayoutContext = append(routes[index].GoLayoutContext, hasContext)
 		}
 		if !routes[index].HasError {
 			if directory := inheritedGoFile(routeRoot, routes[index].Directory, "error.go"); directory != "" {
@@ -1419,8 +1422,8 @@ func goPageHandlerSource(route appRoute, index int) string {
 	} else {
 		source.WriteString("\tcache := \"\"\n")
 	}
-	fmt.Fprintf(&source, "\tprops, err := %s.Load(r)\n", route.Alias)
-	source.WriteString("\tif err != nil {\n")
+	fmt.Fprintf(&source, "\tstarted := time.Now()\n\tprops, err := %s.Load(r)\n", route.Alias)
+	source.WriteString("\tbifrost.ObserveLoad(r.Context(), started, err)\n\tif err != nil {\n")
 	if hasError || hasNotFound {
 		source.WriteString("\t\tif !bifrost.IsRedirect(err) {\n")
 		source.WriteString("\t\t\tstatus, ok := bifrost.ErrorStatus(err)\n\t\t\tif !ok {\n\t\t\t\tstatus = http.StatusInternalServerError\n\t\t\t}\n")
@@ -1438,6 +1441,10 @@ func goPageHandlerSource(route appRoute, index int) string {
 		fmt.Fprintf(&source, "\tnode = %s.Layout(node, props)\n", route.Alias)
 	} else {
 		for index := len(route.GoLayoutAlias) - 1; index >= 0; index-- {
+			if route.GoLayoutContext[index] {
+				fmt.Fprintf(&source, "\tnode = %s.LayoutContext(node, r)\n", route.GoLayoutAlias[index])
+				continue
+			}
 			fmt.Fprintf(&source, "\tnode = %s.Layout(node)\n", route.GoLayoutAlias[index])
 		}
 	}

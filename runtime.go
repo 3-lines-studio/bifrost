@@ -200,6 +200,12 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 		if err != nil {
 			return nil, err
 		}
+		if route.cacheControl != "" {
+			handler = &cacheControlHandler{value: route.cacheControl, next: handler}
+		}
+		if len(app.hooks.loadHooks) > 0 {
+			handler = &loadObserverHandler{pattern: route.pattern, next: handler, hooks: app.hooks.loadHooks}
+		}
 		state.handlers[route.pattern] = handler
 	}
 	return state, nil

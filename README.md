@@ -46,7 +46,7 @@ One trailing `_` is a one-segment parameter. Two are a catch-all, which must be 
 - `page.go` next to `page.tsx` exports `Load(r *http.Request) (any, error)` and optionally `Cache() string`.
 - `page.go` without `page.tsx` is a Go page: it exports typed `Load` and `Page`, and optionally `Layout`, `Error`, `NotFound`, and `Cache`.
 - `layout.tsx` exports `Layout`, wraps the routes below it, and stays mounted across navigation.
-- `layout.go` exports `Layout(content g.Node) g.Node` and wraps Go pages below it.
+- `layout.go` exports `Layout(content g.Node) g.Node` or `LayoutContext(content g.Node, r *http.Request) g.Node` and wraps Go pages below it.
 - `template.tsx` exports `Template`, wraps like a layout, and remounts on navigation.
 - `loading.tsx` exports `Loading`, shown while a navigation to that subtree runs.
 - `error.tsx` exports `Error({ error, reset })`; `reset` re-fetches the route.
@@ -123,7 +123,7 @@ func Layout(content g.Node) g.Node {
 }
 ```
 
-Inherited layouts apply from the outside in. With a layout, `Page` returns the content node; without one, `Page` returns the document. A page can also export `Layout(content, props) g.Node` in `page.go`; that page-specific layout takes precedence and skips inherited `layout.go` files.
+Inherited layouts apply from the outside in. With a layout, `Page` returns the content node; without one, `Page` returns the document. Use `LayoutContext(content, r)` when the layout needs params, query values, or the pathname. A page can also export `Layout(content, props) g.Node` in `page.go`; that page-specific layout takes precedence and skips inherited `layout.go` files.
 
 Optional exports:
 
@@ -132,7 +132,7 @@ Optional exports:
 - `Cache() string` sets `Cache-Control`.
 - `Load` receives the request, so params, query values, and the pathname come from `r.PathValue`, `r.URL.Query`, and `r.URL.Path`. A catch-all parameter is a string with slash-separated segments.
 
-App Router `middleware.go` wraps Go pages as well. A Go-only app does not need Bun or Vite: `bifrost build` and `bifrost dev` compile and restart the Go app, and dev rebuilds reload the page. The `example/gomponents-app` app exercises typed props, nested layouts, nested error and not-found views, Alpine, Tailwind, dynamic params, middleware, cache, and a root not-found page.
+App Router `middleware.go` wraps Go pages as well. A Go-only app does not need Bun or Vite: `bifrost build` and `bifrost dev` compile and restart the Go app, and dev rebuilds reload the page. Bifrost load hooks observe Go page `Load` calls; response hooks and middleware wrap the page handler. The `example/gomponents-app` app exercises typed props, nested layouts with request context, nested error and not-found views, Alpine, Tailwind, dynamic params, middleware, cache, and a root not-found page.
 
 Go pages are full HTML. Add Turbo Drive to the layout for client navigation; the example does. Without it, links do normal page loads. The React `?_data` protocol and client router do not apply. Go pages are server-rendered only: there is no static export and no `loading.tsx` equivalent; `Load` runs synchronously before `Page`.
 
