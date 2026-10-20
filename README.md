@@ -1,10 +1,10 @@
 # Bifrost
 
-Bifrost is a file-based App Router served by Go. Pages are React components or Go `html/template` files. Go owns routing, loaders, and HTTP handlers; Vite and Bun render React pages.
+Bifrost is a file-based App Router served by Go. Pages are React components or Go `html/template` files. Go owns routing, loaders, and HTTP handlers; Vite builds client scripts and Bun renders React pages on the server.
 
 ## Requirements
 
-Go 1.25+, Linux or macOS. React pages also need Bun and Vite.
+Go 1.25+, Linux or macOS. React pages and pages with a client script also need Bun and Vite.
 
 ## Create and run
 
@@ -44,6 +44,7 @@ One trailing `_` is a one-segment parameter. Two are a catch-all, which must be 
 
 - `page.tsx` exports `Page` (or a default export) and optionally `Head`.
 - `page.html` is a Go template rendered by `html/template`; no React or hydration.
+- `page.js` or `page.ts` is the optional client entry for `page.html`; Vite builds it.
 - `page.go` exports `Load(r *http.Request) (any, error)` and optionally `Cache() string`.
 - `layout.tsx` exports `Layout`, wraps the routes below it, and stays mounted across navigation.
 - `layout.html` wraps `page.html` routes and receives `.Content`.
@@ -80,7 +81,7 @@ A loader may also return `bifrost.PageData{Props: props, Document: bifrost.Docum
 
 ## Go templates
 
-A directory with `page.html` is rendered by Go, without React, Bun, or Vite:
+A directory with `page.html` is rendered by Go:
 
 ```html
 {{define "head"}}<title>{{.Props.title}}</title>{{end}}
@@ -95,7 +96,18 @@ func Load(r *http.Request) (any, error) {
 
 Templates receive `.Props`, `.Params`, `.SearchParams`, and `.Pathname`. `layout.html` wraps the page and receives `.Content`; `{{define "head"}}` blocks are collected from the outside in. Loaders, middleware, caching, `?_data`, and Markdown work the same as for React pages. `not-found.html` is the not-found view.
 
-A build with only `page.html` routes skips Bun and Vite. `bifrost dev` for these apps is not available yet; run `bifrost build` and start `.bifrost/bifrost-app`.
+A sibling `page.js` or `page.ts` becomes the client entry. Vite builds it, so imports, TypeScript, and CSS imports work:
+
+```js
+import "./page.css";
+
+const props = JSON.parse(document.getElementById("__BIFROST_PROPS__").textContent);
+document.querySelector("h1").textContent = props.title;
+```
+
+The shell injects the props JSON and the built module; do not add your own entry script to `page.html`.
+
+A build with only `page.html` routes and no `page.js` skips Bun and Vite. `bifrost dev` works when a page script or a React page exists; a pure HTML app can be built and started with `.bifrost/bifrost-app`.
 
 ## Route handlers
 

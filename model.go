@@ -204,6 +204,22 @@ func validateRoutes(sourceRoot string, routes []Route) ([]Route, error) {
 			return nil, fmt.Errorf("bifrost: route %q uses layouts with a non-html view", route.pattern)
 		}
 
+		if route.script != "" {
+			if !template {
+				return nil, fmt.Errorf("bifrost: route %q uses a script with a non-html view", route.pattern)
+			}
+			switch strings.ToLower(path.Ext(route.script)) {
+			case ".js", ".ts":
+			default:
+				return nil, fmt.Errorf("bifrost: route %q script %q must use .js or .ts", route.pattern, route.script)
+			}
+			normalized, err := normalizeView(sourceRoot, route.script)
+			if err != nil {
+				return nil, fmt.Errorf("bifrost: route %q script: %w", route.pattern, err)
+			}
+			route.script = normalized
+		}
+
 		if route.navigation && route.kind != routeServer {
 			return nil, fmt.Errorf("bifrost: navigation requires a server route: %q", route.pattern)
 		}
@@ -306,6 +322,7 @@ func makeBuildSpec(routes []Route) (protocol.Spec, string, error) {
 			Kind:       route.kind.String(),
 			Navigation: route.navigation,
 			Layouts:    slices.Clone(route.layouts),
+			Script:     route.script,
 		}
 	}
 

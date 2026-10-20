@@ -58,6 +58,39 @@ func NewShell(assets protocol.AssetSet) (Shell, error) {
 	return Shell{afterHead: after.String(), suffix: suffix.String()}, nil
 }
 
+func NewScriptShell(assets protocol.AssetSet) (Shell, error) {
+	if assets.Entry.Path == "" {
+		return Shell{}, errors.New("bifrost: missing client entry")
+	}
+	var after strings.Builder
+	for _, style := range assets.Styles {
+		after.WriteString(`<link rel="stylesheet" href="`)
+		after.WriteString(html.EscapeString(FrontendAssetURL(style.Path)))
+		after.WriteString(`">`)
+	}
+	for _, imported := range assets.Imports {
+		after.WriteString(`<link rel="modulepreload" fetchpriority="low" href="`)
+		after.WriteString(html.EscapeString(FrontendAssetURL(imported.Path)))
+		after.WriteString(`">`)
+	}
+	entryURL := FrontendAssetURL(assets.Entry.Path)
+	if strings.HasPrefix(entryURL, DevPrefix) {
+		after.WriteString(`<script type="module" src="` + html.EscapeString(DevPrefix+"@vite/client") + `"></script>`)
+	}
+	after.WriteString(`<link rel="modulepreload" fetchpriority="low" href="`)
+	after.WriteString(html.EscapeString(entryURL))
+	after.WriteString(`"></head><body>`)
+
+	var suffix strings.Builder
+	suffix.WriteString(`<script id="__BIFROST_PROPS__" type="application/json">`)
+	suffix.WriteString(propsMarker)
+	suffix.WriteString(`</script><script type="module" src="`)
+	suffix.WriteString(html.EscapeString(entryURL))
+	suffix.WriteString(`"></script></body></html>`)
+
+	return Shell{afterHead: after.String(), suffix: suffix.String()}, nil
+}
+
 func NewPlainShell() Shell {
 	return Shell{afterHead: "</head><body>", suffix: "</body></html>"}
 }

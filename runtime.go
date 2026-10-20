@@ -109,12 +109,24 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 			if err != nil {
 				return nil, fmt.Errorf("bifrost: compile route %q templates: %w", pattern, err)
 			}
+			clientAssets := view.Client
+			if devDir != "" && clientAssets.Entry.Path != "" {
+				clientFile := filepath.Join(devDir, "entries", view.ID+"-client.tsx")
+				clientAssets = protocol.AssetSet{Entry: protocol.FileRef{Path: (&url.URL{Path: dochtml.DevPrefix + "@fs" + filepath.ToSlash(clientFile)}).EscapedPath()}}
+			}
+			shell := dochtml.NewPlainShell()
+			if clientAssets.Entry.Path != "" {
+				shell, err = dochtml.NewScriptShell(clientAssets)
+				if err != nil {
+					return nil, fmt.Errorf("bifrost: compile route %q shell: %w", pattern, err)
+				}
+			}
 			state.serverPatterns["GET "+pattern] = struct{}{}
 			handler = &serverPageHandler{
 				pattern:      pattern,
 				load:         declaration.load,
 				entry:        view.Source,
-				shell:        dochtml.NewPlainShell(),
+				shell:        shell,
 				render:       templates,
 				hooks:        app.hooks,
 				limits:       app.limits,

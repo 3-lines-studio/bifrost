@@ -57,6 +57,7 @@ type viewPlan struct {
 	Navigation bool
 	ID         string
 	Source     string
+	ViewSource string
 	Mode       string
 	ClientFile string
 	ServerFile string
@@ -207,7 +208,7 @@ func Build(ctx context.Context, options Options) error {
 	if err != nil {
 		return err
 	}
-	views = append(views, htmlViews...)
+	views = attachHTMLViews(views, htmlViews)
 	staticWorkers := options.StaticWorkers
 	if staticWorkers <= 0 {
 		staticWorkers = 4
@@ -234,10 +235,18 @@ func Build(ctx context.Context, options Options) error {
 		return err
 	}
 	hasFrontend := len(plans) > 0
+	hasReact := false
+	for _, route := range describe.Spec.Routes {
+		if !htmlRoute(route) {
+			hasReact = true
+		}
+	}
 	bunVersion, viteVersion, reactVersion, reactDOMVersion := "", "", "", ""
 	if hasFrontend {
 		bunVersion, _ = commandOutput(ctx, describe.SourceRoot, "bun", "--version")
 		viteVersion = readPackageVersion(describe.SourceRoot, "vite")
+	}
+	if hasReact {
 		reactVersion = readPackageVersion(describe.SourceRoot, "react")
 		reactDOMVersion = readPackageVersion(describe.SourceRoot, "react-dom")
 	}
@@ -271,6 +280,8 @@ func Build(ctx context.Context, options Options) error {
 		if manifest.Toolchain.Vite == "" || !supportedViteVersion(manifest.Toolchain.Vite) {
 			return fmt.Errorf("bifrost: unsupported Vite version %q; Bifrost requires Vite 8", manifest.Toolchain.Vite)
 		}
+	}
+	if hasReact {
 		if manifest.Toolchain.React == "" || reactDOMVersion == "" {
 			return errors.New("bifrost: cannot determine React and React DOM versions")
 		}
@@ -442,7 +453,12 @@ func planViews(describe protocol.DescribeResult, output string, routeParams map[
 	navigationViews := make(map[string]string, len(describe.Spec.Routes))
 	for _, route := range describe.Spec.Routes {
 		if htmlRoute(route) {
-			routeViews[route.Pattern] = templateViewID(route)
+			id := templateViewID(route)
+			routeViews[route.Pattern] = id
+			if route.Script == "" {
+				continue
+			}
+			byKey[id] = viewPlan{ID: id, Source: route.Script, ViewSource: route.View, Mode: "script", ClientFile: filepath.Join(output, "entries", id+"-client.tsx")}
 			continue
 		}
 		mode := "hydrate"
@@ -477,7 +493,24 @@ func htmlRoute(route protocol.RouteSpec) bool {
 }
 
 func templateViewID(route protocol.RouteSpec) string {
-	return digest(route.View + "\x00html\x00" + strings.Join(route.Layouts, "\x00"))
+	return digest(route.View + "\x00html\x00" + strings.Join(route.Layouts, "\x00") + "\x00" + route.Script)
+}
+
+func attachHTMLViews(views []protocol.BuiltView, htmlViews []protocol.BuiltView) []protocol.BuiltView {
+	byID := make(map[string]int, len(views))
+	for index, view := range views {
+		byID[view.ID] = index
+	}
+	for _, htmlView := range htmlViews {
+		index, exists := byID[htmlView.ID]
+		if !exists {
+			byID[htmlView.ID] = len(views)
+			views = append(views, htmlView)
+			continue
+		}
+		views[index].HTML = htmlView.HTML
+	}
+	return views
 }
 
 func collectHTMLViews(sourceRoot string, spec protocol.Spec, routeViews map[string]string) ([]protocol.BuiltView, error) {
@@ -539,6 +572,16 @@ func writeEntries(sourceRoot, output string, plans []viewPlan, routes []clientRo
 			return err
 		}
 		quoted := strconv.Quote(filepath.ToSlash(source))
+		if plan.Mode == "script" {
+			client := "import " + quoted + ";\n"
+			if buildID != "" {
+				client += "const bifrostBuild=" + strconv.Quote(buildID) + ";async function bifrostPoll(){try{const r=await fetch('/_bifrost/build-id?wait='+bifrostBuild,{cache:'no-store'});if(r.ok){if((await r.text())!==bifrostBuild){location.reload();return;}setTimeout(bifrostPoll,0);}else{setTimeout(bifrostPoll,500);}}catch{setTimeout(bifrostPoll,500);}}bifrostPoll();\n"
+			}
+			if err := os.WriteFile(plan.ClientFile, []byte(client), 0o644); err != nil {
+				return err
+			}
+			continue
+		}
 		var client string
 		if plan.Mode == "mount" {
 			client = "import React from 'react';\nimport { createRoot } from 'react-dom/client';\nimport { Page } from " + quoted + ";\nconst root=document.getElementById('app'); if(!root) throw new Error('missing #app'); createRoot(root).render(React.createElement(Page, {}));\n"
@@ -795,10 +838,18 @@ func collectBuiltViews(output string, plans []viewPlan, development bool) ([]pro
 		if err != nil {
 			return nil, nil, err
 		}
+		source := plan.Source
+		if plan.ViewSource != "" {
+			source = plan.ViewSource
+		}
+		mode := plan.Mode
+		if mode == "script" {
+			mode = "html"
+		}
 		view := protocol.BuiltView{
 			ID:     plan.ID,
-			Source: plan.Source,
-			Mode:   plan.Mode,
+			Source: source,
+			Mode:   mode,
 			Client: protocol.AssetSet{Entry: clientEntry, Imports: imports, Styles: styles},
 		}
 		if !development && plan.ServerFile != "" {
