@@ -2585,27 +2585,15 @@ function Back() {
   return null;
 }
 
-// The keyboard takes the bottom of the screen, and with the phone on edge to edge
-// the window does not shrink for it: what is anchored to the bottom -- the field
-// of the chat -- stays under the keys. Measured on fonnso: the composer of a thread
-// was covered whole by the keyboard, and with the height the phone reports it was
-// still 24 dp under it, which is the bar of the system: the keyboard reports its
-// own height and not the bar it sits on, so the shell pads by both.
+// The keyboard takes the bottom of the screen, and a window that shrinks for it
+// is the window of the system: padding the shell by the height of the keyboard
+// as well took the room twice. Measured on the login of picsel: with the keyboard
+// open the form of the page closed to nothing and the fields went out of sight.
+// The window is left to the system, and a page that does not fit scrolls.
 function Shell() {
   const insets = useSafeAreaInsets();
-  const [keyboard, setKeyboard] = useState(0);
-  useEffect(() => {
-    const show = Keyboard.addListener("keyboardDidShow", (event) => {
-      setKeyboard(event.endCoordinates?.height ?? 0);
-    });
-    const hide = Keyboard.addListener("keyboardDidHide", () => setKeyboard(0));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
   return (
-    <View style={[styles.shell, { paddingTop: insets.top, paddingBottom: keyboard > 0 ? keyboard + insets.bottom : insets.bottom }]}>
+    <View style={[styles.shell, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <Back />
       <Stack screenOptions={{ headerShown: false }} />
     </View>
