@@ -736,6 +736,22 @@ func TestNativeAParagraphOfTheHTMLIsABlock(t *testing.T) {
 	}
 }
 
+func TestNativeKeepsTheCookieTheServerSets(t *testing.T) {
+	// Measured on the login of the app of the case: the session POST answered with
+	// its cookie and the page that followed was fetched as an anonymous visitor.
+	for _, said := range []string{
+		"const jar = new Map<string, string>();",
+		"function readCookies(response: Response): void",
+		`jar.set(name, value);`,
+		`headers.set("cookie", cookie);`,
+		`return original(target, sent).then((response) => {`,
+	} {
+		if !strings.Contains(nativeNet, said) {
+			t.Fatalf("the target forgets the cookie of the server: %q", said)
+		}
+	}
+}
+
 func TestNativeLeavesOutAPlaceThatIsNotANumber(t *testing.T) {
 	// A page that places a popup works out where it goes by measuring the page,
 	// and what it measured travels as a style of a browser: a box fixed to the
@@ -1261,7 +1277,7 @@ func TestNativeShipsThePiecesEveryClientNeeds(t *testing.T) {
 	if !ok {
 		t.Fatal("a page that asks its server for /api/... has nothing to put the origin there")
 	}
-	if !strings.Contains(net, `url.startsWith("/")`) || !strings.Contains(net, "original(target, init)") {
+	if !strings.Contains(net, `url.startsWith("/")`) || !strings.Contains(net, "original(target, sent)") {
 		t.Fatal("the shim does not do what the browser does to a relative url")
 	}
 	// A multipart request with a file is the one the fetch of the runtime cannot

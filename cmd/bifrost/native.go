@@ -1125,16 +1125,63 @@ function uploaded(url: string, init: RequestInit): Promise<Response> {
   });
 }
 
+// A client of the web keeps the cookie a server sets and sends it back with the
+// next request. The fetch of this target keeps none: measured on the login of the
+// app of the case, the session POST answered with its cookie and the page that
+// followed was fetched as an anonymous visitor, so every screen after a login was
+// the one of a guest. The jar is kept here, for the origin of the app only.
+const jar = new Map<string, string>();
+
+function readCookies(response: Response): void {
+  const header = response.headers.get("set-cookie");
+  if (header === null) {
+    return;
+  }
+  for (const piece of header.split(/,(?=[^;=]+=[^;]*)/)) {
+    const pair = piece.split(";")[0] ?? "";
+    const at = pair.indexOf("=");
+    if (at <= 0) {
+      continue;
+    }
+    const name = pair.slice(0, at).trim();
+    const value = pair.slice(at + 1).trim();
+    if (value === "") {
+      jar.delete(name);
+    } else {
+      jar.set(name, value);
+    }
+  }
+}
+
+function cookieOf(): string | null {
+  if (jar.size === 0) {
+    return null;
+  }
+  return Array.from(jar.entries())
+    .map(([name, value]) => name + "=" + value)
+    .join("; ");
+}
+
 globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
   const url = urlOf(input);
+  const same = url.startsWith("/") || url.startsWith(ORIGIN);
   const target = url.startsWith("/") ? ORIGIN + url : url;
   if (init !== undefined && isUpload(init.body)) {
     return uploaded(target, init);
   }
-  if (url.startsWith("/")) {
-    return original(target, init);
+  if (!same) {
+    return original(input, init);
   }
-  return original(input, init);
+  const headers = new Headers(init?.headers);
+  const cookie = cookieOf();
+  if (cookie !== null && !headers.has("cookie")) {
+    headers.set("cookie", cookie);
+  }
+  const sent = { ...(init ?? {}), headers };
+  return original(target, sent).then((response) => {
+    readCookies(response);
+    return response;
+  });
 };
 `
 
