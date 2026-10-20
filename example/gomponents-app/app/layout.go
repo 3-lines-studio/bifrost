@@ -12,7 +12,7 @@ func Layout(content g.Node) g.Node {
 			h.Meta(h.Charset("utf-8")),
 			h.Meta(h.Name("viewport"), h.Content("width=device-width, initial-scale=1")),
 			h.TitleEl(g.Text("Gomponents App Router")),
-			h.Script(h.Src("https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4")),
+			h.Link(h.Rel("stylesheet"), h.Href("/styles.css")),
 			h.Script(h.Defer(), h.Src("https://cdn.jsdelivr.net/npm/@hotwired/turbo@8/dist/turbo.es2017-umd.js")),
 			h.Script(h.Defer(), h.Src("https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js")),
 			h.StyleEl(g.Raw("[x-cloak]{display:none!important}")),
