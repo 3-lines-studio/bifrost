@@ -347,3 +347,56 @@ func TestLastLinesKeepsTheEndOfTheLog(t *testing.T) {
 		t.Fatal("an empty log is not empty")
 	}
 }
+
+func TestPlanViewsSkipsHTMLViews(t *testing.T) {
+	describe := protocol.DescribeResult{Spec: protocol.Spec{Routes: []protocol.RouteSpec{
+		{Pattern: "/", View: "app/page.html", Kind: "server", Layouts: []string{"app/layout.html"}},
+	}}}
+	plans, routes, _, err := planViews(describe, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) != 0 {
+		t.Fatalf("html view produced %d frontend plans", len(plans))
+	}
+	if routes["/"] != templateViewID(describe.Spec.Routes[0]) {
+		t.Fatal("html route view id was not registered")
+	}
+}
+
+func TestCollectHTMLViews(t *testing.T) {
+	root := t.TempDir()
+	for name, source := range map[string]string{
+		"app/page.html":   "<h1>{{.Props.title}}</h1>",
+		"app/layout.html": "<main>{{.Content}}</main>",
+	} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spec := protocol.Spec{Routes: []protocol.RouteSpec{
+		{Pattern: "/", View: "app/page.html", Kind: "server", Layouts: []string{"app/layout.html"}},
+	}}
+	routeViews := map[string]string{"/": templateViewID(spec.Routes[0])}
+	views, err := collectHTMLViews(root, spec, routeViews)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("views = %d", len(views))
+	}
+	view := views[0]
+	if view.Mode != "html" || view.Source != "app/page.html" || view.HTML == nil {
+		t.Fatalf("view = %+v", view)
+	}
+	if view.HTML.Page.Source != "<h1>{{.Props.title}}</h1>" {
+		t.Fatalf("page source = %q", view.HTML.Page.Source)
+	}
+	if len(view.HTML.Layouts) != 1 || view.HTML.Layouts[0].Path != "app/layout.html" {
+		t.Fatalf("layouts = %+v", view.HTML.Layouts)
+	}
+}

@@ -213,3 +213,61 @@ func TestPathMatchesPattern(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateManifestAcceptsHTMLViews(t *testing.T) {
+	app, err := newApp(Config{
+		SourceRoot: t.TempDir(),
+		Routes: []Route{
+			Server("/", "app/page.html", nil).WithLayouts("app/layout.html"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := protocol.BuiltView{
+		ID:     digestString("html-view"),
+		Source: "app/page.html",
+		Mode:   "html",
+		HTML: &protocol.HTMLAssets{
+			Page:    protocol.TemplateSource{Path: "app/page.html", Source: "<h1>hello</h1>"},
+			Layouts: []protocol.TemplateSource{{Path: "app/layout.html", Source: "<main>{{.Content}}</main>"}},
+		},
+	}
+	manifest := protocol.Manifest{
+		Schema:    protocol.Schema,
+		SpecHash:  app.specHash,
+		BuildID:   digestString("build"),
+		Toolchain: protocol.Toolchain{Bifrost: "1.1.0"},
+		Views:     []protocol.BuiltView{view},
+		Routes:    []protocol.BuiltRoute{{Pattern: "/", Kind: "server", ViewID: view.ID}},
+	}
+	compiled, err := validateManifest(fstest.MapFS{}, app.spec, app.specHash, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := compiled.views[view.ID].Mode; got != "html" {
+		t.Fatalf("view mode = %q", got)
+	}
+}
+
+func TestValidateManifestRejectsHTMLViewWithoutTemplates(t *testing.T) {
+	app, err := newApp(Config{
+		SourceRoot: t.TempDir(),
+		Routes:     []Route{Server("/", "app/page.html", nil)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := protocol.BuiltView{ID: digestString("html-view"), Source: "app/page.html", Mode: "html"}
+	manifest := protocol.Manifest{
+		Schema:    protocol.Schema,
+		SpecHash:  app.specHash,
+		BuildID:   digestString("build"),
+		Toolchain: protocol.Toolchain{Bifrost: "1.1.0"},
+		Views:     []protocol.BuiltView{view},
+		Routes:    []protocol.BuiltRoute{{Pattern: "/", Kind: "server", ViewID: view.ID}},
+	}
+	if _, err := validateManifest(fstest.MapFS{}, app.spec, app.specHash, manifest); err == nil {
+		t.Fatal("manifest without html templates was accepted")
+	}
+}

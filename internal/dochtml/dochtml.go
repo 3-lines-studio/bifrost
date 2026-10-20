@@ -14,6 +14,7 @@ import (
 const (
 	AssetPrefix         = "/_bifrost/"
 	DevPrefix           = "/_bifrost/dev/"
+	propsMarker         = "<!--BIFROST:PROPS-->"
 	defaultDocumentOpen = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
 )
 
@@ -55,6 +56,10 @@ func NewShell(assets protocol.AssetSet) (Shell, error) {
 	suffix.WriteString(`"></script></body></html>`)
 
 	return Shell{afterHead: after.String(), suffix: suffix.String()}, nil
+}
+
+func NewPlainShell() Shell {
+	return Shell{afterHead: "</head><body>", suffix: "</body></html>"}
 }
 
 func FrontendAssetURL(value string) string {
@@ -111,9 +116,10 @@ func (s Shell) WritePreamble(w io.Writer, head []byte, document protocol.Documen
 }
 
 func (s Shell) WriteSuffix(w io.Writer, props json.RawMessage) error {
-	before, after, ok := strings.Cut(s.suffix, "<!--BIFROST:PROPS-->")
+	before, after, ok := strings.Cut(s.suffix, propsMarker)
 	if !ok {
-		return errors.New("bifrost: invalid document shell")
+		_, err := io.WriteString(w, s.suffix)
+		return err
 	}
 	if _, err := io.WriteString(w, before); err != nil {
 		return err

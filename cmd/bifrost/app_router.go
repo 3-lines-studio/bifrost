@@ -51,6 +51,8 @@ type appRoute struct {
 	NotFoundView string
 	LoadingView  string
 	NotFoundPage bool
+	Template     bool
+	Layouts      []string
 }
 
 type goDir struct {
@@ -73,10 +75,10 @@ func appRouterRoots(dir, packagePath string) (string, string, bool, error) {
 	if err != nil {
 		return "", "", false, err
 	}
-	rootPage := fileExists(filepath.Join(projectRoot, "page.tsx"))
-	appPage := fileExists(filepath.Join(projectRoot, "app", "page.tsx"))
+	rootPage := fileExists(filepath.Join(projectRoot, "page.tsx")) || fileExists(filepath.Join(projectRoot, "page.html"))
+	appPage := fileExists(filepath.Join(projectRoot, "app", "page.tsx")) || fileExists(filepath.Join(projectRoot, "app", "page.html"))
 	if rootPage && appPage {
-		return "", "", false, errors.New("bifrost: both page.tsx and app/page.tsx define the route root")
+		return "", "", false, errors.New("bifrost: both a root page and app/page.* define the route root")
 	}
 	if rootPage {
 		return projectRoot, projectRoot, true, nil
@@ -97,7 +99,7 @@ func appRouterHint(projectRoot string, err error) error {
 	if hasPage(projectRoot) || hasMarker(projectRoot) || !hasGoFile(projectRoot) {
 		return err
 	}
-	return fmt.Errorf("%w\nbifrost: %s has route.go but no page.tsx and no app directory; an App Router app needs one of them", err, filepath.ToSlash(projectRoot))
+	return fmt.Errorf("%w\nbifrost: %s has route.go but no page.tsx, page.html, or app directory; an App Router app needs one of them", err, filepath.ToSlash(projectRoot))
 }
 
 func walkTree(root string, match func(path string, entry os.DirEntry) bool) bool {
@@ -120,7 +122,7 @@ func walkTree(root string, match func(path string, entry os.DirEntry) bool) bool
 
 func hasPage(root string) bool {
 	return walkTree(root, func(_ string, entry os.DirEntry) bool {
-		return !entry.IsDir() && entry.Name() == "page.tsx"
+		return !entry.IsDir() && (entry.Name() == "page.tsx" || entry.Name() == "page.html")
 	})
 }
 
@@ -168,6 +170,15 @@ func (a *appRouter) routeRows() []routeRow {
 	return a.Rows
 }
 
+func (a *appRouter) needsFrontend() bool {
+	for _, route := range a.Routes {
+		if !route.Template {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *appRouter) routeParams() map[string][]string {
 	if a == nil {
 		return nil
@@ -206,7 +217,7 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 		return appRouter{}, err
 	}
 	if len(routes) == 0 && len(goDirs) == 0 {
-		return appRouter{}, fmt.Errorf("bifrost: no page.tsx or route.go found under %s", routeRoot)
+		return appRouter{}, fmt.Errorf("bifrost: no page.tsx, page.html, or route.go found under %s", routeRoot)
 	}
 	routes, err := appendNotFoundRoutes(routeRoot, routes)
 	if err != nil {
@@ -352,7 +363,7 @@ func discoverRoutes(root string) ([]appRoute, error) {
 		if entry.IsDir() {
 			return nil
 		}
-		if entry.Name() != "page.tsx" {
+		if entry.Name() != "page.tsx" && entry.Name() != "page.html" {
 			if !isRouteView(entry.Name()) || !hasHeadExport(filePath) {
 				return nil
 			}
@@ -378,7 +389,7 @@ func discoverRoutes(root string) ([]appRoute, error) {
 			return nil
 		}
 		patterns[pattern] = filepath.ToSlash(relative)
-		route := appRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, Params: params, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), HasHead: hasHeadExport(filePath)}
+		route := appRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, Params: params, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), HasHead: hasHeadExport(filePath), Template: strings.HasSuffix(entry.Name(), ".html")}
 		if _, err := os.Stat(filepath.Join(directory, "page.go")); err == nil {
 			route.PageGo = true
 			route.ImportPath = filepath.ToSlash(relative)
@@ -410,7 +421,7 @@ func appendNotFoundRoutes(root string, routes []appRoute) ([]appRoute, error) {
 		} else if skip {
 			return filepath.SkipDir
 		}
-		if entry.IsDir() || entry.Name() != "not-found.tsx" {
+		if entry.IsDir() || (entry.Name() != "not-found.tsx" && entry.Name() != "not-found.html") {
 			return nil
 		}
 		relative, err := filepath.Rel(root, filepath.Dir(filePath))
@@ -423,7 +434,7 @@ func appendNotFoundRoutes(root string, routes []appRoute) ([]appRoute, error) {
 			return nil
 		}
 		pattern := strings.TrimSuffix(base, "/{$}") + "/{path...}"
-		routes = append(routes, appRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), NotFoundPage: true})
+		routes = append(routes, appRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), NotFoundPage: true, Template: strings.HasSuffix(entry.Name(), ".html")})
 		return nil
 	})
 	if err != nil {
@@ -492,6 +503,11 @@ func writeViews(projectRoot, routeRoot string, routes []appRoute) error {
 	}
 	needsMetadata := false
 	for index := range routes {
+		if routes[index].Template {
+			routes[index].View = projectRelativeView(projectRoot, routeRoot, routes[index].View)
+			routes[index].Layouts = inheritedHTMLLayouts(projectRoot, routeRoot, routes[index].Directory)
+			continue
+		}
 		wrappers := inheritedWrappers(routeRoot, routes[index].Directory)
 		layouts := make([]string, 0, len(wrappers))
 		for _, wrapper := range wrappers {
@@ -792,6 +808,33 @@ func inheritedWrappers(root, directory string) []viewWrapper {
 		}
 	}
 	return wrappers
+}
+
+func projectRelativeView(projectRoot, routeRoot, view string) string {
+	relative, err := filepath.Rel(projectRoot, routeRoot)
+	if err != nil || relative == "." {
+		return filepath.ToSlash(view)
+	}
+	return filepath.ToSlash(filepath.Join(relative, view))
+}
+
+func inheritedHTMLLayouts(projectRoot, routeRoot, directory string) []string {
+	var layouts []string
+	appendDirectory := func(current string) {
+		filePath := filepath.Join(routeRoot, filepath.FromSlash(current), "layout.html")
+		if fileExists(filePath) {
+			layouts = append(layouts, projectRelativeView(projectRoot, routeRoot, filepath.ToSlash(filepath.Join(current, "layout.html"))))
+		}
+	}
+	appendDirectory(".")
+	if directory != "." {
+		current := "."
+		for _, part := range strings.Split(directory, "/") {
+			current = filepath.Join(current, part)
+			appendDirectory(current)
+		}
+	}
+	return layouts
 }
 
 func inheritedFiles(root, directory, name string) []string {
@@ -1132,6 +1175,27 @@ func directoryContains(parent, child string) bool {
 	return parent == "." || parent == child || strings.HasPrefix(child, parent+"/")
 }
 
+func routeOptions(route appRoute) string {
+	var options strings.Builder
+	if len(route.Layouts) > 0 {
+		options.WriteString(".WithLayouts(")
+		for index, layout := range route.Layouts {
+			if index > 0 {
+				options.WriteString(", ")
+			}
+			options.WriteString(strconv.Quote(layout))
+		}
+		options.WriteString(")")
+	}
+	if !route.Template {
+		options.WriteString(".WithNavigation()")
+	}
+	if route.HasCache {
+		options.WriteString(".WithCache(" + route.Alias + ".Cache())")
+	}
+	return options.String()
+}
+
 func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDir, renderConcurrency, renderQueue int) error {
 	renderConfig := "Assets: bifrostAssets, "
 	if renderConcurrency > 0 {
@@ -1148,7 +1212,7 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 	for index, route := range routes {
 		if route.NotFoundPage {
 			hasNotFoundPage = true
-			fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, loadNotFound).WithNavigation(),\n", strconv.Quote(route.Pattern), strconv.Quote(route.View))
+			fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, loadNotFound)%s,\n", strconv.Quote(route.Pattern), strconv.Quote(route.View), routeOptions(route))
 			continue
 		}
 		hasSegments = hasSegments || slices.ContainsFunc(route.Params, func(param routeParam) bool { return param.Segments })
@@ -1174,11 +1238,7 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 		} else {
 			fmt.Fprintf(&loaders, "func %s(r *http.Request) (any, error) {\n\treturn requestPage(r, %s, nil, %d)\n}\n\n", loader, params, len(route.ErrorViews))
 		}
-		cache := ""
-		if route.HasCache {
-			cache = ".WithCache(" + route.Alias + ".Cache())"
-		}
-		fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, %s).WithNavigation()%s,\n", strconv.Quote(route.Pattern), strconv.Quote(route.View), loader, cache)
+		fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, %s)%s,\n", strconv.Quote(route.Pattern), strconv.Quote(route.View), loader, routeOptions(route))
 	}
 	if hasNotFoundPage {
 		fmt.Fprintf(&loaders, "func loadNotFound(r *http.Request) (any, error) {\n\treturn bifrost.PageData{Props: map[string]any{\"pathname\": r.URL.EscapedPath()}, Status: http.StatusNotFound}, nil\n}\n\n")

@@ -10,10 +10,11 @@ type Spec struct {
 }
 
 type RouteSpec struct {
-	Pattern    string `json:"pattern"`
-	View       string `json:"view"`
-	Kind       string `json:"kind"`
-	Navigation bool   `json:"navigation,omitempty"`
+	Pattern    string   `json:"pattern"`
+	View       string   `json:"view"`
+	Kind       string   `json:"kind"`
+	Navigation bool     `json:"navigation,omitempty"`
+	Layouts    []string `json:"layouts,omitempty"`
 }
 
 type DescribeResult struct {
@@ -78,6 +79,17 @@ type BuiltView struct {
 	Mode   string        `json:"mode"`
 	Client AssetSet      `json:"client"`
 	Server *ServerAssets `json:"server,omitempty"`
+	HTML   *HTMLAssets   `json:"html,omitempty"`
+}
+
+type HTMLAssets struct {
+	Page    TemplateSource   `json:"page"`
+	Layouts []TemplateSource `json:"layouts,omitempty"`
+}
+
+type TemplateSource struct {
+	Path   string `json:"path"`
+	Source string `json:"source"`
 }
 
 type ServerAssets struct {

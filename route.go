@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 )
 
 type Loader func(*http.Request) (any, error)
@@ -61,6 +62,7 @@ type Route struct {
 	generate     Generator
 	navigation   bool
 	cacheControl string
+	layouts      []string
 }
 
 func Server(pattern, view string, load Loader) Route {
@@ -96,5 +98,10 @@ func (r Route) WithNavigation() Route {
 
 func (r Route) WithCache(cacheControl string) Route {
 	r.cacheControl = cacheControl
+	return r
+}
+
+func (r Route) WithLayouts(layouts ...string) Route {
+	r.layouts = slices.Clone(layouts)
 	return r
 }

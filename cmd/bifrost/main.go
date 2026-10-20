@@ -3,11 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/3-lines-studio/bifrost"
@@ -95,18 +93,17 @@ func runBuild(args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := exec.LookPath("bun"); err != nil {
-		return errors.New("bifrost: Bun is required for the build; install it from https://bun.sh")
-	}
-	if err := requireViteInstalled(projectRoot); err != nil {
-		return err
-	}
 	if isAppRouter {
 		prepared, err := prepareAppRouter(context.Background(), projectRoot, routeRoot, *renderConcurrency, *renderQueue)
 		if err != nil {
 			return err
 		}
 		app = &prepared
+		if app.needsFrontend() {
+			if err := checkFrontendToolchain(projectRoot); err != nil {
+				return err
+			}
+		}
 		if err := buildAppRouter(context.Background(), prepared, options, true); err != nil {
 			return err
 		}

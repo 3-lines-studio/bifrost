@@ -181,6 +181,29 @@ func validateRoutes(sourceRoot string, routes []Route) ([]Route, error) {
 		}
 		route.view = view
 
+		for layoutIndex, layout := range route.layouts {
+			normalized, err := normalizeView(sourceRoot, layout)
+			if err != nil {
+				return nil, fmt.Errorf("bifrost: route %q layout: %w", route.pattern, err)
+			}
+			if !htmlView(normalized) {
+				return nil, fmt.Errorf("bifrost: route %q layout %q must use .html", route.pattern, layout)
+			}
+			route.layouts[layoutIndex] = normalized
+		}
+
+		template := htmlView(route.view)
+		if template {
+			if route.kind != routeServer {
+				return nil, fmt.Errorf("bifrost: route %q must be a server route to use an .html view", route.pattern)
+			}
+			if route.navigation {
+				return nil, fmt.Errorf("bifrost: route %q cannot enable navigation with an .html view", route.pattern)
+			}
+		} else if len(route.layouts) > 0 {
+			return nil, fmt.Errorf("bifrost: route %q uses layouts with a non-html view", route.pattern)
+		}
+
 		if route.navigation && route.kind != routeServer {
 			return nil, fmt.Errorf("bifrost: navigation requires a server route: %q", route.pattern)
 		}
@@ -247,9 +270,9 @@ func normalizeView(sourceRoot, view string) (string, error) {
 
 	clean := path.Clean(view)
 	switch strings.ToLower(path.Ext(clean)) {
-	case ".tsx", ".jsx", ".ts", ".js":
+	case ".tsx", ".jsx", ".ts", ".js", ".html":
 	default:
-		return "", fmt.Errorf("view path %q must use .tsx, .jsx, .ts, or .js", view)
+		return "", fmt.Errorf("view path %q must use .tsx, .jsx, .ts, .js, or .html", view)
 	}
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
 		return "", fmt.Errorf("view path %q escapes the source root", view)
@@ -267,6 +290,10 @@ func patternIsDynamic(pattern string) bool {
 	return strings.Contains(strings.ReplaceAll(pattern, "{$}", ""), "{")
 }
 
+func htmlView(view string) bool {
+	return strings.HasSuffix(strings.ToLower(view), ".html")
+}
+
 func makeBuildSpec(routes []Route) (protocol.Spec, string, error) {
 	spec := protocol.Spec{
 		Schema: protocol.Schema,
@@ -278,6 +305,7 @@ func makeBuildSpec(routes []Route) (protocol.Spec, string, error) {
 			View:       route.view,
 			Kind:       route.kind.String(),
 			Navigation: route.navigation,
+			Layouts:    slices.Clone(route.layouts),
 		}
 	}
 

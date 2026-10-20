@@ -1120,3 +1120,118 @@ func TestPrepareAppRouterAppRejectsEmptyTrees(t *testing.T) {
 		t.Fatal("an empty route root was accepted")
 	}
 }
+
+func TestAppRouterDiscoversHTMLViewsAndLayouts(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{
+		"layout.html",
+		"page.html",
+		"not-found.html",
+		"blog/layout.html",
+		"blog/page.html",
+		"blog/slug_/page.html",
+	} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("<p>"+name+"</p>"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err = appendNotFoundRoutes(root, routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	byPattern := make(map[string]appRoute, len(routes))
+	for _, route := range routes {
+		byPattern[route.Pattern] = route
+	}
+	post := byPattern["/blog/{slug}"]
+	if !post.Template || post.View != "blog/slug_/page.html" {
+		t.Fatalf("post route = %+v", post)
+	}
+	if got, want := strings.Join(post.Layouts, ","), "layout.html,blog/layout.html"; got != want {
+		t.Fatalf("post layouts = %q, want %q", got, want)
+	}
+	home := byPattern["/{$}"]
+	if !home.Template || home.View != "page.html" || strings.Join(home.Layouts, ",") != "layout.html" {
+		t.Fatalf("home route = %+v", home)
+	}
+	notFound := byPattern["/{path...}"]
+	if !notFound.Template || notFound.View != "not-found.html" || strings.Join(notFound.Layouts, ",") != "layout.html" {
+		t.Fatalf("not found route = %+v", notFound)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".bifrost", "views"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".tsx") {
+			t.Fatalf("html routes generated a React view: %s", entry.Name())
+		}
+	}
+}
+
+func TestAppRouterRejectsBothPageFiles(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"page.tsx", "page.html"} {
+		if err := os.WriteFile(filepath.Join(root, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := discoverRoutes(root); err == nil || !strings.Contains(err.Error(), "duplicate route") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestAppRouterRootsFindHTMLPage(t *testing.T) {
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.MkdirAll(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.html"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project, routes, ok, err := appRouterRoots(".", projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || project != projectRoot || routes != appRoot {
+		t.Fatalf("roots = %q, %q, %t", project, routes, ok)
+	}
+}
+
+func TestGeneratedMainUsesHTMLayoutsWithoutNavigation(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	routes := []appRoute{
+		{Pattern: "/blog/{slug}", View: "app/blog/slug_/page.html", Template: true, Layouts: []string{"app/layout.html", "app/blog/layout.html"}},
+		{Pattern: "/{$}", View: "app/page.html", Template: true, Layouts: []string{"app/layout.html"}},
+	}
+	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	if !strings.Contains(text, `bifrost.Server("/blog/{slug}", "app/blog/slug_/page.html", load0).WithLayouts("app/layout.html", "app/blog/layout.html"),`) {
+		t.Fatalf("generated main does not declare html layouts:\n%s", text)
+	}
+	if strings.Contains(text, ".WithNavigation()") {
+		t.Fatalf("generated main enables navigation for html views:\n%s", text)
+	}
+}

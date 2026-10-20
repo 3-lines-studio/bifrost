@@ -67,14 +67,25 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 	if manifest.SpecHash != specHash {
 		return nil, fmt.Errorf("bifrost: stale manifest: spec hash %q does not match app %q", manifest.SpecHash, specHash)
 	}
-	if manifest.Toolchain.Bifrost == "" || manifest.Toolchain.Bun == "" || manifest.Toolchain.Vite == "" || manifest.Toolchain.React == "" {
+	if manifest.Toolchain.Bifrost == "" {
 		return nil, errors.New("bifrost: manifest toolchain is incomplete")
 	}
-	if !supportedMajorVersion(manifest.Toolchain.Vite, 8) {
-		return nil, fmt.Errorf("bifrost: unsupported Vite version %q; Bifrost requires Vite 8", manifest.Toolchain.Vite)
+	hasFrontend := manifest.Runtime != nil
+	for _, view := range manifest.Views {
+		if view.Mode != "html" {
+			hasFrontend = true
+		}
 	}
-	if !supportedReactVersion(manifest.Toolchain.React) {
-		return nil, fmt.Errorf("bifrost: unsupported React version %q; V1 requires React 19", manifest.Toolchain.React)
+	if hasFrontend {
+		if manifest.Toolchain.Bun == "" || manifest.Toolchain.Vite == "" || manifest.Toolchain.React == "" {
+			return nil, errors.New("bifrost: manifest toolchain is incomplete")
+		}
+		if !supportedMajorVersion(manifest.Toolchain.Vite, 8) {
+			return nil, fmt.Errorf("bifrost: unsupported Vite version %q; Bifrost requires Vite 8", manifest.Toolchain.Vite)
+		}
+		if !supportedReactVersion(manifest.Toolchain.React) {
+			return nil, fmt.Errorf("bifrost: unsupported React version %q; V1 requires React 19", manifest.Toolchain.React)
+		}
 	}
 
 	views := make(map[string]protocol.BuiltView, len(manifest.Views))
@@ -104,12 +115,14 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 				return nil, fmt.Errorf("bifrost: view %q: %w", view.ID, err)
 			}
 		}
-		clientRefs := append([]protocol.FileRef{view.Client.Entry}, view.Client.Styles...)
-		clientRefs = append(clientRefs, view.Client.Imports...)
-		for _, file := range clientRefs {
-			registered, exists := clientFiles[file.Path]
-			if !exists || registered != file {
-				return nil, fmt.Errorf("bifrost: view %q client file %q is not registered", view.ID, file.Path)
+		if view.Mode != "html" {
+			clientRefs := append([]protocol.FileRef{view.Client.Entry}, view.Client.Styles...)
+			clientRefs = append(clientRefs, view.Client.Imports...)
+			for _, file := range clientRefs {
+				registered, exists := clientFiles[file.Path]
+				if !exists || registered != file {
+					return nil, fmt.Errorf("bifrost: view %q client file %q is not registered", view.ID, file.Path)
+				}
 			}
 		}
 	}
@@ -128,9 +141,6 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 		if _, exists := routes[route.Pattern]; exists {
 			return nil, fmt.Errorf("bifrost: duplicate manifest route %q", route.Pattern)
 		}
-		if route.Kind == "server" {
-			needsRuntime = true
-		}
 		if route.Kind != declared.Kind {
 			return nil, fmt.Errorf("bifrost: manifest route %q kind %q does not match app kind %q", route.Pattern, route.Kind, declared.Kind)
 		}
@@ -138,8 +148,20 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 		if !exists {
 			return nil, fmt.Errorf("bifrost: manifest route %q references unknown view %q", route.Pattern, route.ViewID)
 		}
+		if route.Kind == "server" && view.Mode != "html" {
+			needsRuntime = true
+		}
 		if view.Source != declared.View {
 			return nil, fmt.Errorf("bifrost: manifest route %q view source %q does not match app source %q", route.Pattern, view.Source, declared.View)
+		}
+		if view.Mode == "html" {
+			layouts := make([]string, len(view.HTML.Layouts))
+			for index, layout := range view.HTML.Layouts {
+				layouts[index] = layout.Path
+			}
+			if !slices.Equal(layouts, declared.Layouts) {
+				return nil, fmt.Errorf("bifrost: manifest route %q layouts do not match the app", route.Pattern)
+			}
 		}
 		if err := validateViewForRoute(view, route.Kind); err != nil {
 			return nil, fmt.Errorf("bifrost: manifest route %q: %w", route.Pattern, err)
@@ -234,6 +256,9 @@ func validateBuiltView(view protocol.BuiltView) error {
 	if view.Source == "" || path.Clean(view.Source) != view.Source || !fs.ValidPath(view.Source) {
 		return fmt.Errorf("invalid source path %q", view.Source)
 	}
+	if view.Mode == "html" {
+		return validateHTMLView(view)
+	}
 	if view.Mode != "hydrate" && view.Mode != "mount" {
 		return fmt.Errorf("invalid mode %q", view.Mode)
 	}
@@ -259,9 +284,51 @@ func validateBuiltView(view protocol.BuiltView) error {
 	return nil
 }
 
+func validateHTMLView(view protocol.BuiltView) error {
+	if view.Client.Entry.Path != "" || len(view.Client.Styles) > 0 || len(view.Client.Imports) > 0 || view.Server != nil {
+		return errors.New("html view cannot have client or server assets")
+	}
+	if view.HTML == nil {
+		return errors.New("html view has no templates")
+	}
+	if view.HTML.Page.Path != view.Source {
+		return fmt.Errorf("html page %q does not match the view source", view.HTML.Page.Path)
+	}
+	if err := validateTemplateSource(view.HTML.Page); err != nil {
+		return err
+	}
+	seen := make(map[string]struct{}, len(view.HTML.Layouts))
+	for _, layout := range view.HTML.Layouts {
+		if err := validateTemplateSource(layout); err != nil {
+			return err
+		}
+		if !strings.HasSuffix(layout.Path, ".html") {
+			return fmt.Errorf("html layout %q must use .html", layout.Path)
+		}
+		if _, exists := seen[layout.Path]; exists {
+			return fmt.Errorf("duplicate html layout %q", layout.Path)
+		}
+		seen[layout.Path] = struct{}{}
+	}
+	return nil
+}
+
+func validateTemplateSource(source protocol.TemplateSource) error {
+	if source.Path == "" || path.Clean(source.Path) != source.Path || !fs.ValidPath(source.Path) {
+		return fmt.Errorf("invalid template path %q", source.Path)
+	}
+	if source.Source == "" {
+		return fmt.Errorf("template %q is empty", source.Path)
+	}
+	return nil
+}
+
 func validateViewForRoute(view protocol.BuiltView, kind string) error {
 	switch kind {
 	case "server":
+		if view.Mode == "html" {
+			return nil
+		}
 		if view.Mode != "hydrate" || (view.Server == nil && os.Getenv("BIFROST_DEV_DIR") == "") {
 			return errors.New("server route requires a hydrate view with a server entry")
 		}
@@ -360,6 +427,9 @@ func validDigest(value string) bool {
 }
 
 func viewFiles(view protocol.BuiltView) []protocol.FileRef {
+	if view.Mode == "html" {
+		return nil
+	}
 	serverFiles := 0
 	if view.Server != nil {
 		serverFiles = 1 + len(view.Server.Imports)

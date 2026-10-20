@@ -85,10 +85,6 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 		}
 	}
 
-	declarations := make(map[string]Route, len(app.routes))
-	for _, route := range app.routes {
-		declarations[route.pattern] = route
-	}
 	devDir := os.Getenv("BIFROST_DEV_DIR")
 	if devDir != "" {
 		port, portErr := strconv.Atoi(os.Getenv("BIFROST_VITE_PORT"))
@@ -97,81 +93,107 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 		}
 		state.devProxy = newDevelopmentProxy(port)
 	}
-	for pattern, builtRoute := range manifest.routes {
-		declaration := declarations[pattern]
+	for _, declaration := range app.routes {
+		pattern := declaration.pattern
+		builtRoute, exists := manifest.routes[pattern]
+		if !exists {
+			return nil, fmt.Errorf("bifrost: manifest is missing route %q", pattern)
+		}
 		view := manifest.views[builtRoute.ViewID]
-		clientAssets := view.Client
-		serverEntry := ""
-		if view.Server != nil {
-			serverEntry = view.Server.Entry.Path
-		}
-		if devDir != "" {
-			clientFile := filepath.Join(devDir, "entries", view.ID+"-client.tsx")
-			clientModule := (&url.URL{Path: dochtml.DevPrefix + "@fs" + filepath.ToSlash(clientFile)}).EscapedPath()
-			clientAssets = protocol.AssetSet{Entry: protocol.FileRef{Path: clientModule}}
-			if view.Mode == "hydrate" {
-				serverFile := filepath.Join(devDir, "entries", view.ID+"-server.tsx")
-				serverEntry = (&url.URL{Path: "/@fs" + filepath.ToSlash(serverFile)}).EscapedPath()
-			}
-		}
-		shell, err := dochtml.NewShell(clientAssets)
-		if err != nil {
-			return nil, fmt.Errorf("bifrost: compile route %q shell: %w", pattern, err)
-		}
-
 		var handler http.Handler
-		switch declaration.kind {
-		case routeServer:
-			if render == nil || serverEntry == "" {
-				return nil, fmt.Errorf("bifrost: server route %q has no renderer", pattern)
+		if view.Mode == "html" {
+			if declaration.kind != routeServer {
+				return nil, fmt.Errorf("bifrost: route %q with an html view must be a server route", pattern)
+			}
+			templates, err := newTemplateRenderer(view.HTML)
+			if err != nil {
+				return nil, fmt.Errorf("bifrost: compile route %q templates: %w", pattern, err)
 			}
 			state.serverPatterns["GET "+pattern] = struct{}{}
-			page := &serverPageHandler{
+			handler = &serverPageHandler{
 				pattern:      pattern,
 				load:         declaration.load,
-				entry:        serverEntry,
-				shell:        shell,
-				render:       render,
+				entry:        view.Source,
+				shell:        dochtml.NewPlainShell(),
+				render:       templates,
 				hooks:        app.hooks,
 				limits:       app.limits,
 				logger:       app.logger,
 				cacheControl: declaration.cacheControl,
 			}
-			if declaration.navigation {
-				page.navigationView = view.ID
-				page.navigationBuild = manifest.manifest.BuildID
-				page.shell = shell.WithNavigation(page.navigationBuild)
+		} else {
+			clientAssets := view.Client
+			serverEntry := ""
+			if view.Server != nil {
+				serverEntry = view.Server.Entry.Path
 			}
-			handler = page
-		case routeStatic:
 			if devDir != "" {
-				if render == nil || serverEntry == "" {
-					return nil, fmt.Errorf("bifrost: static development route %q has no renderer", pattern)
+				clientFile := filepath.Join(devDir, "entries", view.ID+"-client.tsx")
+				clientModule := (&url.URL{Path: dochtml.DevPrefix + "@fs" + filepath.ToSlash(clientFile)}).EscapedPath()
+				clientAssets = protocol.AssetSet{Entry: protocol.FileRef{Path: clientModule}}
+				if view.Mode == "hydrate" {
+					serverFile := filepath.Join(devDir, "entries", view.ID+"-server.tsx")
+					serverEntry = (&url.URL{Path: "/@fs" + filepath.ToSlash(serverFile)}).EscapedPath()
 				}
-				pages := make(map[string]developmentStaticPage, len(builtRoute.Documents))
-				for _, document := range builtRoute.Documents {
-					props := document.Props
-					if len(props) == 0 {
-						props = emptyProps
-					}
-					pages[document.Path] = developmentStaticPage{props: props, document: documentFromProtocol(document.Document)}
-				}
-				handler = &developmentStaticHandler{pages: pages, page: &serverPageHandler{pattern: pattern, entry: serverEntry, shell: shell, render: render, hooks: app.hooks, limits: app.limits, logger: app.logger}}
-			} else {
-				files := make(map[string]protocol.FileRef, len(builtRoute.Documents))
-				for _, document := range builtRoute.Documents {
-					files[document.Path] = document.File
-				}
-				handler = &staticPageHandler{assets: assets, files: files, headers: app.hooks.assetHeaders}
 			}
-		case routeClient:
-			document, err := shell.ClientDocument(emptyProps)
+			shell, err := dochtml.NewShell(clientAssets)
 			if err != nil {
-				return nil, fmt.Errorf("bifrost: compile client route %q: %w", pattern, err)
+				return nil, fmt.Errorf("bifrost: compile route %q shell: %w", pattern, err)
 			}
-			handler = &clientPageHandler{document: document, contentLength: strconv.Itoa(len(document))}
-		default:
-			return nil, fmt.Errorf("bifrost: route %q has invalid kind", pattern)
+
+			switch declaration.kind {
+			case routeServer:
+				if render == nil || serverEntry == "" {
+					return nil, fmt.Errorf("bifrost: server route %q has no renderer", pattern)
+				}
+				state.serverPatterns["GET "+pattern] = struct{}{}
+				page := &serverPageHandler{
+					pattern:      pattern,
+					load:         declaration.load,
+					entry:        serverEntry,
+					shell:        shell,
+					render:       render,
+					hooks:        app.hooks,
+					limits:       app.limits,
+					logger:       app.logger,
+					cacheControl: declaration.cacheControl,
+				}
+				if declaration.navigation {
+					page.navigationView = view.ID
+					page.navigationBuild = manifest.manifest.BuildID
+					page.shell = shell.WithNavigation(page.navigationBuild)
+				}
+				handler = page
+			case routeStatic:
+				if devDir != "" {
+					if render == nil || serverEntry == "" {
+						return nil, fmt.Errorf("bifrost: static development route %q has no renderer", pattern)
+					}
+					pages := make(map[string]developmentStaticPage, len(builtRoute.Documents))
+					for _, document := range builtRoute.Documents {
+						props := document.Props
+						if len(props) == 0 {
+							props = emptyProps
+						}
+						pages[document.Path] = developmentStaticPage{props: props, document: documentFromProtocol(document.Document)}
+					}
+					handler = &developmentStaticHandler{pages: pages, page: &serverPageHandler{pattern: pattern, entry: serverEntry, shell: shell, render: render, hooks: app.hooks, limits: app.limits, logger: app.logger}}
+				} else {
+					files := make(map[string]protocol.FileRef, len(builtRoute.Documents))
+					for _, document := range builtRoute.Documents {
+						files[document.Path] = document.File
+					}
+					handler = &staticPageHandler{assets: assets, files: files, headers: app.hooks.assetHeaders}
+				}
+			case routeClient:
+				document, err := shell.ClientDocument(emptyProps)
+				if err != nil {
+					return nil, fmt.Errorf("bifrost: compile client route %q: %w", pattern, err)
+				}
+				handler = &clientPageHandler{document: document, contentLength: strconv.Itoa(len(document))}
+			default:
+				return nil, fmt.Errorf("bifrost: route %q has invalid kind", pattern)
+			}
 		}
 
 		if len(app.hooks.responseHooks) > 0 {

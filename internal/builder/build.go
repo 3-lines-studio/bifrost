@@ -171,6 +171,12 @@ func Build(ctx context.Context, options Options) error {
 	needsRender := false
 	needsProductionRuntime := false
 	for _, route := range describe.Spec.Routes {
+		if htmlRoute(route) {
+			if route.Kind == "static" {
+				return fmt.Errorf("bifrost: static route %q cannot use an html view", route.Pattern)
+			}
+			continue
+		}
 		needsRender = needsRender || route.Kind == "static"
 		needsProductionRuntime = needsProductionRuntime || route.Kind == "server"
 	}
@@ -197,6 +203,11 @@ func Build(ctx context.Context, options Options) error {
 	if err != nil {
 		return err
 	}
+	htmlViews, err := collectHTMLViews(describe.SourceRoot, describe.Spec, routeViews)
+	if err != nil {
+		return err
+	}
+	views = append(views, htmlViews...)
 	staticWorkers := options.StaticWorkers
 	if staticWorkers <= 0 {
 		staticWorkers = 4
@@ -222,10 +233,14 @@ func Build(ctx context.Context, options Options) error {
 	if err := validatePublicOwnership(describe.Spec, public); err != nil {
 		return err
 	}
-	bunVersion, _ := commandOutput(ctx, describe.SourceRoot, "bun", "--version")
-	viteVersion := readPackageVersion(describe.SourceRoot, "vite")
-	reactVersion := readPackageVersion(describe.SourceRoot, "react")
-	reactDOMVersion := readPackageVersion(describe.SourceRoot, "react-dom")
+	hasFrontend := len(plans) > 0
+	bunVersion, viteVersion, reactVersion, reactDOMVersion := "", "", "", ""
+	if hasFrontend {
+		bunVersion, _ = commandOutput(ctx, describe.SourceRoot, "bun", "--version")
+		viteVersion = readPackageVersion(describe.SourceRoot, "vite")
+		reactVersion = readPackageVersion(describe.SourceRoot, "react")
+		reactDOMVersion = readPackageVersion(describe.SourceRoot, "react-dom")
+	}
 	bifrostVersion := options.Version
 	if bifrostVersion == "" {
 		bifrostVersion = "devel"
@@ -246,20 +261,22 @@ func Build(ctx context.Context, options Options) error {
 		ClientFiles: clientFiles,
 		Public:      public,
 	}
-	if manifest.Toolchain.Bun == "" {
-		return errors.New("bifrost: cannot determine Bun version")
-	}
-	if !supportedBunVersion(manifest.Toolchain.Bun) {
-		return fmt.Errorf("bifrost: unsupported Bun version %q; V1 requires Bun 1.3 or newer", manifest.Toolchain.Bun)
-	}
-	if manifest.Toolchain.Vite == "" || !supportedViteVersion(manifest.Toolchain.Vite) {
-		return fmt.Errorf("bifrost: unsupported Vite version %q; Bifrost requires Vite 8", manifest.Toolchain.Vite)
-	}
-	if manifest.Toolchain.React == "" || reactDOMVersion == "" {
-		return errors.New("bifrost: cannot determine React and React DOM versions")
-	}
-	if majorMinorVersion(manifest.Toolchain.React) != majorMinorVersion(reactDOMVersion) {
-		return fmt.Errorf("bifrost: React %s and React DOM %s must use the same major.minor version", manifest.Toolchain.React, reactDOMVersion)
+	if hasFrontend {
+		if manifest.Toolchain.Bun == "" {
+			return errors.New("bifrost: cannot determine Bun version")
+		}
+		if !supportedBunVersion(manifest.Toolchain.Bun) {
+			return fmt.Errorf("bifrost: unsupported Bun version %q; V1 requires Bun 1.3 or newer", manifest.Toolchain.Bun)
+		}
+		if manifest.Toolchain.Vite == "" || !supportedViteVersion(manifest.Toolchain.Vite) {
+			return fmt.Errorf("bifrost: unsupported Vite version %q; Bifrost requires Vite 8", manifest.Toolchain.Vite)
+		}
+		if manifest.Toolchain.React == "" || reactDOMVersion == "" {
+			return errors.New("bifrost: cannot determine React and React DOM versions")
+		}
+		if majorMinorVersion(manifest.Toolchain.React) != majorMinorVersion(reactDOMVersion) {
+			return fmt.Errorf("bifrost: React %s and React DOM %s must use the same major.minor version", manifest.Toolchain.React, reactDOMVersion)
+		}
 	}
 	if manifest.BuildID == "" {
 		canonical, err := json.Marshal(manifest)
@@ -424,6 +441,10 @@ func planViews(describe protocol.DescribeResult, output string, routeParams map[
 	routeViews := make(map[string]string, len(describe.Spec.Routes))
 	navigationViews := make(map[string]string, len(describe.Spec.Routes))
 	for _, route := range describe.Spec.Routes {
+		if htmlRoute(route) {
+			routeViews[route.Pattern] = templateViewID(route)
+			continue
+		}
 		mode := "hydrate"
 		if route.Kind == "client" {
 			mode = "mount"
@@ -449,6 +470,63 @@ func planViews(describe protocol.DescribeResult, output string, routeParams map[
 	}
 	slices.SortFunc(plans, func(a, b viewPlan) int { return strings.Compare(a.ID, b.ID) })
 	return plans, routeViews, clientRoutes(navigationViews, routeParams), nil
+}
+
+func htmlRoute(route protocol.RouteSpec) bool {
+	return strings.HasSuffix(strings.ToLower(route.View), ".html")
+}
+
+func templateViewID(route protocol.RouteSpec) string {
+	return digest(route.View + "\x00html\x00" + strings.Join(route.Layouts, "\x00"))
+}
+
+func collectHTMLViews(sourceRoot string, spec protocol.Spec, routeViews map[string]string) ([]protocol.BuiltView, error) {
+	byID := make(map[string]protocol.BuiltView)
+	for _, route := range spec.Routes {
+		if !htmlRoute(route) {
+			continue
+		}
+		id := routeViews[route.Pattern]
+		if _, exists := byID[id]; exists {
+			continue
+		}
+		page, err := readTemplateSource(sourceRoot, route.View)
+		if err != nil {
+			return nil, err
+		}
+		layouts := make([]protocol.TemplateSource, 0, len(route.Layouts))
+		for _, layout := range route.Layouts {
+			source, err := readTemplateSource(sourceRoot, layout)
+			if err != nil {
+				return nil, err
+			}
+			layouts = append(layouts, source)
+		}
+		byID[id] = protocol.BuiltView{
+			ID:     id,
+			Source: route.View,
+			Mode:   "html",
+			HTML:   &protocol.HTMLAssets{Page: page, Layouts: layouts},
+		}
+	}
+	ids := make([]string, 0, len(byID))
+	for id := range byID {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	views := make([]protocol.BuiltView, 0, len(ids))
+	for _, id := range ids {
+		views = append(views, byID[id])
+	}
+	return views, nil
+}
+
+func readTemplateSource(sourceRoot, sourcePath string) (protocol.TemplateSource, error) {
+	data, err := os.ReadFile(filepath.Join(sourceRoot, filepath.FromSlash(sourcePath)))
+	if err != nil {
+		return protocol.TemplateSource{}, fmt.Errorf("bifrost: read html view %q: %w", sourcePath, err)
+	}
+	return protocol.TemplateSource{Path: sourcePath, Source: string(data)}, nil
 }
 
 func writeEntries(sourceRoot, output string, plans []viewPlan, routes []clientRoute, buildID string) error {

@@ -60,6 +60,9 @@ func runDev(args []string) error {
 		*dir = app.ProjectRoot
 		buildDir = app.WorkDir
 	}
+	if router != nil && !router.needsFrontend() {
+		return errors.New("bifrost: vanilla App Router development is not available yet; run bifrost build and start .bifrost/bifrost-app")
+	}
 	if *vitePort < 0 || *vitePort > 65535 {
 		return fmt.Errorf("invalid Vite port %d", *vitePort)
 	}
@@ -432,6 +435,13 @@ func pruneDevelopmentDirectories(base, prefix string) {
 			_ = os.RemoveAll(filepath.Join(base, entry.Name()))
 		}
 	}
+}
+
+func checkFrontendToolchain(dir string) error {
+	if _, err := exec.LookPath("bun"); err != nil {
+		return errors.New("bifrost: Bun is required for the build; install it from https://bun.sh")
+	}
+	return requireViteInstalled(dir)
 }
 
 func requireViteInstalled(dir string) error {

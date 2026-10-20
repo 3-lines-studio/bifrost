@@ -220,3 +220,61 @@ func TestMustNewPanicsOnInvalidConfig(t *testing.T) {
 	}()
 	MustNew(Config{Routes: []Route{Client("bad", "pages/app.tsx")}})
 }
+
+func TestTemplateRouteModel(t *testing.T) {
+	app, err := newApp(Config{
+		SourceRoot: t.TempDir(),
+		Routes: []Route{
+			Server("/", "app/page.html", nil).WithLayouts("app/layout.html", "app/blog/layout.html"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := app.routes[0].view, "app/page.html"; got != want {
+		t.Fatalf("view = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(app.routes[0].layouts, ","), "app/layout.html,app/blog/layout.html"; got != want {
+		t.Fatalf("layouts = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(app.spec.Routes[0].Layouts, ","), "app/layout.html,app/blog/layout.html"; got != want {
+		t.Fatalf("spec layouts = %q, want %q", got, want)
+	}
+	if !htmlView(app.routes[0].view) {
+		t.Fatal("html view was not detected")
+	}
+}
+
+func TestTemplateRouteRules(t *testing.T) {
+	root := t.TempDir()
+	cases := []struct {
+		name  string
+		route Route
+		want  string
+	}{
+		{"client", Client("/", "app/page.html"), "server route"},
+		{"static", Static("/", "app/page.html", nil), "server route"},
+		{"navigation", Server("/", "app/page.html", nil).WithNavigation(), "navigation"},
+		{"layout on tsx", Server("/", "app/page.tsx", nil).WithLayouts("app/layout.html"), "non-html"},
+		{"tsx layout", Server("/", "app/page.html", nil).WithLayouts("app/layout.tsx"), "must use .html"},
+		{"escape", Server("/", "../page.html", nil), "escapes"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := newApp(Config{SourceRoot: root, Routes: []Route{test.route}})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeViewAcceptsHTML(t *testing.T) {
+	root := t.TempDir()
+	if got, err := normalizeView(root, "app/page.html"); err != nil || got != "app/page.html" {
+		t.Fatalf("html view = %q, %v", got, err)
+	}
+	if _, err := normalizeView(root, "app/page.css"); err == nil {
+		t.Fatal("css view was accepted")
+	}
+}
