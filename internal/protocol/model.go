@@ -16,6 +16,8 @@ type RouteSpec struct {
 	Navigation bool     `json:"navigation,omitempty"`
 	Layouts    []string `json:"layouts,omitempty"`
 	Script     string   `json:"script,omitempty"`
+	Errors     []string `json:"errors,omitempty"`
+	NotFound   string   `json:"notFound,omitempty"`
 }
 
 type DescribeResult struct {
@@ -84,8 +86,10 @@ type BuiltView struct {
 }
 
 type HTMLAssets struct {
-	Page    TemplateSource   `json:"page"`
-	Layouts []TemplateSource `json:"layouts,omitempty"`
+	Page     TemplateSource   `json:"page"`
+	Layouts  []TemplateSource `json:"layouts,omitempty"`
+	Errors   []TemplateSource `json:"errors,omitempty"`
+	NotFound *TemplateSource  `json:"notFound,omitempty"`
 }
 
 type TemplateSource struct {

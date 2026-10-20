@@ -392,7 +392,7 @@ func discoverRoutes(root string) ([]appRoute, error) {
 		patterns[pattern] = filepath.ToSlash(relative)
 		route := appRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, Params: params, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), HasHead: hasHeadExport(filePath), Template: strings.HasSuffix(entry.Name(), ".html")}
 		if route.Template {
-			script, err := routeScript(root, directory)
+			script, err := routeScript(root, directory, "page")
 			if err != nil {
 				problems = append(problems, fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err))
 				return nil
@@ -419,13 +419,13 @@ func discoverRoutes(root string) ([]appRoute, error) {
 	return routes, nil
 }
 
-func routeScript(root, directory string) (string, error) {
-	js := filepath.Join(directory, "page.js")
-	ts := filepath.Join(directory, "page.ts")
+func routeScript(root, directory, base string) (string, error) {
+	js := filepath.Join(directory, base+".js")
+	ts := filepath.Join(directory, base+".ts")
 	hasJS := fileExists(js)
 	hasTS := fileExists(ts)
 	if hasJS && hasTS {
-		return "", errors.New("page.js and page.ts cannot both exist")
+		return "", errors.New(base + ".js and " + base + ".ts cannot both exist")
 	}
 	if hasJS {
 		return filepath.ToSlash(strings.TrimPrefix(js, root+string(filepath.Separator))), nil
@@ -460,7 +460,16 @@ func appendNotFoundRoutes(root string, routes []appRoute) ([]appRoute, error) {
 			return nil
 		}
 		pattern := strings.TrimSuffix(base, "/{$}") + "/{path...}"
-		routes = append(routes, appRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), NotFoundPage: true, Template: strings.HasSuffix(entry.Name(), ".html")})
+		route := appRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), NotFoundPage: true, Template: strings.HasSuffix(entry.Name(), ".html")}
+		if route.Template {
+			script, err := routeScript(root, filepath.Dir(filePath), "not-found")
+			if err != nil {
+				problems = append(problems, fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err))
+				return nil
+			}
+			route.Script = script
+		}
+		routes = append(routes, route)
 		return nil
 	})
 	if err != nil {
@@ -534,6 +543,13 @@ func writeViews(projectRoot, routeRoot string, routes []appRoute) error {
 			routes[index].Layouts = inheritedHTMLLayouts(projectRoot, routeRoot, routes[index].Directory)
 			if routes[index].Script != "" {
 				routes[index].Script = projectRelativeView(projectRoot, routeRoot, routes[index].Script)
+			}
+			if !routes[index].NotFoundPage {
+				routes[index].ErrorViews = projectRelativeFiles(projectRoot, inheritedFiles(routeRoot, routes[index].Directory, "error.html"))
+				notFound := inheritedFiles(routeRoot, routes[index].Directory, "not-found.html")
+				if len(notFound) > 0 {
+					routes[index].NotFoundView = projectRelativeFile(projectRoot, notFound[len(notFound)-1])
+				}
 			}
 			continue
 		}
@@ -837,6 +853,22 @@ func inheritedWrappers(root, directory string) []viewWrapper {
 		}
 	}
 	return wrappers
+}
+
+func projectRelativeFiles(projectRoot string, files []string) []string {
+	relative := make([]string, len(files))
+	for index, file := range files {
+		relative[index] = projectRelativeFile(projectRoot, file)
+	}
+	return relative
+}
+
+func projectRelativeFile(projectRoot, file string) string {
+	relative, err := filepath.Rel(projectRoot, file)
+	if err != nil {
+		return filepath.ToSlash(file)
+	}
+	return filepath.ToSlash(relative)
 }
 
 func projectRelativeView(projectRoot, routeRoot, view string) string {
@@ -1218,6 +1250,19 @@ func routeOptions(route appRoute) string {
 	}
 	if route.Script != "" {
 		options.WriteString(".WithScript(" + strconv.Quote(route.Script) + ")")
+	}
+	if route.Template && len(route.ErrorViews) > 0 {
+		options.WriteString(".WithErrors(")
+		for index, view := range route.ErrorViews {
+			if index > 0 {
+				options.WriteString(", ")
+			}
+			options.WriteString(strconv.Quote(view))
+		}
+		options.WriteString(")")
+	}
+	if route.Template && route.NotFoundView != "" {
+		options.WriteString(".WithNotFound(" + strconv.Quote(route.NotFoundView) + ")")
 	}
 	if !route.Template {
 		options.WriteString(".WithNavigation()")

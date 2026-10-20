@@ -220,6 +220,32 @@ func validateRoutes(sourceRoot string, routes []Route) ([]Route, error) {
 			route.script = normalized
 		}
 
+		if len(route.errorViews) > 0 || route.notFoundView != "" {
+			if !template {
+				return nil, fmt.Errorf("bifrost: route %q uses error views with a non-html view", route.pattern)
+			}
+			for errorIndex, errorView := range route.errorViews {
+				normalized, err := normalizeView(sourceRoot, errorView)
+				if err != nil {
+					return nil, fmt.Errorf("bifrost: route %q error view: %w", route.pattern, err)
+				}
+				if !htmlView(normalized) {
+					return nil, fmt.Errorf("bifrost: route %q error view %q must use .html", route.pattern, errorView)
+				}
+				route.errorViews[errorIndex] = normalized
+			}
+			if route.notFoundView != "" {
+				normalized, err := normalizeView(sourceRoot, route.notFoundView)
+				if err != nil {
+					return nil, fmt.Errorf("bifrost: route %q not found view: %w", route.pattern, err)
+				}
+				if !htmlView(normalized) {
+					return nil, fmt.Errorf("bifrost: route %q not found view %q must use .html", route.pattern, route.notFoundView)
+				}
+				route.notFoundView = normalized
+			}
+		}
+
 		if route.navigation && route.kind != routeServer {
 			return nil, fmt.Errorf("bifrost: navigation requires a server route: %q", route.pattern)
 		}
@@ -323,6 +349,8 @@ func makeBuildSpec(routes []Route) (protocol.Spec, string, error) {
 			Navigation: route.navigation,
 			Layouts:    slices.Clone(route.layouts),
 			Script:     route.script,
+			Errors:     slices.Clone(route.errorViews),
+			NotFound:   route.notFoundView,
 		}
 	}
 

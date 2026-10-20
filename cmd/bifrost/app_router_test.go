@@ -1291,3 +1291,88 @@ func TestAppRouterRejectsBothPageScripts(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestAppRouterDiscoversHTMLErrors(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{
+		"page.html",
+		"error.html",
+		"not-found.html",
+		"not-found.js",
+		"blog/page.html",
+		"blog/error.html",
+	} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("<p>"+name+"</p>"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err = appendNotFoundRoutes(root, routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeViews(root, root, routes); err != nil {
+		t.Fatal(err)
+	}
+	byPattern := make(map[string]appRoute, len(routes))
+	for _, route := range routes {
+		byPattern[route.Pattern] = route
+	}
+	home := byPattern["/{$}"]
+	if got, want := strings.Join(home.ErrorViews, ","), "error.html"; got != want {
+		t.Fatalf("home errors = %q, want %q", got, want)
+	}
+	if home.NotFoundView != "not-found.html" {
+		t.Fatalf("home not found = %q", home.NotFoundView)
+	}
+	blog := byPattern["/blog"]
+	if got, want := strings.Join(blog.ErrorViews, ","), "error.html,blog/error.html"; got != want {
+		t.Fatalf("blog errors = %q, want %q", got, want)
+	}
+	if blog.NotFoundView != "not-found.html" {
+		t.Fatalf("blog not found = %q", blog.NotFoundView)
+	}
+	notFound := byPattern["/{path...}"]
+	if !notFound.NotFoundPage || notFound.Script != "not-found.js" || len(notFound.ErrorViews) != 0 {
+		t.Fatalf("not found route = %+v", notFound)
+	}
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, expected := range []string{
+		`.WithErrors("error.html", "blog/error.html").WithNotFound("not-found.html"),`,
+		`.WithScript("not-found.js"),`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("generated main does not contain %q:\n%s", expected, text)
+		}
+	}
+}
+
+func TestAppRouterRejectsBothNotFoundScripts(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"not-found.html", "not-found.js", "not-found.ts"} {
+		if err := os.WriteFile(filepath.Join(root, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := appendNotFoundRoutes(root, nil); err == nil || !strings.Contains(err.Error(), "not-found.js and not-found.ts") {
+		t.Fatalf("error = %v", err)
+	}
+}

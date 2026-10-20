@@ -167,6 +167,20 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 			if !slices.Equal(layouts, declared.Layouts) {
 				return nil, fmt.Errorf("bifrost: manifest route %q layouts do not match the app", route.Pattern)
 			}
+			errors := make([]string, len(view.HTML.Errors))
+			for index, errorView := range view.HTML.Errors {
+				errors[index] = errorView.Path
+			}
+			if !slices.Equal(errors, declared.Errors) {
+				return nil, fmt.Errorf("bifrost: manifest route %q error views do not match the app", route.Pattern)
+			}
+			notFound := ""
+			if view.HTML.NotFound != nil {
+				notFound = view.HTML.NotFound.Path
+			}
+			if notFound != declared.NotFound {
+				return nil, fmt.Errorf("bifrost: manifest route %q not-found view does not match the app", route.Pattern)
+			}
 			if (declared.Script != "") != (view.Client.Entry.Path != "") {
 				return nil, fmt.Errorf("bifrost: manifest route %q script does not match the app", route.Pattern)
 			}
@@ -336,6 +350,26 @@ func validateHTMLView(view protocol.BuiltView) error {
 			return fmt.Errorf("duplicate html layout %q", layout.Path)
 		}
 		seen[layout.Path] = struct{}{}
+	}
+	for _, errorView := range view.HTML.Errors {
+		if err := validateTemplateSource(errorView); err != nil {
+			return err
+		}
+		if !strings.HasSuffix(errorView.Path, ".html") {
+			return fmt.Errorf("html error view %q must use .html", errorView.Path)
+		}
+		if _, exists := seen[errorView.Path]; exists {
+			return fmt.Errorf("duplicate html error view %q", errorView.Path)
+		}
+		seen[errorView.Path] = struct{}{}
+	}
+	if view.HTML.NotFound != nil {
+		if err := validateTemplateSource(*view.HTML.NotFound); err != nil {
+			return err
+		}
+		if !strings.HasSuffix(view.HTML.NotFound.Path, ".html") {
+			return fmt.Errorf("html not-found view %q must use .html", view.HTML.NotFound.Path)
+		}
 	}
 	return nil
 }

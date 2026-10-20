@@ -50,8 +50,8 @@ One trailing `_` is a one-segment parameter. Two are a catch-all, which must be 
 - `layout.html` wraps `page.html` routes and receives `.Content`.
 - `template.tsx` exports `Template`, wraps like a layout, and remounts on navigation.
 - `loading.tsx` exports `Loading`, shown while a navigation to that subtree runs.
-- `error.tsx` exports `Error({ error, reset })`; `reset` re-fetches the route.
-- `not-found.tsx` exports `NotFound`; `not-found.html` is its Go template equivalent.
+- `error.tsx` exports `Error({ error, reset })`; `reset` re-fetches the route. `error.html` is its Go template equivalent.
+- `not-found.tsx` exports `NotFound`; `not-found.html` and `not-found.js`/`not-found.ts` are its Go template and client entry.
 - `route.go` exports any of `Get`, `Post`, `Put`, `Patch`, `Delete`, `Head`, `Options` with `http.ResponseWriter` and `*http.Request`. Missing methods answer 405.
 - `middleware.go` exports `Middleware(next http.Handler) http.Handler` and wraps the subtree.
 - `server.go` exports `Serve(ctx context.Context, handler http.Handler) error`; it is only valid at the route root.
@@ -94,7 +94,9 @@ func Load(r *http.Request) (any, error) {
 }
 ```
 
-Templates receive `.Props`, `.Params`, `.SearchParams`, and `.Pathname`. `layout.html` wraps the page and receives `.Content`; `{{define "head"}}` blocks are collected from the outside in. Loaders, middleware, caching, `?_data`, and Markdown work the same as for React pages. `not-found.html` is the not-found view.
+Templates receive `.Props`, `.Params`, `.SearchParams`, and `.Pathname`. `layout.html` wraps the page and receives `.Content`; `{{define "head"}}` blocks are collected from the outside in. Loaders, middleware, caching, `?_data`, and Markdown work the same as for React pages.
+
+`error.html` is inherited like `layout.html`; the nearest one renders loader errors inside the route layouts with `__bifrostError` and `__bifrostErrorLevel` in props. `not-found.html` renders unmatched URLs and a loader `bifrost.NotFound()`, with `pathname` in props. A sibling `not-found.js` or `not-found.ts` is the not-found client entry.
 
 A sibling `page.js` or `page.ts` becomes the client entry. Vite builds it, so imports, TypeScript, and CSS imports work:
 
