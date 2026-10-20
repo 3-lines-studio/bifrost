@@ -454,15 +454,6 @@ func hasGoRenderRoute(routes []appRoute) bool {
 	return false
 }
 
-func hasRoutePattern(routes []appRoute, pattern string) bool {
-	for _, route := range routes {
-		if route.Pattern == pattern {
-			return true
-		}
-	}
-	return false
-}
-
 func inheritedGoFile(routeRoot, directory, name string) string {
 	current := directory
 	for {
