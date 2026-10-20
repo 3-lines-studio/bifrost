@@ -38,6 +38,7 @@ const (
 	routeServer
 	routeStatic
 	routeClient
+	routeHandler
 )
 
 func (k routeKind) String() string {
@@ -48,6 +49,8 @@ func (k routeKind) String() string {
 		return "static"
 	case routeClient:
 		return "client"
+	case routeHandler:
+		return "handler"
 	default:
 		return "invalid"
 	}
@@ -59,6 +62,7 @@ type Route struct {
 	kind         routeKind
 	load         Loader
 	generate     Generator
+	handler      http.Handler
 	navigation   bool
 	cacheControl string
 }
@@ -86,6 +90,14 @@ func Client(pattern, view string) Route {
 		pattern: pattern,
 		view:    view,
 		kind:    routeClient,
+	}
+}
+
+func Handler(pattern string, handler http.Handler) Route {
+	return Route{
+		pattern: pattern,
+		kind:    routeHandler,
+		handler: handler,
 	}
 }
 

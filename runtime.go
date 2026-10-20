@@ -97,6 +97,18 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 		}
 		state.devProxy = newDevelopmentProxy(port)
 	}
+	wrap := func(pattern string, handler http.Handler) (http.Handler, error) {
+		if len(app.hooks.responseHooks) > 0 {
+			handler = &responseObserver{pattern: pattern, next: handler, hooks: app.hooks.responseHooks}
+		}
+		for index := len(app.hooks.middleware) - 1; index >= 0; index-- {
+			handler = app.hooks.middleware[index](handler)
+			if handler == nil {
+				return nil, fmt.Errorf("bifrost: middleware %d returned nil for route %q", index, pattern)
+			}
+		}
+		return handler, nil
+	}
 	for pattern, builtRoute := range manifest.routes {
 		declaration := declarations[pattern]
 		view := manifest.views[builtRoute.ViewID]
@@ -174,16 +186,21 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 			return nil, fmt.Errorf("bifrost: route %q has invalid kind", pattern)
 		}
 
-		if len(app.hooks.responseHooks) > 0 {
-			handler = &responseObserver{pattern: pattern, next: handler, hooks: app.hooks.responseHooks}
-		}
-		for i := len(app.hooks.middleware) - 1; i >= 0; i-- {
-			handler = app.hooks.middleware[i](handler)
-			if handler == nil {
-				return nil, fmt.Errorf("bifrost: middleware %d returned nil for route %q", i, pattern)
-			}
+		handler, err = wrap(pattern, handler)
+		if err != nil {
+			return nil, err
 		}
 		state.handlers[pattern] = handler
+	}
+	for _, route := range app.routes {
+		if route.kind != routeHandler {
+			continue
+		}
+		handler, err := wrap(route.pattern, route.handler)
+		if err != nil {
+			return nil, err
+		}
+		state.handlers[route.pattern] = handler
 	}
 	return state, nil
 }

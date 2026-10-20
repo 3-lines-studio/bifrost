@@ -165,7 +165,7 @@ func validateRoutes(sourceRoot string, routes []Route) ([]Route, error) {
 
 	for i, route := range routes {
 		if route.kind == routeInvalid {
-			return nil, fmt.Errorf("bifrost: route %d was not created by Server, Static, or Client", i)
+			return nil, fmt.Errorf("bifrost: route %d was not created by Server, Static, Client, or Handler", i)
 		}
 		if err := validatePattern(route.pattern); err != nil {
 			return nil, fmt.Errorf("bifrost: route %d: %w", i, err)
@@ -174,6 +174,20 @@ func validateRoutes(sourceRoot string, routes []Route) ([]Route, error) {
 			return nil, fmt.Errorf("bifrost: duplicate route pattern %q", route.pattern)
 		}
 		seen[route.pattern] = struct{}{}
+
+		if route.kind == routeHandler {
+			if route.handler == nil {
+				return nil, fmt.Errorf("bifrost: handler route %q has a nil handler", route.pattern)
+			}
+			if route.view != "" {
+				return nil, fmt.Errorf("bifrost: handler route %q must not have a view", route.pattern)
+			}
+			if route.navigation {
+				return nil, fmt.Errorf("bifrost: navigation requires a server route: %q", route.pattern)
+			}
+			normalized[i] = route
+			continue
+		}
 
 		view, err := normalizeView(sourceRoot, route.view)
 		if err != nil {
@@ -270,15 +284,18 @@ func patternIsDynamic(pattern string) bool {
 func makeBuildSpec(routes []Route) (protocol.Spec, string, error) {
 	spec := protocol.Spec{
 		Schema: protocol.Schema,
-		Routes: make([]protocol.RouteSpec, len(routes)),
+		Routes: make([]protocol.RouteSpec, 0, len(routes)),
 	}
-	for i, route := range routes {
-		spec.Routes[i] = protocol.RouteSpec{
+	for _, route := range routes {
+		if route.kind == routeHandler {
+			continue
+		}
+		spec.Routes = append(spec.Routes, protocol.RouteSpec{
 			Pattern:    route.pattern,
 			View:       route.view,
 			Kind:       route.kind.String(),
 			Navigation: route.navigation,
-		}
+		})
 	}
 
 	slices.SortFunc(spec.Routes, func(a, b protocol.RouteSpec) int {

@@ -81,6 +81,10 @@ func IsRedirect(err error) bool {
 	return errors.As(err, &redirect)
 }
 
+func WriteError(w http.ResponseWriter, r *http.Request, err error) {
+	serveDefaultError(w, r, err)
+}
+
 func ErrorStatus(err error) (int, bool) {
 	var missing notFoundError
 	if errors.As(err, &missing) {

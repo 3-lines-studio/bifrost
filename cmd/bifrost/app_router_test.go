@@ -1120,3 +1120,51 @@ func TestPrepareAppRouterAppRejectsEmptyTrees(t *testing.T) {
 		t.Fatal("an empty route root was accepted")
 	}
 }
+
+func TestDiscoverGoPageRoutes(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"page.go", "hello/slug_/page.go", "about/page.tsx"} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, route := range routes {
+		if route.GoRender {
+			got = append(got, route.Pattern)
+		}
+	}
+	if strings.Join(got, ",") != "/hello/{slug},/{$}" {
+		t.Fatalf("go page patterns = %q", strings.Join(got, ","))
+	}
+	rows := goPageRows(routes)
+	if len(rows) != 2 || rows[0].Kind != "go" || rows[0].Pattern != "/hello/{slug}" {
+		t.Fatalf("go page rows = %+v", rows)
+	}
+}
+
+func TestAppRouterRootsGoPage(t *testing.T) {
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.Mkdir(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.go"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project, routes, ok, err := appRouterRoots(".", projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || project != projectRoot || routes != appRoot {
+		t.Fatalf("roots = %q, %q, %t", project, routes, ok)
+	}
+}
