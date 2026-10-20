@@ -5069,6 +5069,24 @@ export function nativeProps(props: unknown, tag?: string): unknown {
   // number is not a place, so the declaration goes and the box stays where the
   // flow put it, which is the only place a target without a browser's
   // measurements can honestly name.
+  // A field of the web says autoCorrect="off" and the target asks for a boolean:
+  // measured on the checkout of picsel, a string crashed the screen with "String
+  // cannot be cast to Boolean".
+  const flag = (value: unknown): unknown => {
+    if (value === "true" || value === "on") {
+      return true;
+    }
+    if (value === "false" || value === "off") {
+      return false;
+    }
+    return value;
+  };
+  if (given.autoCorrect !== undefined) {
+    given.autoCorrect = flag(given.autoCorrect);
+  }
+  if (given.spellCheck !== undefined) {
+    given.spellCheck = flag(given.spellCheck);
+  }
   if (given.style !== undefined) {
     given.style = placed(given.style);
   }

@@ -810,6 +810,20 @@ func TestNativeAGridStretchesItsItems(t *testing.T) {
 	}
 }
 
+func TestNativeAFieldDoesNotCrashOnAWordForYesOrNo(t *testing.T) {
+	// Measured on the checkout of picsel: autoCorrect="off" reached the input as a
+	// string and the screen died with "String cannot be cast to Boolean".
+	for _, said := range []string{
+		"const flag = (value: unknown): unknown => {",
+		`if (value === "true" || value === "on") {`,
+		"if (given.autoCorrect !== undefined) {",
+	} {
+		if !strings.Contains(nativeHostBody, said) {
+			t.Fatalf("a field of the page crashes on a flag: %q", said)
+		}
+	}
+}
+
 func TestNativeASizeWrittenInTheClassIsPainted(t *testing.T) {
 	// Measured on the card of an event of picsel: the aspect of the card was not
 	// applied and the picture that fills it grew to the whole screen.
