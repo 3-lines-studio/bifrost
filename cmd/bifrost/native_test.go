@@ -600,7 +600,7 @@ func TestNativeTakesTheTagOfASelectorDownToAClass(t *testing.T) {
 	if !strings.Contains(nativeReact, "component === undefined ? undefined : type") {
 		t.Fatal("the road through React.createElement does not pass the tag")
 	}
-	if !strings.Contains(nativeCSSWarnings, `withTagClasses(expanded, lostSelectors(config, projectRoot, filePath, options))`) {
+	if !strings.Contains(nativeCSSWarnings, `withTagClasses(withoutAnimations(expanded), lostSelectors(config, projectRoot, filePath, options))`) {
 		t.Fatal("the transformer does not run the rewrite on what the pipeline produced")
 	}
 	if !strings.Contains(nativeCSSWarnings, `options.platform === "web" || !isStylesheet(filePath)`) {
@@ -720,6 +720,13 @@ func TestNativeLeavesOutAPlaceThatIsNotANumber(t *testing.T) {
 	} {
 		if !strings.Contains(nativePlace, said) {
 			t.Fatalf("the place of the page is not read: %q", said)
+		}
+	}
+	// A keyframes of the web needs an interpolator the runtime may not carry: the
+	// target paints without animation rather than stopping at the first press.
+	for _, said := range []string{"function withoutAnimations(css)", "withTagClasses(withoutAnimations(expanded)"} {
+		if !strings.Contains(nativeCSSWarnings, said) {
+			t.Fatalf("an animation of the web reaches the renderer: %q", said)
 		}
 	}
 	if !strings.Contains(nativeHostBody, "given.style = placed(given.style);") {
@@ -1433,7 +1440,7 @@ func TestNativeARefIsAnElementOfTheDocument(t *testing.T) {
 			t.Fatalf("the map does not carry %q", said)
 		}
 	}
-	for _, said := range []string{"insertAdjacentElement: () => null", "remove: () => undefined"} {
+	for _, said := range []string{"insertAdjacentElement: () => null", "remove: () => undefined", "createTreeWalker: () => ({ nextNode: () => null })", "target.NodeFilter ??="} {
 		if !strings.Contains(nativeDOM, said) {
 			t.Fatalf("a focus guard has no place in the body: %q", said)
 		}
@@ -2830,6 +2837,18 @@ func TestNativeAPageThatPaintsThroughAPortalStillPaints(t *testing.T) {
 	// module is looking at one copy of it: the name is resolved from the workspace
 	// for whoever asks. Measured on the app: two copies in the bundle, and the page
 	// was calling the one that was not patched.
+	// A split bundle is fetched from the bundler that served the document, and
+	// the document of this target names the server of the app: the login of the
+	// case failed with "Failed to load split bundle" until the runtime asked the
+	// dev server.
+	for _, said := range []string{`moduleName === "./buildUrlForBundle"`, `context.originModulePath.includes("expo/src/async-require/")`} {
+		if !strings.Contains(nativeMetroHelper, said) {
+			t.Fatalf("a split bundle of the page is fetched from the app server: %q", said)
+		}
+	}
+	if !strings.Contains(nativeBuildUrl, "export function buildUrlForBundle(bundlePath: string): string") {
+		t.Fatal("the runtime has no url of its own for a split bundle")
+	}
 	if !strings.Contains(nativeMetroHelper, `if (moduleName === "react-dom") {`) {
 		t.Fatal("react-dom is not resolved to a single copy")
 	}

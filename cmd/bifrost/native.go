@@ -250,6 +250,16 @@ function withBifrost(config) {
     if (moduleName === "react" && !insideBifrost) {
       return { type: "sourceFile", filePath: react };
     }
+    // A bundle a page imports later is loaded from the bundler that served it,
+    // and the runtime of expo builds that url from location.origin when a
+    // document has one: this target has a document of its own, whose origin is
+    // the server of the app, and the split bundle of a login went there. The
+    // server answered an HTML page and the login failed with "Failed to load
+    // split bundle". Measured on the login of the app of the case. Without a
+    // document the runtime asks the dev server, which is the one that served it.
+    if (!insideBifrost && platform !== "web" && moduleName === "./buildUrlForBundle" && context.originModulePath.includes("expo/src/async-require/")) {
+      return { type: "sourceFile", filePath: path.join(bifrost, "build-url.ts") };
+    }
     for (const alias of aliases) {
       const under = underAlias(alias, moduleName);
       if (under !== null) {
@@ -835,6 +845,33 @@ const isStylesheet = (filePath) => /\.(s?css|sass)$/.test(filePath);
 // that asked for each one. A property the target lacks outright -- cursor,
 // resize, snap -- is not reported: in every case measured it was cosmetic, and
 // the reset Tailwind ships is full of them.
+// The keyframes of the web run on the animation module of the target, and the one
+// the runtime of this target carries has no interpolator for a transform:
+// measured on the first screen of the app, a press that animates stopped the
+// render with "[Reanimated] No interpolator factory found for property:
+// transform". The target paints without animation, which is what a browser with
+// the animations turned off paints.
+function withoutAnimations(css) {
+  let parse;
+  try {
+    parse = require("postcss").parse;
+  } catch {
+    return css;
+  }
+  const root = parse(css);
+  root.walkDecls((declaration) => {
+    if (declaration.prop === "animation" || declaration.prop.startsWith("animation-")) {
+      declaration.remove();
+    }
+  });
+  root.walkAtRules((at) => {
+    if (/^(-\w+-)?keyframes$/.test(at.name)) {
+      at.remove();
+    }
+  });
+  return root.toString();
+}
+
 function dropped(css, warnings) {
   const values = warnings.values ?? {};
   // A class the map answers with a ScrollView, or with a child of one, is not a
@@ -964,7 +1001,7 @@ module.exports.transform = async (config, projectRoot, filePath, data, options) 
   const web = await worker.transform(config, projectRoot, filePath, data, { ...options, platform: "web" });
   const produced = web.output[0]?.data?.css?.code;
   const expanded = produced === undefined ? data.toString("utf8") : produced.toString();
-  const source = withFixed(withTagClasses(expanded, lostSelectors(config, projectRoot, filePath, options)));
+  const source = withFixed(withTagClasses(withoutAnimations(expanded), lostSelectors(config, projectRoot, filePath, options)));
   const compiled = compile(source, {
     ...(config.reactNativeCSS ?? options.reactNativeCSS),
     filename: filePath,
@@ -2294,6 +2331,7 @@ const install = () => {
     },
     createTextNode: () => ({}),
     getElementById: () => null,
+    createTreeWalker: () => ({ nextNode: () => null }),
     querySelector: () => null,
     querySelectorAll: () => [],
     addEventListener: on,
@@ -2305,6 +2343,26 @@ const install = () => {
   // name that does not exist is a throw: measured on the first menu the app
   // opened, "Property 'MutationObserver' doesn't exist" stopped its render. The
   // target has no tree to mutate, so there is nothing to report.
+  // A focus scope walks the tabbable nodes of its box with a tree walker, and
+  // the filter that says what to walk is a name of the browser: measured on the
+  // first menu the app opened, "Property 'NodeFilter' doesn't exist" stopped the
+  // walk. There are no nodes to walk here, so the filter only has to exist and
+  // the walker only has to end.
+  target.NodeFilter ??= {
+    SHOW_ALL: 0xffffffff,
+    SHOW_ELEMENT: 1,
+    SHOW_ATTRIBUTE: 2,
+    SHOW_TEXT: 4,
+    SHOW_CDATA_SECTION: 8,
+    SHOW_ENTITY_REFERENCE: 16,
+    SHOW_ENTITY: 32,
+    SHOW_PROCESSING_INSTRUCTION: 64,
+    SHOW_COMMENT: 128,
+    SHOW_DOCUMENT: 256,
+    SHOW_DOCUMENT_TYPE: 512,
+    SHOW_DOCUMENT_FRAGMENT: 1024,
+    SHOW_NOTATION: 2048,
+  };
   target.MutationObserver ??= class MutationObserver {
     observe() {}
     disconnect() {}
@@ -3362,6 +3420,38 @@ for (const [name, component] of Object.entries(extraTags)) {
 }
 `
 
+const nativeBuildUrl = `import getDevServer from "react-native/Libraries/Core/Devtools/getDevServer";
+
+// A bundle a page imports later is loaded from the bundler that served the
+// document, and the runtime of expo builds that url from the origin of the
+// document when there is one. This target has a document of its own -- the one
+// the shim installs -- and its origin is the server of the app, so the split
+// bundle of a login went to the app server and the login failed with "Failed to
+// load split bundle". Measured on the login of the app of the case. The dev
+// server is the one that served the document, and it is asked here as the
+// runtime asks it when there is no document at all.
+function join(prefix: string, suffix: string): string {
+  return prefix.replace(/\/+$/, "") + "/" + suffix.replace(/^\/+/, "");
+}
+
+export function buildUrlForBundle(bundlePath: string): string {
+  if (/^https?:\/\//.test(bundlePath)) {
+    return bundlePath;
+  }
+  const server = getDevServer() as { url?: string };
+  const base = server.url ?? "";
+  // The path arrives relative to the bundle that is running -- ../../node_modules
+  // from the entry of the router -- and the segments of a path have to be settled
+  // before the server sees them: a request that still carries ../../ is a module
+  // the server cannot find. Measured on the login of the app of the case.
+  try {
+    return new URL(bundlePath, base).href;
+  } catch {
+    return join(base, bundlePath);
+  }
+}
+`
+
 const nativePlace = `// A page that places a popup works out where it goes by measuring the page, and
 // what it measured travels as a style of a browser: a box fixed to the viewport
 // and a transform of translate(544px, 130px). react-native has neither -- an
@@ -3385,10 +3475,10 @@ export function placed(style: unknown): unknown {
       delete given[name];
     }
   }
-  if (given.visibility === "hidden") {
-    delete given.visibility;
-    given.opacity = 0;
-  } else if (given.visibility === "visible") {
+  // A popup of the web hides itself while it is being measured, and a target
+  // that answered the measurement with nothing would keep it out of sight for
+  // good: the key is dropped and the box paints where it was placed.
+  if (given.visibility !== undefined) {
     delete given.visibility;
   }
   const transform = given.transform;
@@ -4910,6 +5000,7 @@ var nativeProjectFiles = []nativeFile{
 	{"bifrost/navigation.tsx", nativeNavigation},
 	{"bifrost/screen.tsx", nativeScreen},
 	{"bifrost/text-style.js", nativeTextStyle},
+	{"bifrost/build-url.ts", nativeBuildUrl},
 	{"bifrost/place.ts", nativePlace},
 	{"bifrost/text.tsx", nativeTextModule},
 	{"bifrost/types.d.ts", nativeTypes},
