@@ -61,7 +61,7 @@ func runDev(args []string) error {
 		buildDir = app.WorkDir
 	}
 	if router != nil && !router.needsFrontend() {
-		return errors.New("bifrost: vanilla App Router development is not available yet; run bifrost build and start .bifrost/bifrost-app")
+		return runTemplateDev(router, projectRoot, routeRoot, *interval, *prepareOnly, *viteConfig)
 	}
 	if *vitePort < 0 || *vitePort > 65535 {
 		return fmt.Errorf("invalid Vite port %d", *vitePort)
@@ -315,6 +315,175 @@ func runDev(args []string) error {
 	}
 }
 
+func runTemplateDev(app *appRouter, projectRoot, routeRoot string, interval time.Duration, prepareOnly bool, viteConfig string) error {
+	build := func(ctx context.Context) error {
+		options := builder.Options{Package: app.Package, Dir: app.WorkDir, Development: true, SourceMaps: false, ViteConfig: viteConfig, OnDescribe: func(description protocol.DescribeResult) {
+			if err := printRouteTable(description, app.routeRows(), app.routeParams(), false); err != nil {
+				reportDevError("route table", err)
+			}
+		}, Version: bifrost.Version}
+		options.Output = app.Output
+		return builder.Build(ctx, options)
+	}
+	if prepareOnly {
+		return build(context.Background())
+	}
+
+	absolute, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256([]byte(absolute))
+	name := "bifrost-dev-" + hex.EncodeToString(digest[:8])
+	lock, err := claimDevelopmentServer(os.TempDir(), name, absolute)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Close() }()
+	pruneStaleDevelopmentFiles(os.TempDir(), name+".lock")
+
+	binaryDir, err := os.MkdirTemp("", "bifrost-dev-bin-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(binaryDir) }()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	var child *exec.Cmd
+	var childBinary string
+	var generation int
+	stopProcess := func(process *exec.Cmd) {
+		if process == nil || process.Process == nil {
+			return
+		}
+		_ = syscall.Kill(-process.Process.Pid, syscall.SIGTERM)
+		_, _ = process.Process.Wait()
+	}
+	defer func() { stopProcess(child) }()
+
+	buildAndStart := func() error {
+		if err := build(ctx); err != nil {
+			return err
+		}
+		generation++
+		nextBinary := filepath.Join(binaryDir, fmt.Sprintf("app-%d", generation))
+		buildCommand := exec.Command("go", "build", "-o", nextBinary, app.Package)
+		buildCommand.Dir = app.WorkDir
+		buildCommand.Stdout = os.Stdout
+		buildCommand.Stderr = os.Stderr
+		if err := buildCommand.Run(); err != nil {
+			return fmt.Errorf("bifrost: build dev app: %w", err)
+		}
+		stopProcess(child)
+		if childBinary != "" {
+			_ = os.Remove(childBinary)
+		}
+		childBinary = nextBinary
+		child = exec.Command(nextBinary)
+		child.Dir = app.WorkDir
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
+		child.Stdin = os.Stdin
+		child.Env = templateDevelopmentEnv()
+		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		return child.Start()
+	}
+	if err := buildAndStart(); err != nil {
+		return err
+	}
+	addr := os.Getenv("BIFROST_ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
+	fmt.Fprintf(os.Stderr, "bifrost: template development for %s, pid %d on %s\n", filepath.ToSlash(projectRoot), os.Getpid(), addr)
+
+	last, err := developmentStamp(projectRoot, routeRoot)
+	if err != nil {
+		return err
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			current, err := developmentStamp(projectRoot, routeRoot)
+			if err != nil {
+				reportDevError("watch", err)
+				continue
+			}
+			if current == last {
+				continue
+			}
+			last = current
+			begin := time.Now()
+			next, err := prepareAppRouter(ctx, projectRoot, routeRoot, 0, 0)
+			if err != nil {
+				reportDevError("reload routes", err)
+				fmt.Fprintf(os.Stderr, "bifrost: rebuild failed in %dms\n", time.Since(begin).Milliseconds())
+				continue
+			}
+			app = &next
+			if err := buildAndStart(); err != nil {
+				if errors.Is(err, context.Canceled) {
+					continue
+				}
+				reportDevError("rebuild", err)
+				fmt.Fprintf(os.Stderr, "bifrost: rebuild failed in %dms\n", time.Since(begin).Milliseconds())
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "bifrost: rebuilt in %dms\n", time.Since(begin).Milliseconds())
+		}
+	}
+}
+
+func templateDevelopmentEnv() []string {
+	env := os.Environ()
+	filtered := make([]string, 0, len(env))
+	for _, value := range env {
+		if strings.HasPrefix(value, "BIFROST_DEV_DIR=") || strings.HasPrefix(value, "BIFROST_VITE_") || strings.HasPrefix(value, "BIFROST_EXTERNAL_VITE=") {
+			continue
+		}
+		filtered = append(filtered, value)
+	}
+	return filtered
+}
+
+func publicTreeStamp(projectRoot string) (string, error) {
+	root := filepath.Join(projectRoot, "public")
+	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	var latest int64
+	var names []string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if modified := info.ModTime().UnixNano(); modified > latest {
+			latest = modified
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		names = append(names, filepath.ToSlash(relative))
+		return nil
+	})
+	sort.Strings(names)
+	return fmt.Sprintf("%d:%s", latest, strings.Join(names, "\n")), err
+}
+
 func reportDevError(prefix string, err error) {
 	fmt.Fprintf(os.Stderr, "bifrost: %s: %s\n", prefix, strings.TrimPrefix(err.Error(), "bifrost: "))
 }
@@ -332,7 +501,11 @@ func developmentStamp(dir, routeRoot string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return sources + "\n" + routes, nil
+	public, err := publicTreeStamp(dir)
+	if err != nil {
+		return "", err
+	}
+	return sources + "\n" + routes + "\n" + public, nil
 }
 
 func routeTreeStamp(routeRoot string) (string, error) {
