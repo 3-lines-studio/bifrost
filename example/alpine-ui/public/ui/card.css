@@ -1,0 +1,45 @@
+.ui-card {
+  display: grid;
+  gap: 1rem;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-surface);
+  padding: 1.1rem;
+}
+
+.ui-card__header {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.ui-card__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.ui-card__description,
+.ui-card__footer {
+  margin: 0;
+  color: var(--ui-muted);
+  font-size: 0.88rem;
+}
+
+.ui-card__footer {
+  border-top: 1px solid var(--ui-line);
+  padding-top: 0.9rem;
+}
+
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  color: var(--ui-muted);
+  font-size: 0.72rem;
+}
+
+.ui-badge[data-variant="primary"] {
+  border-color: var(--ui-primary);
+  color: var(--ui-primary);
+}

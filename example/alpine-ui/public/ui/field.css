@@ -1,0 +1,38 @@
+.ui-field {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.ui-field__label {
+  color: var(--ui-text);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.ui-field__hint,
+.ui-field__error {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.ui-field__hint {
+  color: var(--ui-muted);
+}
+
+.ui-field__error {
+  color: var(--ui-danger);
+}
+
+.ui-input {
+  width: 100%;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: var(--ui-radius);
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  padding: 0.55rem 0.7rem;
+  font-size: 0.92rem;
+}
+
+.ui-input::placeholder {
+  color: var(--ui-muted);
+}

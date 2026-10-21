@@ -1,0 +1,48 @@
+{
+  "shared": ["ui/ui.go", "public/ui/tokens.css", "public/ui/base.css"],
+  "sharedBehavior": ["public/ui/ui.js"],
+  "components": {
+    "button": {
+      "type": "primitive",
+      "description": "Button with variants and sizes.",
+      "files": ["ui/button.go", "public/ui/button.css"]
+    },
+    "field": {
+      "type": "primitive",
+      "description": "Label, input, hint, and error.",
+      "files": ["ui/field.go", "public/ui/field.css"]
+    },
+    "card": {
+      "type": "primitive",
+      "description": "Card and badge surfaces.",
+      "files": ["ui/card.go", "public/ui/card.css"]
+    },
+    "dialog": {
+      "type": "behavior",
+      "description": "Native dialog with Alpine state and backdrop close.",
+      "files": ["ui/dialog.go", "public/ui/dialog.css"],
+      "deps": ["button"],
+      "behavior": true
+    },
+    "menu": {
+      "type": "behavior",
+      "description": "Keyboard-navigable menu with outside close.",
+      "files": ["ui/menu.go", "public/ui/menu.css"],
+      "deps": ["button"],
+      "behavior": true
+    },
+    "pricing": {
+      "type": "block",
+      "description": "Pricing block built from Button and Card tokens.",
+      "files": ["ui/pricing.go", "public/ui/pricing.css"],
+      "deps": ["button"],
+      "behavior": false
+    },
+    "toast": {
+      "type": "behavior",
+      "description": "Toast region backed by an Alpine store.",
+      "files": ["ui/toast.go", "public/ui/toast.css"],
+      "behavior": true
+    }
+  }
+}

@@ -1,0 +1,47 @@
+.ui-dialog__panel {
+  width: min(calc(100% - 2rem), 30rem);
+  border: 1px solid var(--ui-line-strong);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  padding: 0;
+  box-shadow: var(--ui-shadow);
+}
+
+.ui-dialog__panel::backdrop {
+  background: rgb(2 6 12 / 72%);
+  backdrop-filter: blur(3px);
+}
+
+.ui-dialog__inner {
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+}
+
+.ui-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ui-dialog__title {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.ui-dialog__description,
+.ui-dialog__body {
+  margin: 0;
+  color: var(--ui-muted);
+  font-size: 0.92rem;
+}
+
+.ui-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  border-top: 1px solid var(--ui-line);
+  padding-top: 1rem;
+}

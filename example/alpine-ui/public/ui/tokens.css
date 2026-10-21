@@ -1,0 +1,21 @@
+:root {
+  --ui-bg: #0a0f16;
+  --ui-surface: #111923;
+  --ui-surface-strong: #172333;
+  --ui-line: #263447;
+  --ui-line-strong: #3a4d66;
+  --ui-text: #e8eef6;
+  --ui-muted: #93a4b8;
+  --ui-primary: #7dd3fc;
+  --ui-primary-strong: #38bdf8;
+  --ui-danger: #fb7185;
+  --ui-success: #86efac;
+  --ui-radius: 10px;
+  --ui-radius-lg: 16px;
+  --ui-shadow: 0 24px 64px rgb(0 0 0 / 45%);
+  --ui-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+[x-cloak] {
+  display: none !important;
+}

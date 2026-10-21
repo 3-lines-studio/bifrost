@@ -1,0 +1,33 @@
+.ui-button,
+.ui-input,
+.ui-dialog__panel,
+.ui-menu__panel,
+.ui-toast {
+  font-family: var(--ui-font);
+}
+
+.ui-button:focus-visible,
+.ui-input:focus-visible,
+.ui-dialog__close:focus-visible,
+.ui-menu__item:focus-visible,
+.ui-toast__close:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: 2px;
+}
+
+.ui-dialog__close,
+.ui-toast__close {
+  border: 0;
+  background: transparent;
+  color: var(--ui-muted);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-button,
+  .ui-input {
+    transition: none;
+  }
+}
