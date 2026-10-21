@@ -18,7 +18,7 @@ try {
   check("alpine loaded", await page.evaluate(() => !!window.Alpine));
   check("ui css", (await page.locator("body").evaluate((el) => getComputedStyle(el).backgroundColor)) === "oklch(0.145 0 0)");
 
-  const dialog = page.locator("dialog");
+  const dialog = page.locator('[data-slot="dialog"] dialog');
   const trigger = page.getByRole("button", { name: "Abrir dialog" });
   check("dialog starts closed", !(await dialog.evaluate((el) => el.open)));
   await trigger.click();
@@ -58,6 +58,38 @@ try {
   check("tabs arrow", (await page.getByRole("tab", { name: "Cuenta" }).getAttribute("aria-selected")) === "true");
   check("alert", await page.getByText("Contrato shadcn", { exact: true }).isVisible());
   check("table", (await page.locator(".ui-table__row").count()) === 3);
+
+  const accordion = page.getByRole("button", { name: "¿Qué es el contrato?" });
+  check("accordion starts open", await page.getByText("Nombres, slots, variantes y tokens de shadcn.").isVisible());
+  await accordion.click();
+  await page.waitForTimeout(100);
+  check("accordion closes", !(await page.getByText("Nombres, slots, variantes y tokens de shadcn.").isVisible()));
+  await accordion.click();
+  await page.waitForTimeout(100);
+  check("accordion opens", await page.getByText("Nombres, slots, variantes y tokens de shadcn.").isVisible());
+
+  const sheet = page.locator('[data-slot="sheet"] dialog');
+  await page.getByRole("button", { name: "Abrir sheet" }).click();
+  await page.waitForTimeout(100);
+  check("sheet opens", await sheet.evaluate((el) => el.open));
+  await page.getByRole("button", { name: "Cerrar", exact: true }).click();
+  await page.waitForTimeout(100);
+  check("sheet closes", !(await sheet.evaluate((el) => el.open)));
+
+  await page.getByRole("button", { name: "Abrir popover" }).click();
+  await page.waitForTimeout(100);
+  check("popover opens", await page.locator('[data-slot="popover-content"]').isVisible());
+  await page.locator("h1").click();
+  await page.waitForTimeout(100);
+  check("popover outside closes", !(await page.locator('[data-slot="popover-content"]').isVisible()));
+
+  const help = page.getByRole("button", { name: "Ayuda" });
+  await help.hover();
+  await page.waitForTimeout(250);
+  check("tooltip opens", await page.getByRole("tooltip").isVisible());
+  await page.locator("h1").hover();
+  await page.waitForTimeout(100);
+  check("tooltip closes", !(await page.getByRole("tooltip").isVisible()));
 
   await page.getByRole("button", { name: "Mostrar toast" }).click();
   await page.waitForTimeout(100);

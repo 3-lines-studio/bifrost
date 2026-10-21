@@ -24,6 +24,11 @@ func Page(props Props) g.Node {
 	return g.Group{
 		h.Header(
 			h.Class("demo-hero"),
+			ui.Breadcrumb(ui.BreadcrumbList(
+				ui.BreadcrumbItem(ui.BreadcrumbLink("#", g.Text("Inicio"))),
+				ui.BreadcrumbSeparator(),
+				ui.BreadcrumbItem(ui.BreadcrumbPage(g.Text("UI"))),
+			)),
 			h.P(h.Class("demo-kicker"), g.Text("Alpine UI")),
 			h.H1(h.Class("demo-title"), g.Text("Go + Alpine, con contrato de shadcn")),
 			h.P(h.Class("demo-lede"), g.Text("Primitives tipados, comportamiento accesible y CSS con tokens.")),
@@ -101,6 +106,7 @@ func Page(props Props) g.Node {
 				ui.Label(ui.LabelProps{For: "terms"}, g.Text("Acepto los términos")),
 				ui.Checkbox(ui.CheckboxProps{ID: "terms", Name: "terms"}),
 				ui.Switch(ui.SwitchProps{ID: "public", Name: "public", Checked: true}),
+				ui.Toggle(ui.ToggleProps{Variant: ui.VariantOutline, Pressed: true}, g.Text("Favorito")),
 			),
 			ui.Progress(ui.ProgressProps{Value: 62}),
 			ui.Table(
@@ -117,6 +123,48 @@ func Page(props Props) g.Node {
 					ui.PaginationItem(ui.PaginationLink(ui.PaginationLinkProps{Href: "#"}, g.Text("2"))),
 					ui.PaginationItem(ui.PaginationEllipsis()),
 					ui.PaginationItem(ui.PaginationNext("#")),
+				),
+			),
+		),
+		h.Section(
+			h.Class("demo-section"),
+			h.H2(h.Class("demo-section__title"), g.Text("Overlays")),
+			ui.Accordion(ui.AccordionProps{Type: "single", DefaultValue: "one", Collapsible: true},
+				ui.AccordionItem(ui.AccordionItemProps{Value: "one"},
+					ui.AccordionTrigger(ui.AccordionTriggerProps{Value: "one"}, g.Text("¿Qué es el contrato?")),
+					ui.AccordionContent(ui.AccordionContentProps{Value: "one"}, g.Text("Nombres, slots, variantes y tokens de shadcn.")),
+				),
+				ui.AccordionItem(ui.AccordionItemProps{Value: "two"},
+					ui.AccordionTrigger(ui.AccordionTriggerProps{Value: "two"}, g.Text("¿Qué cambia en Go?")),
+					ui.AccordionContent(ui.AccordionContentProps{Value: "two"}, g.Text("Props tipadas y Alpine en lugar de React.")),
+				),
+			),
+			h.Div(
+				h.Class("demo-actions"),
+				ui.Sheet(
+					ui.SheetTrigger(ui.Button(ui.ButtonProps{Variant: ui.VariantOutline}, g.Text("Abrir sheet"))),
+					ui.SheetContent(ui.SheetContentProps{Side: "right"},
+						ui.SheetHeader(
+							ui.SheetTitle(g.Text("Filtros")),
+							ui.SheetDescription(g.Text("Panel lateral con el mismo estado de dialog.")),
+						),
+						ui.SheetFooter(
+							ui.SheetClose(ui.Button(ui.ButtonProps{Variant: ui.VariantSecondary}, g.Text("Cerrar"))),
+						),
+					),
+				),
+				ui.Popover(
+					ui.PopoverTrigger(ui.Button(ui.ButtonProps{Variant: ui.VariantOutline}, g.Text("Abrir popover"))),
+					ui.PopoverContent(
+						h.P(h.Class("demo-popover-title"), g.Text("Popover")),
+						h.P(g.Text("Contenido flotante con cierre por click outside y Escape.")),
+					),
+				),
+				ui.TooltipProvider(
+					ui.Tooltip(
+						ui.TooltipTrigger(ui.Button(ui.ButtonProps{Variant: ui.VariantGhost, Size: ui.SizeIcon, Attrs: []g.Node{g.Attr("aria-label", "Ayuda")}}, g.Text("?"))),
+						ui.TooltipContent(g.Text("Ayuda contextual")),
+					),
 				),
 			),
 		),

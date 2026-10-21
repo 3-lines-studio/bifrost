@@ -10,6 +10,12 @@
 @import "./dialog.css";
 @import "./dropdown-menu.css";
 @import "./toast.css";
+@import "./accordion.css";
+@import "./sheet.css";
+@import "./tooltip.css";
+@import "./toggle.css";
+@import "./breadcrumb.css";
+@import "./popover.css";
 @import "./tabs.css";
 @import "./pricing.css";
 @import "./alert.css";

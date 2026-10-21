@@ -88,6 +88,40 @@
       "description": "Pagination navigation and links.",
       "files": ["ui/pagination.go", "public/ui/pagination.css"]
     },
+    "accordion": {
+      "type": "behavior",
+      "description": "Single or multiple accordion with native buttons.",
+      "files": ["ui/accordion.go", "public/ui/accordion.css"],
+      "behavior": true
+    },
+    "sheet": {
+      "type": "behavior",
+      "description": "Side sheet built on the native dialog.",
+      "files": ["ui/sheet.go", "public/ui/sheet.css"],
+      "behavior": true
+    },
+    "tooltip": {
+      "type": "behavior",
+      "description": "Hover and focus tooltip with delay.",
+      "files": ["ui/tooltip.go", "public/ui/tooltip.css"],
+      "behavior": true
+    },
+    "popover": {
+      "type": "behavior",
+      "description": "Click-triggered popover with outside close.",
+      "files": ["ui/popover.go", "public/ui/popover.css"],
+      "behavior": true
+    },
+    "toggle": {
+      "type": "primitive",
+      "description": "Pressed toggle and toggle group.",
+      "files": ["ui/toggle.go", "public/ui/toggle.css"]
+    },
+    "breadcrumb": {
+      "type": "primitive",
+      "description": "Breadcrumb navigation.",
+      "files": ["ui/breadcrumb.go", "public/ui/breadcrumb.css"]
+    },
     "dialog": {
       "type": "behavior",
       "description": "Composable native dialog with Alpine state.",

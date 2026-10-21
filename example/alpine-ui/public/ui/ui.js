@@ -90,6 +90,51 @@ document.addEventListener("alpine:init", () => {
     },
   }));
 
+  Alpine.data("uiAccordion", ({ id, type, value, collapsible }) => ({
+    id,
+    type,
+    value: type === "multiple" ? (value ? value.split(",") : []) : value,
+    collapsible,
+    isOpen(item) {
+      if (this.type === "multiple") return this.value.includes(item);
+      return this.value === item;
+    },
+    toggle(item) {
+      if (this.type === "multiple") {
+        this.value = this.isOpen(item) ? this.value.filter((entry) => entry !== item) : [...this.value, item];
+        return;
+      }
+      this.value = this.value === item && this.collapsible ? "" : item;
+    },
+  }));
+
+  Alpine.data("uiTooltip", ({ id }) => ({
+    id,
+    open: false,
+    timer: null,
+    show() {
+      window.clearTimeout(this.timer);
+      this.timer = window.setTimeout(() => {
+        this.open = true;
+      }, 150);
+    },
+    hide() {
+      window.clearTimeout(this.timer);
+      this.open = false;
+    },
+  }));
+
+  Alpine.data("uiPopover", ({ id }) => ({
+    id,
+    open: false,
+    toggle() {
+      this.open = !this.open;
+    },
+    close() {
+      this.open = false;
+    },
+  }));
+
   Alpine.data("uiTabs", ({ id, value }) => ({
     id,
     value,

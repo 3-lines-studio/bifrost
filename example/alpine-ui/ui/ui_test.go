@@ -93,3 +93,47 @@ func TestToastRegionUsesStore(t *testing.T) {
 		t.Fatalf("toast markup = %s", html)
 	}
 }
+
+func TestAccordionComposition(t *testing.T) {
+	html := render(t, Accordion(AccordionProps{Type: "single", DefaultValue: "one", Collapsible: true},
+		AccordionItem(AccordionItemProps{Value: "one"},
+			AccordionTrigger(AccordionTriggerProps{Value: "one"}, g.Text("One")),
+			AccordionContent(AccordionContentProps{Value: "one"}, g.Text("Body")),
+		),
+	))
+	for _, expected := range []string{`data-slot="accordion"`, `data-slot="accordion-item"`, `data-slot="accordion-trigger"`, `data-slot="accordion-content"`, `aria-expanded`, `role="region"`} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("missing %q in %s", expected, html)
+		}
+	}
+}
+
+func TestSheetComposition(t *testing.T) {
+	html := render(t, Sheet(
+		SheetTrigger(Button(ButtonProps{}, g.Text("Open"))),
+		SheetContent(SheetContentProps{Side: "right"},
+			SheetHeader(SheetTitle(g.Text("Filters")), SheetDescription(g.Text("Description"))),
+			SheetFooter(SheetClose(Button(ButtonProps{}, g.Text("Close")))),
+		),
+	))
+	for _, expected := range []string{`data-slot="sheet"`, `data-slot="sheet-trigger"`, `data-slot="sheet-content"`, `data-slot="sheet-title"`, `data-slot="sheet-footer"`, `data-side="right"`} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("missing %q in %s", expected, html)
+		}
+	}
+}
+
+func TestTooltipAndPopoverComposition(t *testing.T) {
+	tooltip := render(t, Tooltip(TooltipTrigger(g.Text("?")), TooltipContent(g.Text("Help"))))
+	for _, expected := range []string{`data-slot="tooltip"`, `data-slot="tooltip-trigger"`, `data-slot="tooltip-content"`, `role="tooltip"`} {
+		if !strings.Contains(tooltip, expected) {
+			t.Fatalf("missing %q in %s", expected, tooltip)
+		}
+	}
+	popover := render(t, Popover(PopoverTrigger(g.Text("Open")), PopoverContent(g.Text("Body"))))
+	for _, expected := range []string{`data-slot="popover"`, `data-slot="popover-trigger"`, `data-slot="popover-content"`, `role="dialog"`} {
+		if !strings.Contains(popover, expected) {
+			t.Fatalf("missing %q in %s", expected, popover)
+		}
+	}
+}
