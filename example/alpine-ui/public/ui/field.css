@@ -1,0 +1,16 @@
+.ui-field {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.ui-field__hint {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+}
+
+.ui-field__error {
+  margin: 0;
+  color: var(--destructive);
+  font-size: 0.8rem;
+}
