@@ -220,3 +220,27 @@ func TestMustNewPanicsOnInvalidConfig(t *testing.T) {
 	}()
 	MustNew(Config{Routes: []Route{Client("bad", "pages/app.tsx")}})
 }
+
+func TestHandlerRouteIsValidatedAndExcludedFromBuildSpec(t *testing.T) {
+	handler := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	routes, err := validateRoutes(t.TempDir(), []Route{
+		Handler("/handler", handler),
+		Server("/", "pages/home.tsx", nil),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if routes[0].kind != routeHandler || routes[0].handler == nil {
+		t.Fatalf("handler route = %+v", routes[0])
+	}
+	spec, _, err := makeBuildSpec(routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spec.Routes) != 1 || spec.Routes[0].Pattern != "/" {
+		t.Fatalf("build spec routes = %+v", spec.Routes)
+	}
+	if _, err := validateRoutes(t.TempDir(), []Route{Handler("/nil", nil)}); err == nil {
+		t.Fatal("nil handler was accepted")
+	}
+}

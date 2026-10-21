@@ -65,3 +65,36 @@ func serveDataError(w http.ResponseWriter, request *http.Request, err error) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(dataError{Error: http.StatusText(status), Status: status})
 }
+
+const DataMediaType = dataMediaType
+
+func DataRequested(request *http.Request) bool {
+	return dataRequested(request)
+}
+
+func WriteData(w http.ResponseWriter, pattern string, props any, status int) error {
+	data, err := json.Marshal(props)
+	if err != nil {
+		WriteDataError(w, err)
+		return err
+	}
+	return writeDataPage(w, pattern, data, Document{}, status, 0)
+}
+
+func WriteDataError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	var redirect redirectError
+	if errors.As(err, &redirect) {
+		w.Header().Set("Location", redirect.url)
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(redirect.status)
+		return
+	}
+	if code, ok := ErrorStatus(err); ok {
+		status = code
+	}
+	w.Header().Set("Content-Type", dataMediaType)
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(dataError{Error: err.Error(), Status: status})
+}

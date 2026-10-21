@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestPruneStaleDevelopmentFilesRemovesUnlockedRuns(t *testing.T) {
@@ -304,5 +305,50 @@ func TestRequireViteInstalledFindsTheModulesOfAnAncestor(t *testing.T) {
 	}
 	if err := requireViteInstalled(t.TempDir()); err == nil {
 		t.Fatal("a tree without Vite was accepted")
+	}
+}
+
+func TestPublicTreeStampChangesWithContent(t *testing.T) {
+	root := t.TempDir()
+	public := filepath.Join(root, "public")
+	if err := os.MkdirAll(public, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(public, "style.css")
+	if err := os.WriteFile(file, []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first, err := publicTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(time.Second)
+	if err := os.Chtimes(file, future, future); err != nil {
+		t.Fatal(err)
+	}
+	second, err := publicTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatalf("public stamp did not change: %q", first)
+	}
+}
+
+func TestTemplateDevelopmentEnvDropsVite(t *testing.T) {
+	t.Setenv("BIFROST_DEV_DIR", "/tmp/dev")
+	t.Setenv("BIFROST_VITE_PORT", "1234")
+	t.Setenv("BIFROST_ADDR", "127.0.0.1:9")
+	found := false
+	for _, value := range templateDevelopmentEnv() {
+		if strings.HasPrefix(value, "BIFROST_DEV_DIR=") || strings.HasPrefix(value, "BIFROST_VITE_") {
+			t.Fatalf("environment kept %q", value)
+		}
+		if value == "BIFROST_ADDR=127.0.0.1:9" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("BIFROST_ADDR was dropped")
 	}
 }

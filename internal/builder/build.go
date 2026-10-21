@@ -222,10 +222,14 @@ func Build(ctx context.Context, options Options) error {
 	if err := validatePublicOwnership(describe.Spec, public); err != nil {
 		return err
 	}
-	bunVersion, _ := commandOutput(ctx, describe.SourceRoot, "bun", "--version")
-	viteVersion := readPackageVersion(describe.SourceRoot, "vite")
-	reactVersion := readPackageVersion(describe.SourceRoot, "react")
-	reactDOMVersion := readPackageVersion(describe.SourceRoot, "react-dom")
+	hasFrontend := len(plans) > 0
+	bunVersion, viteVersion, reactVersion, reactDOMVersion := "", "", "", ""
+	if hasFrontend {
+		bunVersion, _ = commandOutput(ctx, describe.SourceRoot, "bun", "--version")
+		viteVersion = readPackageVersion(describe.SourceRoot, "vite")
+		reactVersion = readPackageVersion(describe.SourceRoot, "react")
+		reactDOMVersion = readPackageVersion(describe.SourceRoot, "react-dom")
+	}
 	bifrostVersion := options.Version
 	if bifrostVersion == "" {
 		bifrostVersion = "devel"
@@ -246,20 +250,22 @@ func Build(ctx context.Context, options Options) error {
 		ClientFiles: clientFiles,
 		Public:      public,
 	}
-	if manifest.Toolchain.Bun == "" {
-		return errors.New("bifrost: cannot determine Bun version")
-	}
-	if !supportedBunVersion(manifest.Toolchain.Bun) {
-		return fmt.Errorf("bifrost: unsupported Bun version %q; V1 requires Bun 1.3 or newer", manifest.Toolchain.Bun)
-	}
-	if manifest.Toolchain.Vite == "" || !supportedViteVersion(manifest.Toolchain.Vite) {
-		return fmt.Errorf("bifrost: unsupported Vite version %q; Bifrost requires Vite 8", manifest.Toolchain.Vite)
-	}
-	if manifest.Toolchain.React == "" || reactDOMVersion == "" {
-		return errors.New("bifrost: cannot determine React and React DOM versions")
-	}
-	if majorMinorVersion(manifest.Toolchain.React) != majorMinorVersion(reactDOMVersion) {
-		return fmt.Errorf("bifrost: React %s and React DOM %s must use the same major.minor version", manifest.Toolchain.React, reactDOMVersion)
+	if hasFrontend {
+		if manifest.Toolchain.Bun == "" {
+			return errors.New("bifrost: cannot determine Bun version")
+		}
+		if !supportedBunVersion(manifest.Toolchain.Bun) {
+			return fmt.Errorf("bifrost: unsupported Bun version %q; V1 requires Bun 1.3 or newer", manifest.Toolchain.Bun)
+		}
+		if manifest.Toolchain.Vite == "" || !supportedViteVersion(manifest.Toolchain.Vite) {
+			return fmt.Errorf("bifrost: unsupported Vite version %q; Bifrost requires Vite 8", manifest.Toolchain.Vite)
+		}
+		if manifest.Toolchain.React == "" || reactDOMVersion == "" {
+			return errors.New("bifrost: cannot determine React and React DOM versions")
+		}
+		if majorMinorVersion(manifest.Toolchain.React) != majorMinorVersion(reactDOMVersion) {
+			return fmt.Errorf("bifrost: React %s and React DOM %s must use the same major.minor version", manifest.Toolchain.React, reactDOMVersion)
+		}
 	}
 	if manifest.BuildID == "" {
 		canonical, err := json.Marshal(manifest)

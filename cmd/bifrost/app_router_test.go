@@ -1006,7 +1006,7 @@ func TestGeneratedServerLifecycleAndEscapeHatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, expected := range []string{"signal.NotifyContext", "ReadHeaderTimeout", "BIFROST_ADDR", `flag.StringVar(&addr, "addr"`, "route0.Serve(ctx, redirectTrailingSlash(app.ResolveMarkdown(mux)))", "server.Shutdown"} {
+	for _, expected := range []string{"signal.NotifyContext", "ReadHeaderTimeout", "ReadTimeout", "IdleTimeout", "BIFROST_ADDR", `flag.StringVar(&addr, "addr"`, "route0.Serve(ctx, redirectTrailingSlash(app.ResolveMarkdown(mux)))", "server.Shutdown"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("generated main does not contain %q", expected)
 		}
@@ -1024,6 +1024,15 @@ func TestGeneratedServerLifecycleAndEscapeHatch(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "return serve(ctx, redirectTrailingSlash(app.ResolveMarkdown(mux)))") {
 		t.Fatal("generated main does not apply markdown resolution")
+	}
+}
+
+func TestGoPageHandlerAddsAcceptVaryAndDefaultCache(t *testing.T) {
+	source := goPageHandlerSource(appRoute{Pattern: "/{$}", Alias: "route0"}, 0)
+	for _, expected := range []string{"bifrost.RecoverPage", `w.Header().Add("Vary", "Accept")`, "bifrost.GoPageDefaultCacheControl", "w.Header().Get(\"Cache-Control\")"} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("generated handler does not contain %q: %s", expected, source)
+		}
 	}
 }
 
@@ -1118,5 +1127,67 @@ func TestPrepareAppRouterAppRejectsEmptyTrees(t *testing.T) {
 	}
 	if _, err := prepareAppRouter(context.Background(), projectRoot, appRoot, 0, 0); err == nil {
 		t.Fatal("an empty route root was accepted")
+	}
+}
+
+func TestDiscoverGoPageRoutes(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"page.go", "hello/slug_/page.go", "about/page.tsx"} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes, err := discoverRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, route := range routes {
+		if route.GoRender {
+			got = append(got, route.Pattern)
+		}
+	}
+	if strings.Join(got, ",") != "/hello/{slug},/{$}" {
+		t.Fatalf("go page patterns = %q", strings.Join(got, ","))
+	}
+	rows := goPageRows(routes)
+	if len(rows) != 2 || rows[0].Kind != "go" || rows[0].Pattern != "/hello/{slug}" {
+		t.Fatalf("go page rows = %+v", rows)
+	}
+}
+
+func TestAppRouterRootsGoPage(t *testing.T) {
+	projectRoot := t.TempDir()
+	appRoot := filepath.Join(projectRoot, "app")
+	if err := os.Mkdir(appRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "page.go"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project, routes, ok, err := appRouterRoots(".", projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || project != projectRoot || routes != appRoot {
+		t.Fatalf("roots = %q, %q, %t", project, routes, ok)
+	}
+}
+
+func TestPrivateDirectoryRejectsGoPage(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "_private", "page.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := discoverRoutes(root); err == nil || !strings.Contains(err.Error(), "leading _") {
+		t.Fatalf("discoverRoutes error = %v", err)
 	}
 }

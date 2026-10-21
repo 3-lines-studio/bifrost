@@ -67,13 +67,29 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 	if manifest.SpecHash != specHash {
 		return nil, fmt.Errorf("bifrost: stale manifest: spec hash %q does not match app %q", manifest.SpecHash, specHash)
 	}
-	if manifest.Toolchain.Bifrost == "" || manifest.Toolchain.Bun == "" || manifest.Toolchain.Vite == "" || manifest.Toolchain.React == "" {
+	if manifest.Toolchain.Bifrost == "" {
 		return nil, errors.New("bifrost: manifest toolchain is incomplete")
 	}
-	if !supportedMajorVersion(manifest.Toolchain.Vite, 8) {
+	hasFrontend := manifest.Runtime != nil
+	hasReact := false
+	for _, view := range manifest.Views {
+		if view.Client.Entry.Path != "" {
+			hasFrontend = true
+		}
+		if view.Mode != "html" {
+			hasReact = true
+		}
+	}
+	if hasFrontend && (manifest.Toolchain.Bun == "" || manifest.Toolchain.Vite == "") {
+		return nil, errors.New("bifrost: manifest toolchain is incomplete")
+	}
+	if hasFrontend && !supportedMajorVersion(manifest.Toolchain.Vite, 8) {
 		return nil, fmt.Errorf("bifrost: unsupported Vite version %q; Bifrost requires Vite 8", manifest.Toolchain.Vite)
 	}
-	if !supportedReactVersion(manifest.Toolchain.React) {
+	if hasReact && manifest.Toolchain.React == "" {
+		return nil, errors.New("bifrost: manifest toolchain is incomplete")
+	}
+	if hasReact && !supportedReactVersion(manifest.Toolchain.React) {
 		return nil, fmt.Errorf("bifrost: unsupported React version %q; V1 requires React 19", manifest.Toolchain.React)
 	}
 
