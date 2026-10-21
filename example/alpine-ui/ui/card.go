@@ -5,41 +5,44 @@ import (
 	h "maragu.dev/gomponents/html"
 )
 
-type CardProps struct {
-	Title       string
-	Description string
-	Body        g.Node
-	Footer      g.Node
-	Attrs       []g.Node
-}
-
-func Card(props CardProps) g.Node {
-	nodes := []g.Node{h.Class("ui-card")}
-	nodes = append(nodes, props.Attrs...)
-	if props.Title != "" || props.Description != "" {
-		header := []g.Node{h.Class("ui-card__header")}
-		if props.Title != "" {
-			header = append(header, h.H2(h.Class("ui-card__title"), g.Text(props.Title)))
-		}
-		if props.Description != "" {
-			header = append(header, h.P(h.Class("ui-card__description"), g.Text(props.Description)))
-		}
-		nodes = append(nodes, h.Header(header...))
-	}
-	if props.Body != nil {
-		nodes = append(nodes, h.Div(h.Class("ui-card__body"), props.Body))
-	}
-	if props.Footer != nil {
-		nodes = append(nodes, h.Footer(h.Class("ui-card__footer"), props.Footer))
-	}
-	return h.Article(nodes...)
-}
-
-func Badge(variant string, children ...g.Node) g.Node {
-	if variant == "" {
-		variant = Default
-	}
-	nodes := []g.Node{h.Class("ui-badge"), g.Attr("data-variant", variant)}
+func Card(children ...g.Node) g.Node {
+	nodes := []g.Node{h.Class("ui-card"), g.Attr("data-slot", "card")}
 	nodes = append(nodes, children...)
-	return h.Span(nodes...)
+	return h.Div(nodes...)
+}
+
+func CardHeader(children ...g.Node) g.Node {
+	nodes := []g.Node{h.Class("ui-card__header"), g.Attr("data-slot", "card-header")}
+	nodes = append(nodes, children...)
+	return h.Div(nodes...)
+}
+
+func CardTitle(children ...g.Node) g.Node {
+	nodes := []g.Node{h.Class("ui-card__title"), g.Attr("data-slot", "card-title")}
+	nodes = append(nodes, children...)
+	return h.Div(nodes...)
+}
+
+func CardDescription(children ...g.Node) g.Node {
+	nodes := []g.Node{h.Class("ui-card__description"), g.Attr("data-slot", "card-description")}
+	nodes = append(nodes, children...)
+	return h.P(nodes...)
+}
+
+func CardAction(children ...g.Node) g.Node {
+	nodes := []g.Node{h.Class("ui-card__action"), g.Attr("data-slot", "card-action")}
+	nodes = append(nodes, children...)
+	return h.Div(nodes...)
+}
+
+func CardContent(children ...g.Node) g.Node {
+	nodes := []g.Node{h.Class("ui-card__content"), g.Attr("data-slot", "card-content")}
+	nodes = append(nodes, children...)
+	return h.Div(nodes...)
+}
+
+func CardFooter(children ...g.Node) g.Node {
+	nodes := []g.Node{h.Class("ui-card__footer"), g.Attr("data-slot", "card-footer")}
+	nodes = append(nodes, children...)
+	return h.Div(nodes...)
 }

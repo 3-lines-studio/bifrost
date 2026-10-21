@@ -8,6 +8,7 @@ import (
 func Layout(content g.Node) g.Node {
 	return h.HTML(
 		g.Attr("lang", "en"),
+		g.Attr("class", "dark"),
 		h.Head(
 			h.Meta(h.Charset("utf-8")),
 			h.Meta(h.Name("viewport"), h.Content("width=device-width, initial-scale=1")),

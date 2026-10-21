@@ -27,7 +27,7 @@ for _ in $(seq 50); do
 done
 
 body=$(curl -sS --max-time 10 "$base/")
-for expected in 'ui-button' 'ui-dialog__panel' 'ui-menu__panel' 'ui-toasts' 'ui-pricing' '/ui/ui.js' '/ui/ui.css'; do
+for expected in 'ui-button' 'ui-dialog__panel' 'ui-dropdown-menu__panel' 'ui-tabs__list' 'ui-alert' 'ui-table' 'ui-pagination' 'ui-toasts' 'ui-pricing' '/ui/ui.js' '/ui/ui.css'; do
   if grep -qF -- "$expected" <<<"$body"; then ok "$expected"; else bad "$expected"; fi
 done
 for path in /ui/ui.css /ui/ui.js /app.css; do
@@ -39,7 +39,7 @@ echo "registry"
 if go run ./cmd/ui list | grep -q "dialog"; then ok "ui list"; else bad "ui list"; fi
 tmp=$(mktemp -d)
 if go run ./cmd/ui add dialog -to "$tmp" >/dev/null; then ok "ui add"; else bad "ui add"; fi
-for file in ui/ui.go ui/button.go ui/dialog.go public/ui/ui.css public/ui/ui.js public/ui/dialog.css; do
+for file in ui/ui.go ui/dialog.go public/ui/ui.css public/ui/ui.js public/ui/dialog.css; do
   if [[ -f "$tmp/$file" ]]; then ok "copied $file"; else bad "copied $file"; fi
 done
 if grep -q './dialog.css' "$tmp/public/ui/ui.css"; then ok "ui css imports"; else bad "ui css imports"; fi

@@ -1,5 +1,6 @@
 document.addEventListener("alpine:init", () => {
-  Alpine.data("uiDialog", () => ({
+  Alpine.data("uiDialog", ({ id }) => ({
+    id,
     open: false,
     show() {
       if (this.open) return;
@@ -15,7 +16,8 @@ document.addEventListener("alpine:init", () => {
     },
   }));
 
-  Alpine.data("uiMenu", () => ({
+  Alpine.data("uiMenu", ({ id }) => ({
+    id,
     open: false,
     active: -1,
     items() {
@@ -26,7 +28,7 @@ document.addEventListener("alpine:init", () => {
         this.close();
         return;
       }
-      this.open = true;
+      this.openAndFocus();
     },
     openAndFocus() {
       this.open = true;
@@ -35,7 +37,10 @@ document.addEventListener("alpine:init", () => {
     close(restoreFocus = true) {
       this.open = false;
       this.active = -1;
-      if (restoreFocus) this.$refs.button?.focus();
+      if (!restoreFocus) return;
+      const trigger = this.$refs.trigger;
+      const button = trigger?.querySelector?.("button") ?? trigger;
+      button?.focus();
     },
     focus(index) {
       const items = this.items();
@@ -82,6 +87,40 @@ document.addEventListener("alpine:init", () => {
             }
           }
       }
+    },
+  }));
+
+  Alpine.data("uiTabs", ({ id, value }) => ({
+    id,
+    value,
+    select(next) {
+      this.value = next;
+    },
+    onKeydown(event) {
+      const tabs = Array.from(this.$refs.list.querySelectorAll('[role="tab"]'));
+      if (tabs.length === 0) return;
+      const current = tabs.indexOf(document.activeElement);
+      if (current < 0) return;
+      let next = current;
+      switch (event.key) {
+        case "ArrowRight":
+          next = (current + 1) % tabs.length;
+          break;
+        case "ArrowLeft":
+          next = (current - 1 + tabs.length) % tabs.length;
+          break;
+        case "Home":
+          next = 0;
+          break;
+        case "End":
+          next = tabs.length - 1;
+          break;
+        default:
+          return;
+      }
+      event.preventDefault();
+      tabs[next].focus();
+      tabs[next].click();
     },
   }));
 

@@ -2,64 +2,116 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.4rem;
+  gap: 0.5rem;
+  white-space: nowrap;
   border: 1px solid transparent;
-  border-radius: var(--ui-radius);
-  background: var(--ui-surface-strong);
-  color: var(--ui-text);
-  padding: 0.55rem 0.9rem;
-  font-size: 0.9rem;
-  font-weight: 600;
-  line-height: 1.2;
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
   cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+  text-decoration: none;
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.ui-button[data-size="default"] {
+  height: 2.25rem;
+  padding: 0.5rem 1rem;
 }
 
 .ui-button[data-size="sm"] {
-  padding: 0.35rem 0.65rem;
+  height: 2rem;
+  padding: 0.25rem 0.75rem;
   font-size: 0.8rem;
 }
 
 .ui-button[data-size="lg"] {
-  padding: 0.75rem 1.2rem;
-  font-size: 1rem;
+  height: 2.5rem;
+  padding: 0.5rem 1.5rem;
+}
+
+.ui-button[data-size="icon"] {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
 }
 
 .ui-button[data-variant="default"] {
-  background: var(--ui-surface-strong);
-  border-color: var(--ui-line-strong);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
 }
 
-.ui-button[data-variant="primary"] {
-  background: var(--ui-primary);
-  color: #08111b;
+.ui-button[data-variant="default"]:hover {
+  background: color-mix(in oklch, var(--primary) 90%, transparent);
 }
 
-.ui-button[data-variant="danger"] {
-  background: var(--ui-danger);
-  color: #1c0710;
+.ui-button[data-variant="destructive"] {
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+}
+
+.ui-button[data-variant="destructive"]:hover {
+  background: color-mix(in oklch, var(--destructive) 90%, transparent);
 }
 
 .ui-button[data-variant="outline"] {
-  background: transparent;
-  border-color: var(--ui-line-strong);
+  border-color: var(--input);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.ui-button[data-variant="outline"]:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.ui-button[data-variant="secondary"] {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+
+.ui-button[data-variant="secondary"]:hover {
+  background: color-mix(in oklch, var(--secondary) 80%, transparent);
 }
 
 .ui-button[data-variant="ghost"] {
   background: transparent;
-  color: var(--ui-muted);
+  color: var(--foreground);
 }
 
-.ui-button:hover {
-  border-color: var(--ui-primary);
+.ui-button[data-variant="ghost"]:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 
-.ui-button[data-variant="primary"]:hover,
-.ui-button[data-variant="danger"]:hover {
-  filter: brightness(1.08);
+.ui-button[data-variant="link"] {
+  height: auto;
+  padding: 0;
+  background: transparent;
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 
-.ui-button:disabled {
-  cursor: not-allowed;
+.ui-button[data-variant="link"]:hover {
+  text-decoration-thickness: 2px;
+}
+
+.ui-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.ui-button:disabled,
+.ui-button[aria-disabled="true"] {
+  pointer-events: none;
   opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-button {
+    transition: none;
+  }
 }

@@ -16,7 +16,7 @@ try {
   await page.goto(`${base}/`, { waitUntil: "load" });
   await page.waitForTimeout(300);
   check("alpine loaded", await page.evaluate(() => !!window.Alpine));
-  check("ui css", (await page.locator("body").evaluate((el) => getComputedStyle(el).backgroundColor)) === "rgb(10, 15, 22)");
+  check("ui css", (await page.locator("body").evaluate((el) => getComputedStyle(el).backgroundColor)) === "oklch(0.145 0 0)");
 
   const dialog = page.locator("dialog");
   const trigger = page.getByRole("button", { name: "Abrir dialog" });
@@ -34,9 +34,10 @@ try {
   await menu.click();
   await page.waitForTimeout(100);
   check("menu opens", await page.getByRole("menu").isVisible());
+  check("menu click focus", (await page.evaluate(() => document.activeElement?.textContent)) === "Editar");
   await page.keyboard.press("ArrowDown");
   await page.waitForTimeout(100);
-  check("menu arrow focus", (await page.evaluate(() => document.activeElement?.textContent)) === "Editar");
+  check("menu arrow focus", (await page.evaluate(() => document.activeElement?.textContent)) === "Compartir");
   await page.keyboard.press("Escape");
   await page.waitForTimeout(100);
   check("menu escape", !(await page.getByRole("menu").isVisible()));
@@ -47,6 +48,16 @@ try {
   await page.waitForTimeout(100);
   check("menu outside closes", !(await page.getByRole("menu").isVisible()));
   check("outside keeps focus", (await page.evaluate(() => document.activeElement?.textContent)) !== "Acciones");
+
+  await page.getByRole("tab", { name: "Facturación" }).click();
+  await page.waitForTimeout(100);
+  check("tabs click", (await page.getByRole("tab", { name: "Facturación" }).getAttribute("aria-selected")) === "true");
+  check("tabs panel", await page.getByText("Contenido de facturación.").isVisible());
+  await page.getByRole("tab", { name: "Facturación" }).press("ArrowLeft");
+  await page.waitForTimeout(100);
+  check("tabs arrow", (await page.getByRole("tab", { name: "Cuenta" }).getAttribute("aria-selected")) === "true");
+  check("alert", await page.getByText("Contrato shadcn", { exact: true }).isVisible());
+  check("table", (await page.locator(".ui-table__row").count()) === 3);
 
   await page.getByRole("button", { name: "Mostrar toast" }).click();
   await page.waitForTimeout(100);

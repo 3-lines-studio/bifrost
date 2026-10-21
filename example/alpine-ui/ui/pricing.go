@@ -25,9 +25,9 @@ type PricingProps struct {
 func Pricing(props PricingProps) g.Node {
 	plans := make([]g.Node, 0, len(props.Plans))
 	for _, plan := range props.Plans {
-		variant := Outline
+		variant := VariantOutline
 		if plan.Highlight {
-			variant = Primary
+			variant = VariantDefault
 		}
 		features := make([]g.Node, 0, len(plan.Features))
 		for _, feature := range plan.Features {
