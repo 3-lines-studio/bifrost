@@ -1,0 +1,30 @@
+.ui-alert {
+  display: grid;
+  gap: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--card-foreground);
+  padding: 0.9rem 1rem;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+}
+
+.ui-alert[data-variant="destructive"] {
+  border-color: color-mix(in oklch, var(--destructive) 45%, transparent);
+  color: var(--destructive);
+}
+
+.ui-alert__title {
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.ui-alert__description {
+  color: var(--muted-foreground);
+  font-size: 0.82rem;
+}
+
+.ui-alert[data-variant="destructive"] .ui-alert__description {
+  color: color-mix(in oklch, var(--destructive) 70%, var(--muted-foreground));
+}

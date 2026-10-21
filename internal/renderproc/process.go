@@ -26,24 +26,20 @@ import (
 
 const startupTimeout = 10 * time.Second
 
-// UnavailableError reports renderer process or transport failure.
 type UnavailableError struct{ Err error }
 
 func (e *UnavailableError) Error() string { return e.Err.Error() }
 func (e *UnavailableError) Unwrap() error { return e.Err }
 
-// RemoteError reports an application render failure returned by the renderer.
 type RemoteError struct{ Message string }
 
 func (e *RemoteError) Error() string { return e.Message }
 
-// Sink receives ordered renderer output.
 type Sink interface {
 	Head([]byte) error
 	Body([]byte) error
 }
 
-// Process is one long-lived renderer executable.
 type Process struct {
 	cmd       *exec.Cmd
 	socket    string
@@ -99,8 +95,6 @@ func processAlive(pid int) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
-// StartCommand starts a renderer command and waits for its Unix socket health
-// endpoint.
 func StartCommand(executable string, args []string, workDir string, environment ...string) (*Process, error) {
 	if executable == "" {
 		return nil, errors.New("empty renderer executable")
@@ -153,9 +147,6 @@ func StartCommand(executable string, args []string, workDir string, environment 
 	return process, nil
 }
 
-// Attach connects to an already-running renderer listening on socket. The
-// caller owns the renderer process lifecycle; Attach never starts, restarts,
-// or removes the socket.
 func Attach(socket string) (*Process, error) {
 	if socket == "" {
 		return nil, errors.New("empty renderer socket")
@@ -176,8 +167,6 @@ func Attach(socket string) (*Process, error) {
 	return process, nil
 }
 
-// Recover drops pooled transport connections after the remote renderer
-// restarted on the same socket.
 func (p *Process) Recover() {
 	if p == nil || p.client == nil {
 		return
@@ -209,7 +198,6 @@ func (p *Process) waitHealthy() error {
 	return fmt.Errorf("renderer did not start within %s", startupTimeout)
 }
 
-// Healthy checks the child process and its health endpoint.
 func (p *Process) Healthy(ctx context.Context) error {
 	if p == nil || p.client == nil {
 		return errors.New("renderer process is not initialized")

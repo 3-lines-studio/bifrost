@@ -97,6 +97,18 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 		}
 		state.devProxy = newDevelopmentProxy(port)
 	}
+	wrap := func(pattern string, handler http.Handler) (http.Handler, error) {
+		if len(app.hooks.responseHooks) > 0 {
+			handler = &responseObserver{pattern: pattern, next: handler, hooks: app.hooks.responseHooks}
+		}
+		for index := len(app.hooks.middleware) - 1; index >= 0; index-- {
+			handler = app.hooks.middleware[index](handler)
+			if handler == nil {
+				return nil, fmt.Errorf("bifrost: middleware %d returned nil for route %q", index, pattern)
+			}
+		}
+		return handler, nil
+	}
 	for pattern, builtRoute := range manifest.routes {
 		declaration := declarations[pattern]
 		view := manifest.views[builtRoute.ViewID]
@@ -174,16 +186,30 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 			return nil, fmt.Errorf("bifrost: route %q has invalid kind", pattern)
 		}
 
-		if len(app.hooks.responseHooks) > 0 {
-			handler = &responseObserver{pattern: pattern, next: handler, hooks: app.hooks.responseHooks}
-		}
-		for i := len(app.hooks.middleware) - 1; i >= 0; i-- {
-			handler = app.hooks.middleware[i](handler)
-			if handler == nil {
-				return nil, fmt.Errorf("bifrost: middleware %d returned nil for route %q", i, pattern)
-			}
+		handler, err = wrap(pattern, handler)
+		if err != nil {
+			return nil, err
 		}
 		state.handlers[pattern] = handler
+	}
+	for _, route := range app.routes {
+		if route.kind != routeHandler {
+			continue
+		}
+		handler, err := wrap(route.pattern, route.handler)
+		if err != nil {
+			return nil, err
+		}
+		if route.cacheControl != "" {
+			handler = &cacheControlHandler{value: route.cacheControl, next: handler}
+		}
+		if len(app.hooks.loadHooks) > 0 {
+			handler = &loadObserverHandler{pattern: route.pattern, next: handler, hooks: app.hooks.loadHooks}
+		}
+		if len(app.hooks.renderHooks) > 0 {
+			handler = &renderObserverHandler{pattern: route.pattern, next: handler, hooks: app.hooks.renderHooks}
+		}
+		state.handlers[route.pattern] = handler
 	}
 	return state, nil
 }
@@ -203,9 +229,7 @@ type serverPageHandler struct {
 }
 
 func (h *serverPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
-	if h.navigationView != "" {
-		w.Header().Add("Vary", "Accept")
-	}
+	w.Header().Add("Vary", "Accept")
 	props := any(nil)
 	if h.load != nil {
 		var started time.Time
@@ -256,6 +280,12 @@ func (h *serverPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 }
 
 func (h *serverPageHandler) renderProps(w http.ResponseWriter, request *http.Request, propsJSON json.RawMessage, document Document, status, errorFallbacks int) {
+	if dataRequested(request) {
+		if err := writeDataPage(w, h.pattern, propsJSON, document, status, errorFallbacks); err != nil && h.logger != nil {
+			h.logger.Error("bifrost data response failed", "pattern", h.pattern, "error", err)
+		}
+		return
+	}
 	var sink pageRenderSink
 	if markdownRequested(request.Context()) {
 		sink = &markdownRenderSink{writer: w, limits: h.limits}
@@ -353,12 +383,16 @@ func (h *serverPageHandler) serveError(w http.ResponseWriter, request *http.Requ
 		h.hooks.errorHandler(w, request, err)
 		return
 	}
+	if dataRequested(request) {
+		serveDataError(w, request, err)
+		return
+	}
 	serveDefaultError(w, request, err)
 }
 
-// defaultDocumentCacheControl keeps a rendered document with request props out
-// of browsers and shared caches, including the ones that only read max-age.
 const defaultDocumentCacheControl = "private, no-cache, no-store, max-age=0, must-revalidate"
+
+const GoPageDefaultCacheControl = defaultDocumentCacheControl
 
 type httpRenderSink struct {
 	writer       http.ResponseWriter

@@ -1,0 +1,24 @@
+.ui-popover {
+  position: relative;
+  display: inline-block;
+}
+
+.ui-popover__trigger {
+  display: contents;
+}
+
+.ui-popover__content {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  z-index: 30;
+  width: 18rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  padding: 1rem;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  box-shadow: var(--shadow);
+}

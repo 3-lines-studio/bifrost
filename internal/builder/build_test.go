@@ -1,7 +1,10 @@
 package builder
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -264,5 +267,83 @@ func TestWriteEntriesAddsReloadOnlyInDevelopment(t *testing.T) {
 	data, _ = os.ReadFile(plan.ClientFile)
 	if strings.Contains(string(data), "/_bifrost/build-id") {
 		t.Fatal("production entry contains reload polling")
+	}
+}
+
+func TestFrontendBuildErrorKeepsTheEndOfWhatTheRunnerSaid(t *testing.T) {
+	command := exec.Command("bun", "run", "vite-runner.ts")
+	log := "vite v8.0.0 building for production\n" +
+		"error: Could not resolve \"../../app/probe/page.tsx\" from .bifrost/views/page-2.tsx\n"
+	said := frontendBuildError(command, errors.New("exit status 1"), log)
+	if !strings.Contains(said.Error(), "Could not resolve") {
+		t.Fatalf("the failure does not carry what the runner said:\n%s", said)
+	}
+	if !strings.Contains(said.Error(), "vite-runner.ts") {
+		t.Fatalf("the failure does not name the runner:\n%s", said)
+	}
+	if quiet := frontendBuildError(command, errors.New("exit status 1"), ""); strings.Contains(quiet.Error(), "\n") {
+		t.Fatalf("a runner that said nothing left an empty tail:\n%s", quiet)
+	}
+}
+
+func TestFrontendBuildErrorDropsRunnerNoise(t *testing.T) {
+	command := exec.Command("bun", "run", "vite-runner.ts")
+	said := "\x1b[33m[WARN] internal\x1b[0m\n" +
+		"✗ Build failed in 38ms\n" +
+		"44 | summary += err;\n" +
+		"\n" +
+		"error: Build failed with 1 error:\n" +
+		"\n" +
+		"\x1b[31m[builtin:vite-transform]\x1b[0m Expected `:` but found `<`\n" +
+		"   ╭─[ app/page.tsx:1:40 ]\n" +
+		" 1 │ export default function Page( {\n" +
+		"\n" +
+		"      at aggregate (/tmp/rolldown.mjs:49:22)\n" +
+		"Bun v1.4.3 (Linux x64)\n"
+	failure := frontendBuildError(command, errors.New("exit status 1"), said)
+	for _, unwanted := range []string{"\x1b", "summary +=", "at aggregate", "Bun v"} {
+		if strings.Contains(failure.Error(), unwanted) {
+			t.Fatalf("the failure kept %q:\n%s", unwanted, failure)
+		}
+	}
+	for _, wanted := range []string{"Expected", "app/page.tsx", "vite-runner.ts"} {
+		if !strings.Contains(failure.Error(), wanted) {
+			t.Fatalf("the failure lost %q:\n%s", wanted, failure)
+		}
+	}
+}
+
+func TestFrontendWarningsKeepsOnlyUserWarnings(t *testing.T) {
+	said := "\x1b[33m[INEFFECTIVE_DYNAMIC_IMPORT]\x1b[0m .bifrost/views/page-0.tsx is imported twice\n\n" +
+		"[IMPORT_IS_UNDEFINED] Import `renderHead` is undefined in '.bifrost/views/page-0.tsx'\n" +
+		"   ╭─[ .bifrost/app/server.tsx:6:29 ]\n\n" +
+		"\x1b[33m[UNUSED]\x1b[0m app/page.tsx is unused\n"
+	warnings := frontendWarnings(said)
+	if strings.Contains(warnings, ".bifrost/") || strings.Contains(warnings, "\x1b") {
+		t.Fatalf("the warnings kept generated files or ANSI:\n%s", warnings)
+	}
+	if !strings.Contains(warnings, "app/page.tsx is unused") {
+		t.Fatalf("the warnings lost the user's warning:\n%s", warnings)
+	}
+}
+
+func TestLastLinesKeepsTheEndOfTheLog(t *testing.T) {
+	var log strings.Builder
+	for index := 0; index < 100; index++ {
+		fmt.Fprintf(&log, "line %d\n", index)
+	}
+	kept := lastLines(log.String(), 40)
+	lines := strings.Split(kept, "\n")
+	if len(lines) != 40 {
+		t.Fatalf("kept %d lines, want 40:\n%s", len(lines), kept)
+	}
+	if lines[0] != "line 60" || lines[39] != "line 99" {
+		t.Fatalf("the end of the log is not what was kept:\n%s", kept)
+	}
+	if lastLines("only one line\n", 40) != "only one line" {
+		t.Fatal("a log of one line lost it")
+	}
+	if lastLines("", 40) != "" {
+		t.Fatal("an empty log is not empty")
 	}
 }

@@ -99,7 +99,6 @@ func (a *App) initializeProduction(config Config) error {
 	return nil
 }
 
-// Register installs Bifrost pages and assets into mux.
 func (a *App) Register(mux *http.ServeMux) (err error) {
 	if mux == nil {
 		return errors.New("bifrost: nil ServeMux")
@@ -122,7 +121,7 @@ func (a *App) Register(mux *http.ServeMux) (err error) {
 	}
 	mux.HandleFunc("GET "+dochtml.AssetPrefix+"build-id", func(w http.ResponseWriter, request *http.Request) {
 		id := a.runtime.manifest.manifest.BuildID
-		if request.URL.Query().Get("wait") == id && a.runtime.devProxy != nil {
+		if request.URL.Query().Get("wait") == id && (a.runtime.devProxy != nil || os.Getenv("BIFROST_GO_DEV") != "") {
 			select {
 			case <-request.Context().Done():
 				return
@@ -148,8 +147,6 @@ func (a *App) Register(mux *http.ServeMux) (err error) {
 	return nil
 }
 
-// Handler returns a standalone Bifrost handler. A setup failure produces a
-// deterministic 503 response rather than a partially configured route table.
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
 	if err := a.Register(mux); err != nil {
@@ -160,8 +157,6 @@ func (a *App) Handler() http.Handler {
 	return a.ResolveMarkdown(mux)
 }
 
-// Ready checks whether every renderer process can accept work. Applications
-// with only Static or Client routes are ready when their runtime is compiled.
 func (a *App) Ready(ctx context.Context) error {
 	if a == nil || a.runtime == nil {
 		return errors.New("bifrost: app has no compiled runtime")
@@ -176,7 +171,6 @@ func (a *App) Ready(ctx context.Context) error {
 	return ready.Ready(ctx)
 }
 
-// Close drains renderer work until ctx ends, then stops child processes.
 func (a *App) Close(ctx context.Context) error {
 	if a == nil || a.runtime == nil || a.runtime.renderer == nil {
 		return nil
@@ -372,8 +366,6 @@ func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency
 	return renderer, nil
 }
 
-// writeDevelopmentRoutesFile publishes the route table for the development
-// bridge's virtual routes module.
 func writeDevelopmentRoutesFile(routes []protocol.RouteSpec) (string, error) {
 	if len(routes) == 0 {
 		return "", nil
@@ -436,9 +428,6 @@ func newDevelopmentRenderer(sourceRoot, devDir string, port int, routesFile stri
 	}, nil
 }
 
-// newAttachedDevelopmentRenderer connects to a Vite bridge that outlives this
-// process and is owned by the bifrost dev command. Restart policy belongs to
-// the owner.
 func newAttachedDevelopmentRenderer(socket string, queue int, logger *slog.Logger, queueHooks []QueueHook) (*productionRenderer, error) {
 	process, err := renderproc.Attach(socket)
 	if err != nil {

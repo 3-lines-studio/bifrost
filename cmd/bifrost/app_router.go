@@ -37,20 +37,32 @@ type viewWrapper struct {
 }
 
 type appRoute struct {
-	Directory    string
-	Pattern      string
-	Params       []routeParam
-	View         string
-	ImportPath   string
-	Alias        string
-	PageGo       bool
-	HasLoader    bool
-	HasCache     bool
-	HasHead      bool
-	ErrorViews   []string
-	NotFoundView string
-	LoadingView  string
-	NotFoundPage bool
+	Directory       string
+	Pattern         string
+	Params          []routeParam
+	View            string
+	ImportPath      string
+	Alias           string
+	PageGo          bool
+	GoRender        bool
+	GoNotFound      bool
+	GoLayouts       []string
+	GoLayoutAlias   []string
+	GoLayoutContext []bool
+	GoErrorPath     string
+	GoErrorAlias    string
+	GoNotFoundPath  string
+	GoNotFoundAlias string
+	HasLoader       bool
+	HasCache        bool
+	HasError        bool
+	HasNotFound     bool
+	HasLayout       bool
+	HasHead         bool
+	ErrorViews      []string
+	NotFoundView    string
+	LoadingView     string
+	NotFoundPage    bool
 }
 
 type goDir struct {
@@ -73,10 +85,10 @@ func appRouterRoots(dir, packagePath string) (string, string, bool, error) {
 	if err != nil {
 		return "", "", false, err
 	}
-	rootPage := fileExists(filepath.Join(projectRoot, "page.tsx"))
-	appPage := fileExists(filepath.Join(projectRoot, "app", "page.tsx"))
+	rootPage := fileExists(filepath.Join(projectRoot, "page.tsx")) || fileExists(filepath.Join(projectRoot, "page.go"))
+	appPage := fileExists(filepath.Join(projectRoot, "app", "page.tsx")) || fileExists(filepath.Join(projectRoot, "app", "page.go"))
 	if rootPage && appPage {
-		return "", "", false, errors.New("bifrost: both page.tsx and app/page.tsx define the route root")
+		return "", "", false, errors.New("bifrost: both a root page and app/page.* define the route root")
 	}
 	if rootPage {
 		return projectRoot, projectRoot, true, nil
@@ -97,7 +109,7 @@ func appRouterHint(projectRoot string, err error) error {
 	if hasPage(projectRoot) || hasMarker(projectRoot) || !hasGoFile(projectRoot) {
 		return err
 	}
-	return fmt.Errorf("%w\nbifrost: %s has route.go but no page.tsx and no app directory; an App Router app needs one of them", err, filepath.ToSlash(projectRoot))
+	return fmt.Errorf("%w\nbifrost: %s has route.go but no page.tsx, page.go, or app directory; an App Router app needs one of them", err, filepath.ToSlash(projectRoot))
 }
 
 func walkTree(root string, match func(path string, entry os.DirEntry) bool) bool {
@@ -120,7 +132,7 @@ func walkTree(root string, match func(path string, entry os.DirEntry) bool) bool
 
 func hasPage(root string) bool {
 	return walkTree(root, func(_ string, entry os.DirEntry) bool {
-		return !entry.IsDir() && entry.Name() == "page.tsx"
+		return !entry.IsDir() && (entry.Name() == "page.tsx" || entry.Name() == "page.go")
 	})
 }
 
@@ -156,8 +168,18 @@ type appRouter struct {
 	Package     string
 	Output      string
 	Executable  string
+	Routes      []appRoute
 	RouteParams map[string][]string
 	Rows        []routeRow
+}
+
+func (a *appRouter) needsFrontend() bool {
+	for _, route := range a.Routes {
+		if !route.GoRender {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *appRouter) routeRows() []routeRow {
@@ -167,14 +189,40 @@ func (a *appRouter) routeRows() []routeRow {
 	return a.Rows
 }
 
+func (a *appRouter) routeParams() map[string][]string {
+	if a == nil {
+		return nil
+	}
+	return a.RouteParams
+}
+
+func goPageRows(routes []appRoute) []routeRow {
+	var rows []routeRow
+	for _, route := range routes {
+		if !route.GoRender {
+			continue
+		}
+		names := make([]string, 0, len(route.Params))
+		for _, param := range route.Params {
+			names = append(names, param.Name)
+		}
+		source := "page.go"
+		if route.GoNotFound {
+			source = "not-found.go"
+		}
+		rows = append(rows, routeRow{Kind: "go", Pattern: route.Pattern, Source: path.Join(route.Directory, source), Params: names})
+	}
+	return rows
+}
+
 func goRouteRows(goDirs []goDir) []routeRow {
 	var rows []routeRow
 	for _, directory := range goDirs {
 		for _, method := range directory.HTTPMethods {
-			rows = append(rows, routeRow{kind: "api", pattern: strings.ToUpper(method) + " " + directory.Pattern, source: path.Join(directory.Directory, "route.go")})
+			rows = append(rows, routeRow{Kind: "api", Pattern: strings.ToUpper(method) + " " + directory.Pattern, Source: path.Join(directory.Directory, "route.go")})
 		}
 		if directory.Middleware {
-			rows = append(rows, routeRow{kind: "middleware", pattern: middlewareScope(directory.Pattern), source: path.Join(directory.Directory, "middleware.go")})
+			rows = append(rows, routeRow{Kind: "middleware", Pattern: middlewareScope(directory.Pattern), Source: path.Join(directory.Directory, "middleware.go")})
 		}
 	}
 	return rows
@@ -192,20 +240,23 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 	if renderConcurrency < 0 {
 		return appRouter{}, errors.New("bifrost: render concurrency must not be negative")
 	}
-	routes, err := discoverRoutes(routeRoot)
-	if err != nil {
-		return appRouter{}, err
-	}
-	goDirs, err := discoverGoDirs(routeRoot)
-	if err != nil {
+	routes, routesErr := discoverRoutes(routeRoot)
+	goDirs, goDirsErr := discoverGoDirs(routeRoot)
+	if err := joinErrors(routesErr, goDirsErr); err != nil {
 		return appRouter{}, err
 	}
 	if len(routes) == 0 && len(goDirs) == 0 {
-		return appRouter{}, fmt.Errorf("bifrost: no page.tsx or route.go found under %s", routeRoot)
+		return appRouter{}, fmt.Errorf("bifrost: no page.tsx, page.go, or route.go found under %s", routeRoot)
 	}
-	routes, err = appendNotFoundRoutes(routeRoot, routes)
+	routes, err := appendNotFoundRoutes(routeRoot, routes)
 	if err != nil {
 		return appRouter{}, err
+	}
+	if hasGoRenderRoute(routes) {
+		routes, err = appendGoNotFoundRoutes(routeRoot, routes)
+		if err != nil {
+			return appRouter{}, err
+		}
 	}
 	modulePath, moduleDir, err := resolveModule(ctx, routeRoot, routes, len(goDirs) > 0)
 	if err != nil {
@@ -229,6 +280,45 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 		}
 		routes[index].HasLoader = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Load")
 		routes[index].HasCache = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Cache")
+		if routes[index].GoNotFound {
+			if !hasSymbol(ctx, moduleDir, routes[index].ImportPath, "NotFound") {
+				return appRouter{}, fmt.Errorf("bifrost: %s must export NotFound", filepath.ToSlash(filepath.Join(routes[index].Directory, "not-found.go")))
+			}
+			if err := validateGoArity(filepath.Join(routeRoot, filepath.FromSlash(routes[index].Directory)), goArity{name: "NotFound", params: 1, results: 1}); err != nil {
+				return appRouter{}, err
+			}
+			continue
+		}
+		if routes[index].GoRender {
+			if !hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Load") {
+				return appRouter{}, fmt.Errorf("bifrost: %s must export Load", filepath.ToSlash(filepath.Join(routes[index].Directory, "page.go")))
+			}
+			if !hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Page") {
+				return appRouter{}, fmt.Errorf("bifrost: %s must export Page", filepath.ToSlash(filepath.Join(routes[index].Directory, "page.go")))
+			}
+			routes[index].HasError = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Error")
+			routes[index].HasNotFound = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "NotFound")
+			routes[index].HasLayout = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Layout") && !fileExists(filepath.Join(routeRoot, filepath.FromSlash(routes[index].Directory), "layout.go"))
+			expected := []goArity{
+				{name: "Load", params: 1, results: 2},
+				{name: "Page", params: 1, results: 1},
+			}
+			if routes[index].HasLayout {
+				expected = append(expected, goArity{name: "Layout", params: 2, results: 1})
+			}
+			if routes[index].HasError {
+				expected = append(expected, goArity{name: "Error", params: 2, results: 1})
+			}
+			if routes[index].HasNotFound {
+				expected = append(expected, goArity{name: "NotFound", params: 1, results: 1})
+			}
+			if routes[index].HasCache {
+				expected = append(expected, goArity{name: "Cache", params: 0, results: 1})
+			}
+			if err := validateGoArity(filepath.Join(routeRoot, filepath.FromSlash(routes[index].Directory)), expected...); err != nil {
+				return appRouter{}, err
+			}
+		}
 	}
 	for index := range goDirs {
 		if goDirs[index].Directory == "." {
@@ -253,6 +343,63 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 			routes[index].Alias = importAlias(aliases, routes[index].ImportPath)
 		}
 	}
+	for index := range routes {
+		if !routes[index].GoRender || routes[index].GoNotFound {
+			continue
+		}
+		layouts, err := inheritedGoLayouts(routeRoot, routes[index].Directory)
+		if err != nil {
+			return appRouter{}, err
+		}
+		for _, layout := range layouts {
+			importPath := modulePath
+			if layout != "." {
+				importPath = modulePath + "/" + filepath.ToSlash(layout)
+			}
+			hasContext := hasSymbol(ctx, moduleDir, importPath, "LayoutContext")
+			if !hasContext && !hasSymbol(ctx, moduleDir, importPath, "Layout") {
+				return appRouter{}, fmt.Errorf("bifrost: %s must export Layout or LayoutContext", filepath.ToSlash(filepath.Join(layout, "layout.go")))
+			}
+			if err := validateGoArity(filepath.Join(routeRoot, filepath.FromSlash(layout)), goArity{name: "Layout", params: 1, results: 1}, goArity{name: "LayoutContext", params: 2, results: 1}); err != nil {
+				return appRouter{}, err
+			}
+			routes[index].GoLayouts = append(routes[index].GoLayouts, importPath)
+			routes[index].GoLayoutAlias = append(routes[index].GoLayoutAlias, importAlias(aliases, importPath))
+			routes[index].GoLayoutContext = append(routes[index].GoLayoutContext, hasContext)
+		}
+		if !routes[index].HasError {
+			if directory := inheritedGoFile(routeRoot, routes[index].Directory, "error.go"); directory != "" {
+				importPath := modulePath
+				if directory != "." {
+					importPath = modulePath + "/" + filepath.ToSlash(directory)
+				}
+				if !hasSymbol(ctx, moduleDir, importPath, "Error") {
+					return appRouter{}, fmt.Errorf("bifrost: %s must export Error", filepath.ToSlash(filepath.Join(directory, "error.go")))
+				}
+				if err := validateGoArity(filepath.Join(routeRoot, filepath.FromSlash(directory)), goArity{name: "Error", params: 2, results: 1}); err != nil {
+					return appRouter{}, err
+				}
+				routes[index].GoErrorPath = importPath
+				routes[index].GoErrorAlias = importAlias(aliases, importPath)
+			}
+		}
+		if !routes[index].HasNotFound {
+			if directory := inheritedGoFile(routeRoot, routes[index].Directory, "not-found.go"); directory != "" {
+				importPath := modulePath
+				if directory != "." {
+					importPath = modulePath + "/" + filepath.ToSlash(directory)
+				}
+				if !hasSymbol(ctx, moduleDir, importPath, "NotFound") {
+					return appRouter{}, fmt.Errorf("bifrost: %s must export NotFound", filepath.ToSlash(filepath.Join(directory, "not-found.go")))
+				}
+				if err := validateGoArity(filepath.Join(routeRoot, filepath.FromSlash(directory)), goArity{name: "NotFound", params: 1, results: 1}); err != nil {
+					return appRouter{}, err
+				}
+				routes[index].GoNotFoundPath = importPath
+				routes[index].GoNotFoundAlias = importAlias(aliases, importPath)
+			}
+		}
+	}
 	for index := range goDirs {
 		goDirs[index].Alias = importAlias(aliases, goDirs[index].ImportPath)
 	}
@@ -266,7 +413,7 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 		}
 		for _, method := range directory.HTTPMethods {
 			if method == "Get" || method == "Head" {
-				return appRouter{}, fmt.Errorf("bifrost: %s in %s/route.go conflicts with page.tsx", method, directory.Directory)
+				return appRouter{}, fmt.Errorf("bifrost: %s in %s/route.go conflicts with the page", method, directory.Directory)
 			}
 		}
 	}
@@ -292,7 +439,8 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 	if err := command.Run(); err != nil {
 		return appRouter{}, fmt.Errorf("bifrost: prepare generated module: %w", err)
 	}
-	return appRouter{ProjectRoot: projectRoot, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(projectRoot, ".bifrost", "bifrost-app"), RouteParams: routeParams(routes), Rows: goRouteRows(goDirs)}, nil
+	rows := append(goPageRows(routes), goRouteRows(goDirs)...)
+	return appRouter{ProjectRoot: projectRoot, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(projectRoot, ".bifrost", "bifrost-app"), Routes: routes, RouteParams: routeParams(routes), Rows: rows}, nil
 }
 
 func routeParams(routes []appRoute) map[string][]string {
@@ -310,8 +458,77 @@ func routeParams(routes []appRoute) map[string][]string {
 	return params
 }
 
+func joinErrors(errs ...error) error {
+	var lines []string
+	seen := make(map[string]bool)
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		for _, line := range strings.Split(err.Error(), "\n") {
+			if line == "" || seen[line] {
+				continue
+			}
+			seen[line] = true
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(lines, "\n"))
+}
+
+func hasGoRenderRoute(routes []appRoute) bool {
+	for _, route := range routes {
+		if route.GoRender {
+			return true
+		}
+	}
+	return false
+}
+
+func inheritedGoFile(routeRoot, directory, name string) string {
+	current := directory
+	for {
+		if fileExists(filepath.Join(routeRoot, filepath.FromSlash(current), name)) {
+			return current
+		}
+		if current == "." || current == "" {
+			return ""
+		}
+		current = path.Dir(current)
+	}
+}
+
+func inheritedGoLayouts(routeRoot, directory string) ([]string, error) {
+	var layouts []string
+	check := func(current string) error {
+		path := filepath.Join(routeRoot, filepath.FromSlash(current), "layout.go")
+		if !fileExists(path) {
+			return nil
+		}
+		layouts = append(layouts, current)
+		return nil
+	}
+	if err := check("."); err != nil {
+		return nil, err
+	}
+	if directory != "." {
+		current := "."
+		for _, part := range strings.Split(directory, "/") {
+			current = filepath.ToSlash(filepath.Join(current, part))
+			if err := check(current); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return layouts, nil
+}
+
 func discoverRoutes(root string) ([]appRoute, error) {
 	var routes []appRoute
+	var problems []error
 	patterns := make(map[string]string)
 	err := filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -333,7 +550,8 @@ func discoverRoutes(root string) ([]appRoute, error) {
 			if err != nil {
 				return err
 			}
-			return fmt.Errorf("bifrost: %s exports Head; keep it in page.tsx", filepath.ToSlash(relative))
+			problems = append(problems, fmt.Errorf("bifrost: %s exports Head; keep it in page.tsx", filepath.ToSlash(relative)))
+			return nil
 		}
 		directory := filepath.Dir(filePath)
 		relative, err := filepath.Rel(root, directory)
@@ -342,10 +560,12 @@ func discoverRoutes(root string) ([]appRoute, error) {
 		}
 		pattern, params, err := routePattern(relative)
 		if err != nil {
-			return fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err)
+			problems = append(problems, fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err))
+			return nil
 		}
 		if previous := patterns[pattern]; previous != "" {
-			return fmt.Errorf("bifrost: duplicate route %q from %s and %s", pattern, previous, filepath.ToSlash(relative))
+			problems = append(problems, fmt.Errorf("bifrost: duplicate route %q from %s and %s", pattern, previous, filepath.ToSlash(relative)))
+			return nil
 		}
 		patterns[pattern] = filepath.ToSlash(relative)
 		route := appRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, Params: params, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), HasHead: hasHeadExport(filePath)}
@@ -362,11 +582,125 @@ func discoverRoutes(root string) ([]appRoute, error) {
 	if err != nil {
 		return nil, err
 	}
+	pageDirectories := make(map[string]struct{}, len(routes))
+	for _, route := range routes {
+		pageDirectories[route.Directory] = struct{}{}
+	}
+	err = filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if skip, err := skipDirectory(filePath, entry); err != nil {
+			return err
+		} else if skip {
+			return filepath.SkipDir
+		}
+		if entry.IsDir() || entry.Name() != "page.go" {
+			return nil
+		}
+		directory := filepath.Dir(filePath)
+		relative, err := filepath.Rel(root, directory)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if _, exists := pageDirectories[relative]; exists || fileExists(filepath.Join(directory, "page.tsx")) {
+			return nil
+		}
+		pattern, params, err := routePattern(relative)
+		if err != nil {
+			problems = append(problems, fmt.Errorf("bifrost: route %s: %w", relative, err))
+			return nil
+		}
+		if previous := patterns[pattern]; previous != "" {
+			problems = append(problems, fmt.Errorf("bifrost: duplicate route %q from %s and %s", pattern, previous, relative))
+			return nil
+		}
+		patterns[pattern] = relative
+		pageDirectories[relative] = struct{}{}
+		importPath := relative
+		if relative == "." {
+			importPath = ""
+		}
+		routes = append(routes, appRoute{
+			Directory:  relative,
+			Pattern:    pattern,
+			Params:     params,
+			PageGo:     true,
+			GoRender:   true,
+			ImportPath: importPath,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := errors.Join(problems...); err != nil {
+		return nil, err
+	}
+	slices.SortFunc(routes, func(a, b appRoute) int { return strings.Compare(a.Pattern, b.Pattern) })
+	return routes, nil
+}
+
+func appendGoNotFoundRoutes(root string, routes []appRoute) ([]appRoute, error) {
+	patterns := make(map[string]struct{}, len(routes))
+	for _, route := range routes {
+		patterns[route.Pattern] = struct{}{}
+	}
+	var problems []error
+	err := filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if skip, err := skipDirectory(filePath, entry); err != nil {
+			return err
+		} else if skip {
+			return filepath.SkipDir
+		}
+		if entry.IsDir() || entry.Name() != "not-found.go" {
+			return nil
+		}
+		relative, err := filepath.Rel(root, filepath.Dir(filePath))
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		base, _, err := routePattern(relative)
+		if err != nil {
+			problems = append(problems, fmt.Errorf("bifrost: route %s: %w", relative, err))
+			return nil
+		}
+		pattern := strings.TrimSuffix(base, "/{$}") + "/{path...}"
+		if _, exists := patterns[pattern]; exists {
+			return nil
+		}
+		patterns[pattern] = struct{}{}
+		importPath := relative
+		if relative == "." {
+			importPath = ""
+		}
+		routes = append(routes, appRoute{
+			Directory:  relative,
+			Pattern:    pattern,
+			PageGo:     true,
+			GoRender:   true,
+			GoNotFound: true,
+			ImportPath: importPath,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := errors.Join(problems...); err != nil {
+		return nil, err
+	}
 	slices.SortFunc(routes, func(a, b appRoute) int { return strings.Compare(a.Pattern, b.Pattern) })
 	return routes, nil
 }
 
 func appendNotFoundRoutes(root string, routes []appRoute) ([]appRoute, error) {
+	var problems []error
 	err := filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -385,7 +719,8 @@ func appendNotFoundRoutes(root string, routes []appRoute) ([]appRoute, error) {
 		}
 		base, _, err := routePattern(relative)
 		if err != nil {
-			return err
+			problems = append(problems, fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err))
+			return nil
 		}
 		pattern := strings.TrimSuffix(base, "/{$}") + "/{path...}"
 		routes = append(routes, appRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), NotFoundPage: true})
@@ -394,11 +729,15 @@ func appendNotFoundRoutes(root string, routes []appRoute) ([]appRoute, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := errors.Join(problems...); err != nil {
+		return nil, err
+	}
 	slices.SortFunc(routes, func(a, b appRoute) int { return strings.Compare(a.Pattern, b.Pattern) })
 	return routes, nil
 }
 
 func discoverGoDirs(root string) ([]goDir, error) {
+	var problems []error
 	byDirectory := make(map[string]goDir)
 	err := filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -418,7 +757,8 @@ func discoverGoDirs(root string) ([]goDir, error) {
 		}
 		pattern, params, err := routePattern(relative)
 		if err != nil {
-			return fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err)
+			problems = append(problems, fmt.Errorf("bifrost: route %s: %w", filepath.ToSlash(relative), err))
+			return nil
 		}
 		directory := filepath.ToSlash(relative)
 		item := byDirectory[directory]
@@ -429,6 +769,9 @@ func discoverGoDirs(root string) ([]goDir, error) {
 		return nil
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := errors.Join(problems...); err != nil {
 		return nil, err
 	}
 	items := make([]goDir, 0, len(byDirectory))
@@ -449,6 +792,9 @@ func writeViews(projectRoot, routeRoot string, routes []appRoute) error {
 	}
 	needsMetadata := false
 	for index := range routes {
+		if routes[index].GoRender {
+			continue
+		}
 		wrappers := inheritedWrappers(routeRoot, routes[index].Directory)
 		layouts := make([]string, 0, len(wrappers))
 		for _, wrapper := range wrappers {
@@ -558,7 +904,7 @@ func writeViews(projectRoot, routeRoot string, routes []appRoute) error {
 		case !routes[index].NotFoundPage:
 			head = "export * from " + strconv.Quote(pageView) + ";\n"
 		}
-		source := imports.String() + head + "export function renderPage(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + wrap(body) + ";\n}\nexport function Page(props: Record<string, unknown>) {\n  return renderPage(props);\n}\n"
+		source := "// @ts-nocheck\n" + imports.String() + head + "export function renderPage(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + wrap(body) + ";\n}\nexport function Page(props: Record<string, unknown>) {\n  return renderPage(props);\n}\n"
 		if routes[index].LoadingView != "" {
 			source += "export function renderPending(props: Record<string, unknown>, pageKey?: string) {\n  \"use no memo\";\n  return " + wrap("<RouteLoading />") + ";\n}\n"
 		}
@@ -794,7 +1140,7 @@ func privateDirectory(directory string) error {
 		if walkErr != nil || offender != "" {
 			return walkErr
 		}
-		if !entry.IsDir() && (entry.Name() == "page.tsx" || entry.Name() == "route.go") {
+		if !entry.IsDir() && (entry.Name() == "page.tsx" || entry.Name() == "page.go" || entry.Name() == "route.go") {
 			offender = filePath
 		}
 		return nil
@@ -1089,6 +1435,103 @@ func directoryContains(parent, child string) bool {
 	return parent == "." || parent == child || strings.HasPrefix(child, parent+"/")
 }
 
+func goPageHandlerSource(route appRoute, index int) string {
+	hasError := route.HasError || route.GoErrorAlias != ""
+	hasNotFound := route.HasNotFound || route.GoNotFoundAlias != ""
+	errorCall := route.Alias + ".Error"
+	if !route.HasError && route.GoErrorAlias != "" {
+		errorCall = route.GoErrorAlias + ".Error"
+	}
+	notFoundCall := route.Alias + ".NotFound"
+	if !route.HasNotFound && route.GoNotFoundAlias != "" {
+		notFoundCall = route.GoNotFoundAlias + ".NotFound"
+	}
+	var source strings.Builder
+	fmt.Fprintf(&source, "func gopage%d(w http.ResponseWriter, r *http.Request) {\n", index)
+	source.WriteString("\tdefer bifrost.RecoverPage(w, r)\n")
+	source.WriteString("\tw.Header().Add(\"Vary\", \"Accept\")\n")
+	source.WriteString("\tif w.Header().Get(\"Cache-Control\") == \"\" {\n")
+	source.WriteString("\t\tw.Header().Set(\"Cache-Control\", bifrost.GoPageDefaultCacheControl)\n")
+	source.WriteString("\t}\n")
+	fmt.Fprintf(&source, "\tstarted := time.Now()\n\tprops, err := %s.Load(r)\n", route.Alias)
+	source.WriteString("\tbifrost.ObserveLoad(r.Context(), started, err)\n\tif err != nil {\n")
+	source.WriteString("\t\tif bifrost.DataRequested(r) {\n\t\t\tbifrost.WriteDataError(w, err)\n\t\t\treturn\n\t\t}\n")
+	if hasError || hasNotFound {
+		source.WriteString("\t\tif !bifrost.IsRedirect(err) {\n")
+		source.WriteString("\t\t\tstatus, ok := bifrost.ErrorStatus(err)\n\t\t\tif !ok {\n\t\t\t\tstatus = http.StatusInternalServerError\n\t\t\t}\n")
+		if hasNotFound {
+			fmt.Fprintf(&source, "\t\t\tif status == http.StatusNotFound {\n\t\t\t\tnode := %s(r)\n\t\t\t\tif node != nil {\n\t\t\t\t\trenderGoPage(w, r, status, node)\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t}\n", notFoundCall)
+		}
+		if hasError {
+			fmt.Fprintf(&source, "\t\t\tnode := %s(err, r)\n\t\t\tif node != nil {\n\t\t\t\trenderGoPage(w, r, status, node)\n\t\t\t\treturn\n\t\t\t}\n", errorCall)
+		}
+		source.WriteString("\t\t}\n")
+	}
+	source.WriteString("\t\tbifrost.WriteError(w, r, err)\n\t\treturn\n\t}\n")
+	source.WriteString("\tif bifrost.DataRequested(r) {\n\t\tif err := bifrost.WriteData(w, " + strconv.Quote(route.Pattern) + ", props, http.StatusOK); err != nil {\n\t\t\treturn\n\t\t}\n\t\treturn\n\t}\n")
+	fmt.Fprintf(&source, "\tnode := %s.Page(props)\n", route.Alias)
+	if route.HasLayout {
+		fmt.Fprintf(&source, "\tnode = %s.Layout(node, props)\n", route.Alias)
+	} else {
+		for index := len(route.GoLayoutAlias) - 1; index >= 0; index-- {
+			if route.GoLayoutContext[index] {
+				fmt.Fprintf(&source, "\tnode = %s.LayoutContext(node, r)\n", route.GoLayoutAlias[index])
+				continue
+			}
+			fmt.Fprintf(&source, "\tnode = %s.Layout(node)\n", route.GoLayoutAlias[index])
+		}
+	}
+	source.WriteString("\trenderGoPage(w, r, http.StatusOK, node)\n}\n\n")
+	return source.String()
+}
+
+func goPageHelpersSource() string {
+	return `type goPageNode interface {
+	Render(io.Writer) error
+}
+
+func writeGoPage(w http.ResponseWriter, status int, node goPageNode) error {
+	if node == nil {
+		err := errors.New("nil go page node")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return err
+	}
+	var body strings.Builder
+	if err := node.Render(&body); err != nil {
+		log.Printf("bifrost: render go page: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return err
+	}
+	html := body.String()
+	if os.Getenv("BIFROST_GO_DEV") != "" {
+		html = injectGoPageReload(html)
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	if _, err := w.Write([]byte("<!doctype html>")); err != nil {
+		return err
+	}
+	_, err := w.Write([]byte(html))
+	return err
+}
+
+func renderGoPage(w http.ResponseWriter, r *http.Request, status int, node goPageNode) {
+	started := time.Now()
+	err := writeGoPage(w, status, node)
+	bifrost.ObserveRender(r.Context(), started, err)
+}
+
+func injectGoPageReload(html string) string {
+	const script = "<script>(()=>{let build=\"\";async function poll(){try{if(!build){build=await (await fetch(\"/_bifrost/build-id\",{cache:\"no-store\"})).text();}const response=await fetch(\"/_bifrost/build-id?wait=\"+build,{cache:\"no-store\"});if((await response.text())!==build){location.reload();return;}setTimeout(poll,0);}catch{setTimeout(poll,500);}}poll();})()</script>"
+	if index := strings.LastIndex(html, "</body>"); index >= 0 {
+		return html[:index] + script + html[index:]
+	}
+	return html + script
+}
+
+`
+}
+
 func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDir, renderConcurrency, renderQueue int) error {
 	renderConfig := "Assets: bifrostAssets, "
 	if renderConcurrency > 0 {
@@ -1102,10 +1545,50 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 	var loaders strings.Builder
 	hasNotFoundPage := false
 	hasSegments := false
+	hasGoPage := false
 	for index, route := range routes {
 		if route.NotFoundPage {
 			hasNotFoundPage = true
 			fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, loadNotFound).WithNavigation(),\n", strconv.Quote(route.Pattern), strconv.Quote(route.View))
+			continue
+		}
+		if route.GoNotFound {
+			hasGoPage = true
+			importsByPath[route.ImportPath] = route.Alias
+			fmt.Fprintf(&loaders, "func gonotfound%d(w http.ResponseWriter, r *http.Request) {\n\trenderGoPage(w, r, http.StatusNotFound, %s.NotFound(r))\n}\n\n", index, route.Alias)
+			handler := fmt.Sprintf("http.HandlerFunc(gonotfound%d)", index)
+			for middlewareIndex := len(goDirs) - 1; middlewareIndex >= 0; middlewareIndex-- {
+				if goDirs[middlewareIndex].Middleware && directoryContains(goDirs[middlewareIndex].Directory, route.Directory) {
+					handler = goDirs[middlewareIndex].Alias + ".Middleware(" + handler + ")"
+				}
+			}
+			fmt.Fprintf(&declarations, "\t\t\tbifrost.Handler(%s, %s),\n", strconv.Quote(route.Pattern), handler)
+			continue
+		}
+		if route.GoRender {
+			hasGoPage = true
+			importsByPath[route.ImportPath] = route.Alias
+			for layoutIndex, layoutPath := range route.GoLayouts {
+				importsByPath[layoutPath] = route.GoLayoutAlias[layoutIndex]
+			}
+			if route.GoErrorPath != "" {
+				importsByPath[route.GoErrorPath] = route.GoErrorAlias
+			}
+			if route.GoNotFoundPath != "" {
+				importsByPath[route.GoNotFoundPath] = route.GoNotFoundAlias
+			}
+			loaders.WriteString(goPageHandlerSource(route, index))
+			handler := fmt.Sprintf("http.HandlerFunc(gopage%d)", index)
+			for middlewareIndex := len(goDirs) - 1; middlewareIndex >= 0; middlewareIndex-- {
+				if goDirs[middlewareIndex].Middleware && directoryContains(goDirs[middlewareIndex].Directory, route.Directory) {
+					handler = goDirs[middlewareIndex].Alias + ".Middleware(" + handler + ")"
+				}
+			}
+			declaration := fmt.Sprintf("bifrost.Handler(%s, %s)", strconv.Quote(route.Pattern), handler)
+			if route.HasCache {
+				declaration += ".WithCache(" + route.Alias + ".Cache())"
+			}
+			fmt.Fprintf(&declarations, "\t\t\t%s,\n", declaration)
 			continue
 		}
 		hasSegments = hasSegments || slices.ContainsFunc(route.Params, func(param routeParam) bool { return param.Segments })
@@ -1158,6 +1641,9 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 	var registrations strings.Builder
 	var pathValues strings.Builder
 	for index, route := range routes {
+		if route.GoRender {
+			continue
+		}
 		handler := "http.Handler(pageMux)"
 		for index := len(goDirs) - 1; index >= 0; index-- {
 			if goDirs[index].Middleware && directoryContains(goDirs[index].Directory, route.Directory) {
@@ -1186,7 +1672,15 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 			break
 		}
 	}
-	source := "package main\n\nimport (\n" + standardImports() + "\n\t\"github.com/3-lines-studio/bifrost\"\n" + imports.String() + ")\n\n" + loaders.String() + pathValues.String() + "func main() {\n\tif err := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n\nfunc run() error {\n\tapp, err := bifrost.New(bifrost.Config{SourceRoot: " + strconv.Quote(root) + ", " + renderConfig + "Routes: []bifrost.Route{\n" + declarations.String() + "\t}})\n\tif err != nil {\n\t\treturn err\n\t}\n\tif bifrost.Building() {\n\t\treturn nil\n\t}\n\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\tdefer stop()\n\tdefer func() {\n\t\tcloseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\t\tdefer cancel()\n\t\t_ = app.Close(closeCtx)\n\t}()\n\tpageMux := http.NewServeMux()\n\tif err := app.Register(pageMux); err != nil {\n\t\treturn err\n\t}\n\tmux := http.NewServeMux()\n" + registrations.String() + "\tmux.Handle(\"/\", pageMux)\n\t" + serve + "\n}\n\nfunc redirectTrailingSlash(next http.Handler) http.Handler {\n\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n\t\tpath := r.URL.Path\n\t\tif len(path) < 2 || !strings.HasSuffix(path, \"/\") {\n\t\t\tnext.ServeHTTP(w, r)\n\t\t\treturn\n\t\t}\n\t\ttarget := *r.URL\n\t\ttarget.Path = strings.TrimSuffix(path, \"/\")\n\t\thttp.Redirect(w, r, target.String(), http.StatusPermanentRedirect)\n\t})\n}\n\nfunc serve(ctx context.Context, handler http.Handler) error {\n\taddr := os.Getenv(\"BIFROST_ADDR\")\n\tif addr == \"\" {\n\t\taddr = \":8080\"\n\t}\n\tflag.StringVar(&addr, \"addr\", addr, \"HTTP listen address\")\n\tflag.Parse()\n\tserver := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10*time.Second}\n\tdone := make(chan error, 1)\n\tgo func() { done <- server.ListenAndServe() }()\n\tselect {\n\tcase err := <-done:\n\t\tif errors.Is(err, http.ErrServerClosed) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\tcase <-ctx.Done():\n\t}\n\tshutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\tdefer cancel()\n\tif err := server.Shutdown(shutdownCtx); err != nil {\n\t\t_ = server.Close()\n\t\treturn err\n\t}\n\terr := <-done\n\tif errors.Is(err, http.ErrServerClosed) {\n\t\treturn nil\n\t}\n\treturn err\n}\n"
+	importsText := standardImports()
+	if hasGoPage {
+		importsText += "\t\"io\"\n"
+	}
+	helpers := ""
+	if hasGoPage {
+		helpers = goPageHelpersSource()
+	}
+	source := "package main\n\nimport (\n" + importsText + "\n\t\"github.com/3-lines-studio/bifrost\"\n" + imports.String() + ")\n\n" + loaders.String() + helpers + pathValues.String() + "func main() {\n\tif err := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n\nfunc run() error {\n\tapp, err := bifrost.New(bifrost.Config{SourceRoot: " + strconv.Quote(root) + ", " + renderConfig + "Routes: []bifrost.Route{\n" + declarations.String() + "\t}})\n\tif err != nil {\n\t\treturn err\n\t}\n\tif bifrost.Building() {\n\t\treturn nil\n\t}\n\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\tdefer stop()\n\tdefer func() {\n\t\tcloseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\t\tdefer cancel()\n\t\t_ = app.Close(closeCtx)\n\t}()\n\tpageMux := http.NewServeMux()\n\tif err := app.Register(pageMux); err != nil {\n\t\treturn err\n\t}\n\tmux := http.NewServeMux()\n" + registrations.String() + "\tmux.Handle(\"/\", pageMux)\n\t" + serve + "\n}\n\nfunc redirectTrailingSlash(next http.Handler) http.Handler {\n\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n\t\tpath := r.URL.Path\n\t\tif len(path) < 2 || !strings.HasSuffix(path, \"/\") {\n\t\t\tnext.ServeHTTP(w, r)\n\t\t\treturn\n\t\t}\n\t\ttarget := *r.URL\n\t\ttarget.Path = strings.TrimSuffix(path, \"/\")\n\t\thttp.Redirect(w, r, target.String(), http.StatusPermanentRedirect)\n\t})\n}\n\nfunc serve(ctx context.Context, handler http.Handler) error {\n\taddr := os.Getenv(\"BIFROST_ADDR\")\n\tif addr == \"\" {\n\t\taddr = \":8080\"\n\t}\n\tflag.StringVar(&addr, \"addr\", addr, \"HTTP listen address\")\n\tflag.Parse()\n\tserver := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10*time.Second, ReadTimeout: 30*time.Second, IdleTimeout: 120*time.Second}\n\tdone := make(chan error, 1)\n\tgo func() { done <- server.ListenAndServe() }()\n\tselect {\n\tcase err := <-done:\n\t\tif errors.Is(err, http.ErrServerClosed) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\tcase <-ctx.Done():\n\t}\n\tshutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\tdefer cancel()\n\tif err := server.Shutdown(shutdownCtx); err != nil {\n\t\t_ = server.Close()\n\t\treturn err\n\t}\n\terr := <-done\n\tif errors.Is(err, http.ErrServerClosed) {\n\t\treturn nil\n\t}\n\treturn err\n}\n"
 	formatted, err := format.Source([]byte(source))
 	if err != nil {
 		return err

@@ -18,33 +18,20 @@ import (
 	"github.com/3-lines-studio/bifrost/internal/protocol"
 )
 
-// Config is the complete input to New. Its slices are copied during app
-// construction.
 type Config struct {
-	// SourceRoot is the directory against which frontend view paths resolve. An
-	// empty value means the current directory.
 	SourceRoot string
 	Routes     []Route
 	AppPlugins []AppPlugin
 
-	// Assets contains a production manifest and its referenced files. When it
-	// is nil, New creates a declaration-only app for build and development
-	// phases.
 	Assets fs.FS
 
-	// RenderConcurrency is the number of isolated production renderer processes.
-	// Each process handles one render at a time. Zero uses two processes. Development
-	// always uses one process because it owns one Vite module graph.
 	RenderConcurrency int
-	// RenderQueue bounds requests waiting for renderer capacity. Zero uses 64.
-	RenderQueue int
+	RenderQueue       int
 
 	Limits Limits
 	Logger *slog.Logger
 }
 
-// App is an immutable, validated application model. Runtime services are added
-// to this type after model compilation succeeds.
 type App struct {
 	sourceRoot string
 	routes     []Route
@@ -57,9 +44,6 @@ type App struct {
 	logger     *slog.Logger
 }
 
-// New validates declarations, runs plugin registration, and starts the
-// production runtime. Build phases may omit Assets; normal applications may
-// not.
 func New(config Config) (*App, error) {
 	app, err := newApp(config)
 	if err != nil {
@@ -155,8 +139,6 @@ func newApp(config Config) (*App, error) {
 	return app, nil
 }
 
-// MustNew is New with panic-on-error behavior for programs that treat invalid
-// app declarations as programmer errors.
 func MustNew(config Config) *App {
 	app, err := New(config)
 	if err != nil {
@@ -183,7 +165,7 @@ func validateRoutes(sourceRoot string, routes []Route) ([]Route, error) {
 
 	for i, route := range routes {
 		if route.kind == routeInvalid {
-			return nil, fmt.Errorf("bifrost: route %d was not created by Server, Static, or Client", i)
+			return nil, fmt.Errorf("bifrost: route %d was not created by Server, Static, Client, or Handler", i)
 		}
 		if err := validatePattern(route.pattern); err != nil {
 			return nil, fmt.Errorf("bifrost: route %d: %w", i, err)
@@ -192,6 +174,20 @@ func validateRoutes(sourceRoot string, routes []Route) ([]Route, error) {
 			return nil, fmt.Errorf("bifrost: duplicate route pattern %q", route.pattern)
 		}
 		seen[route.pattern] = struct{}{}
+
+		if route.kind == routeHandler {
+			if route.handler == nil {
+				return nil, fmt.Errorf("bifrost: handler route %q has a nil handler", route.pattern)
+			}
+			if route.view != "" {
+				return nil, fmt.Errorf("bifrost: handler route %q must not have a view", route.pattern)
+			}
+			if route.navigation {
+				return nil, fmt.Errorf("bifrost: navigation requires a server route: %q", route.pattern)
+			}
+			normalized[i] = route
+			continue
+		}
 
 		view, err := normalizeView(sourceRoot, route.view)
 		if err != nil {
@@ -288,15 +284,18 @@ func patternIsDynamic(pattern string) bool {
 func makeBuildSpec(routes []Route) (protocol.Spec, string, error) {
 	spec := protocol.Spec{
 		Schema: protocol.Schema,
-		Routes: make([]protocol.RouteSpec, len(routes)),
+		Routes: make([]protocol.RouteSpec, 0, len(routes)),
 	}
-	for i, route := range routes {
-		spec.Routes[i] = protocol.RouteSpec{
+	for _, route := range routes {
+		if route.kind == routeHandler {
+			continue
+		}
+		spec.Routes = append(spec.Routes, protocol.RouteSpec{
 			Pattern:    route.pattern,
 			View:       route.view,
 			Kind:       route.kind.String(),
 			Navigation: route.navigation,
-		}
+		})
 	}
 
 	slices.SortFunc(spec.Routes, func(a, b protocol.RouteSpec) int {
