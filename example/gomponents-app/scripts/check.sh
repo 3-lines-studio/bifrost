@@ -54,6 +54,8 @@ expect_body "vanilla css link" "/styles.css" "/"
 expect_status "vanilla css" 200 "/styles.css"
 expect_body "parent passes props" "Parent passes variables" "/"
 expect_header "middleware" "X-Go-Page" "1" "/"
+expect_header "vary" "Vary" "Accept" "/"
+expect_header "document cache" "Cache-Control" "private, no-cache, no-store" "/"
 expect_header "cache" "Cache-Control" "public, max-age=60" "/error-demo"
 expect_status "dynamic param" 200 "/hello/world"
 expect_body "dynamic param body" "Hello, world" "/hello/world"
@@ -64,6 +66,12 @@ if grep -qF '"Name":"world"' <<<"$data"; then
   ok "data response"
 else
   bad "data response" "no props in $data"
+fi
+data_headers=$(curl -sS --max-time 10 -D - -o /dev/null -H "Accept: application/vnd.bifrost.data+json" "$base/hello/world" | tr -d '\r')
+if grep -qi '^Cache-Control: no-store' <<<"$data_headers" && grep -qi '^Vary: Accept' <<<"$data_headers"; then
+  ok "data cache and vary"
+else
+  bad "data cache and vary" "$data_headers"
 fi
 expect_status "nested error" 503 "/hello/world?state=error"
 expect_body "nested error body" "Hello error" "/hello/world?state=error"
