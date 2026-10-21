@@ -1,0 +1,51 @@
+.ui-accordion {
+  width: 100%;
+}
+
+.ui-accordion__item {
+  border-bottom: 1px solid var(--border);
+}
+
+.ui-accordion__trigger {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 0;
+  background: transparent;
+  padding: 1rem 0;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ui-accordion__trigger::after {
+  content: "+";
+  color: var(--muted-foreground);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.ui-accordion__trigger[data-state="open"]::after {
+  content: "−";
+}
+
+.ui-accordion__trigger:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.ui-accordion__trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.ui-accordion__content {
+  padding-bottom: 1rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}

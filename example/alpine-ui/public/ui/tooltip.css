@@ -1,0 +1,30 @@
+.ui-tooltip-provider {
+  display: contents;
+}
+
+.ui-tooltip {
+  position: relative;
+  display: inline-block;
+}
+
+.ui-tooltip__trigger {
+  display: contents;
+}
+
+.ui-tooltip__content {
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  left: 50%;
+  z-index: 30;
+  width: max-content;
+  max-width: 16rem;
+  transform: translateX(-50%);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  padding: 0.35rem 0.55rem;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  box-shadow: var(--shadow);
+}
