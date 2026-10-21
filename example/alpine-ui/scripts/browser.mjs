@@ -68,6 +68,15 @@ try {
   await page.waitForTimeout(100);
   check("accordion opens", await page.getByText("Nombres, slots, variantes y tokens de shadcn.").isVisible());
 
+  const more = page.getByRole("button", { name: "Más detalles" });
+  check("collapsible starts closed", !(await page.getByText("Contenido colapsable con Alpine.").isVisible()));
+  await more.click();
+  await page.waitForTimeout(100);
+  check("collapsible opens", await page.getByText("Contenido colapsable con Alpine.").isVisible());
+  await more.click();
+  await page.waitForTimeout(100);
+  check("collapsible closes", !(await page.getByText("Contenido colapsable con Alpine.").isVisible()));
+
   const sheet = page.locator('[data-slot="sheet"] dialog');
   await page.getByRole("button", { name: "Abrir sheet" }).click();
   await page.waitForTimeout(100);

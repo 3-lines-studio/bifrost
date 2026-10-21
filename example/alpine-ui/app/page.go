@@ -64,16 +64,17 @@ func Page(props Props) g.Node {
 					ui.CardDescription(g.Text("Label, input y ayuda.")),
 				),
 				ui.CardContent(
-					ui.Field(ui.FieldProps{
-						Label: "Nombre",
-						ID:    "name",
-						Hint:  "Se usa en el saludo.",
-						Control: ui.Input(ui.InputProps{
-							Name:        "name",
-							ID:          "name",
-							Placeholder: props.Name,
-						}),
-					}),
+					ui.Form(nil,
+						ui.FormItem(
+							ui.FormLabel("name", g.Text("Nombre")),
+							ui.FormControl(ui.Input(ui.InputProps{
+								Name:        "name",
+								ID:          "name",
+								Placeholder: props.Name,
+							})),
+							ui.FormDescription(g.Text("Se usa en el saludo.")),
+						),
+					),
 				),
 			),
 		),
@@ -116,6 +117,20 @@ func Page(props Props) g.Node {
 					ui.TableRow(ui.TableCell(g.Text("Pro")), ui.TableCell(g.Text("$16"))),
 				),
 			),
+			h.Div(
+				h.Class("demo-grid"),
+				ui.AspectRatio(ui.AspectRatioProps{Ratio: "16 / 9"},
+					h.Div(
+						g.Attr("style", "display:grid;place-items:center;background:var(--secondary);color:var(--muted-foreground);font-size:0.8rem"),
+						g.Text("16 / 9"),
+					),
+				),
+				ui.ScrollArea(
+					h.P(g.Text("ScrollArea conserva el scroll nativo y el foco de teclado.")),
+					h.P(g.Text("Contenido de ejemplo para demostrar el overflow.")),
+					h.P(g.Text("Sin scrollbars custom, sin JavaScript.")),
+				),
+			),
 			ui.Pagination(
 				ui.PaginationContent(
 					ui.PaginationItem(ui.PaginationPrevious("#")),
@@ -137,6 +152,12 @@ func Page(props Props) g.Node {
 				ui.AccordionItem(ui.AccordionItemProps{Value: "two"},
 					ui.AccordionTrigger(ui.AccordionTriggerProps{Value: "two"}, g.Text("¿Qué cambia en Go?")),
 					ui.AccordionContent(ui.AccordionContentProps{Value: "two"}, g.Text("Props tipadas y Alpine en lugar de React.")),
+				),
+			),
+			ui.Collapsible(ui.CollapsibleProps{},
+				ui.CollapsibleTrigger(ui.Button(ui.ButtonProps{Variant: ui.VariantGhost}, g.Text("Más detalles"))),
+				ui.CollapsibleContent(
+					ui.Card(ui.CardContent(h.P(g.Text("Contenido colapsable con Alpine.")))),
 				),
 			),
 			h.Div(

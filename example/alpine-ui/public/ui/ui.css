@@ -16,6 +16,10 @@
 @import "./toggle.css";
 @import "./breadcrumb.css";
 @import "./popover.css";
+@import "./collapsible.css";
+@import "./aspect-ratio.css";
+@import "./scroll-area.css";
+@import "./form.css";
 @import "./tabs.css";
 @import "./pricing.css";
 @import "./alert.css";

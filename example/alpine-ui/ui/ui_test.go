@@ -137,3 +137,21 @@ func TestTooltipAndPopoverComposition(t *testing.T) {
 		}
 	}
 }
+
+func TestCollapsibleAndForm(t *testing.T) {
+	collapsible := render(t, Collapsible(CollapsibleProps{DefaultOpen: true},
+		CollapsibleTrigger(g.Text("More")),
+		CollapsibleContent(g.Text("Body")),
+	))
+	for _, expected := range []string{`data-slot="collapsible"`, `data-slot="collapsible-trigger"`, `data-slot="collapsible-content"`, `aria-expanded`} {
+		if !strings.Contains(collapsible, expected) {
+			t.Fatalf("missing %q in %s", expected, collapsible)
+		}
+	}
+	form := render(t, Form(nil, FormItem(FormLabel("name", g.Text("Name")), FormControl(Input(InputProps{ID: "name"})), FormDescription(g.Text("Help")), FormMessage(g.Text("Error")))))
+	for _, expected := range []string{`data-slot="form"`, `data-slot="form-item"`, `data-slot="form-label"`, `data-slot="form-control"`, `data-slot="form-description"`, `data-slot="form-message"`} {
+		if !strings.Contains(form, expected) {
+			t.Fatalf("missing %q in %s", expected, form)
+		}
+	}
+}

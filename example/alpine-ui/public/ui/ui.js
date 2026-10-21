@@ -135,6 +135,14 @@ document.addEventListener("alpine:init", () => {
     },
   }));
 
+  Alpine.data("uiCollapsible", ({ id, open }) => ({
+    id,
+    open,
+    toggle() {
+      this.open = !this.open;
+    },
+  }));
+
   Alpine.data("uiTabs", ({ id, value }) => ({
     id,
     value,

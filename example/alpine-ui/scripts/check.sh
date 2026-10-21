@@ -27,7 +27,7 @@ for _ in $(seq 50); do
 done
 
 body=$(curl -sS --max-time 10 "$base/")
-for expected in 'ui-button' 'ui-dialog__panel' 'ui-dropdown-menu__panel' 'ui-tabs__list' 'ui-accordion' 'ui-sheet' 'ui-tooltip' 'ui-popover' 'ui-breadcrumb' 'ui-toggle' 'ui-alert' 'ui-table' 'ui-pagination' 'ui-toasts' 'ui-pricing' '/ui/ui.js' '/ui/ui.css'; do
+for expected in 'ui-button' 'ui-dialog__panel' 'ui-dropdown-menu__panel' 'ui-tabs__list' 'ui-accordion' 'ui-sheet' 'ui-tooltip' 'ui-popover' 'ui-breadcrumb' 'ui-toggle' 'ui-form' 'ui-collapsible' 'ui-scroll-area' 'ui-aspect-ratio' 'ui-alert' 'ui-table' 'ui-pagination' 'ui-toasts' 'ui-pricing' '/ui/ui.js' '/ui/ui.css'; do
   if grep -qF -- "$expected" <<<"$body"; then ok "$expected"; else bad "$expected"; fi
 done
 for path in /ui/ui.css /ui/ui.js /app.css; do

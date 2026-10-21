@@ -122,6 +122,28 @@
       "description": "Breadcrumb navigation.",
       "files": ["ui/breadcrumb.go", "public/ui/breadcrumb.css"]
     },
+    "collapsible": {
+      "type": "behavior",
+      "description": "Single collapsible region.",
+      "files": ["ui/collapsible.go", "public/ui/collapsible.css"],
+      "behavior": true
+    },
+    "aspect-ratio": {
+      "type": "primitive",
+      "description": "Aspect ratio container.",
+      "files": ["ui/aspect_ratio.go", "public/ui/aspect-ratio.css"]
+    },
+    "scroll-area": {
+      "type": "primitive",
+      "description": "Native scroll container.",
+      "files": ["ui/scroll_area.go", "public/ui/scroll-area.css"]
+    },
+    "form": {
+      "type": "primitive",
+      "description": "Form layout primitives without react-hook-form.",
+      "files": ["ui/form.go", "public/ui/form.css"],
+      "deps": ["label", "input", "textarea"]
+    },
     "dialog": {
       "type": "behavior",
       "description": "Composable native dialog with Alpine state.",
