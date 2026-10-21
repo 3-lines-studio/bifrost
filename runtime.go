@@ -392,6 +392,8 @@ func (h *serverPageHandler) serveError(w http.ResponseWriter, request *http.Requ
 
 const defaultDocumentCacheControl = "private, no-cache, no-store, max-age=0, must-revalidate"
 
+const GoPageDefaultCacheControl = defaultDocumentCacheControl
+
 type httpRenderSink struct {
 	writer       http.ResponseWriter
 	shell        dochtml.Shell
