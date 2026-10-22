@@ -246,7 +246,7 @@ func (p *Process) Render(ctx context.Context, entry string, props json.RawMessag
 	request.Header.Set("Content-Type", "application/json")
 	response, err := p.client.Do(request)
 	if err != nil {
-		return &UnavailableError{Err: fmt.Errorf("renderer request: %w", err)}
+		return unavailableOrCanceled(ctx, fmt.Errorf("renderer request: %w", err))
 	}
 	defer func() { _ = response.Body.Close() }()
 
@@ -255,7 +255,7 @@ func (p *Process) Render(ctx context.Context, entry string, props json.RawMessag
 	var header [5]byte
 	for {
 		if _, err := io.ReadFull(response.Body, header[:]); err != nil {
-			return &UnavailableError{Err: fmt.Errorf("read renderer frame header: %w", err)}
+			return unavailableOrCanceled(ctx, fmt.Errorf("read renderer frame header: %w", err))
 		}
 		size := int(binary.BigEndian.Uint32(header[1:]))
 		if size > maxWireFrameBytes {
@@ -267,7 +267,7 @@ func (p *Process) Render(ctx context.Context, entry string, props json.RawMessag
 			payload = payload[:size]
 		}
 		if _, err := io.ReadFull(response.Body, payload); err != nil {
-			return &UnavailableError{Err: fmt.Errorf("read renderer frame payload: %w", err)}
+			return unavailableOrCanceled(ctx, fmt.Errorf("read renderer frame payload: %w", err))
 		}
 		switch header[0] {
 		case 1:
@@ -299,6 +299,17 @@ func (p *Process) Render(ctx context.Context, entry string, props json.RawMessag
 			return &UnavailableError{Err: fmt.Errorf("unknown renderer frame type %d", header[0])}
 		}
 	}
+}
+
+// unavailableOrCanceled reports the caller's context error when the request
+// was canceled or timed out, so a client abort is not mistaken for a broken
+// renderer. Canceling closes the per-request connection to the renderer, so
+// no partial response can leak into a later request on the same worker.
+func unavailableOrCanceled(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	return &UnavailableError{Err: err}
 }
 
 func (p *Process) processError() error {

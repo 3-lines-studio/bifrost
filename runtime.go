@@ -378,7 +378,15 @@ func (h *developmentStaticHandler) ServeHTTP(w http.ResponseWriter, request *htt
 	h.page.renderProps(w, request, page.props, page.document, http.StatusOK, 0)
 }
 
+// statusClientClosedRequest is the nginx convention for a request the client
+// abandoned before the response was produced.
+const statusClientClosedRequest = 499
+
 func (h *serverPageHandler) serveError(w http.ResponseWriter, request *http.Request, err error) {
+	if request.Context().Err() == context.Canceled && errors.Is(err, context.Canceled) {
+		w.WriteHeader(statusClientClosedRequest)
+		return
+	}
 	if h.hooks.errorHandler != nil {
 		h.hooks.errorHandler(w, request, err)
 		return
