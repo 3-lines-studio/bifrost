@@ -155,3 +155,46 @@ func TestSocketPID(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderReturnsContextErrorWhenCanceledMidStream(t *testing.T) {
+	started := make(chan struct{})
+	process := processForHandler(t, http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		writeTestFrame(t, w, 1, "<title>Hi</title>")
+		w.(http.Flusher).Flush()
+		close(started)
+		<-request.Context().Done()
+	}))
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { <-started; cancel() }()
+	err := process.Render(ctx, "entry.js", json.RawMessage(`{}`), &testSink{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	var unavailable *UnavailableError
+	if errors.As(err, &unavailable) {
+		t.Fatalf("canceled render reported as unavailable: %v", err)
+	}
+}
+
+func TestRenderReturnsContextErrorWhenCanceledBeforeRequest(t *testing.T) {
+	process := processForHandler(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := process.Render(ctx, "entry.js", json.RawMessage(`{}`), &testSink{})
+	var unavailable *UnavailableError
+	if !errors.Is(err, context.Canceled) || errors.As(err, &unavailable) {
+		t.Fatalf("err = %v, want bare context.Canceled", err)
+	}
+}
+
+func TestRenderStillReportsUnavailableWhenRendererDrops(t *testing.T) {
+	process := processForHandler(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeTestFrame(t, w, 1, "<title>Hi</title>")
+		panic(http.ErrAbortHandler)
+	}))
+	err := process.Render(context.Background(), "entry.js", json.RawMessage(`{}`), &testSink{})
+	var unavailable *UnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("err = %v, want UnavailableError", err)
+	}
+}
