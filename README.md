@@ -34,7 +34,7 @@ go run github.com/3-lines-studio/bifrost/cmd/bifrost routes ./cmd/web
 go run github.com/3-lines-studio/bifrost/cmd/bifrost version
 ```
 
-Flags precede the package path. `init` runs `bun install` automatically (`--no-install` skips it). `build` accepts `--sourcemaps`, `--static-workers`, `--output`, `--vite-config`, and `--render-concurrency` and `--render-queue` (the App Router takes its renderer worker count and its queue depth here). `dev` accepts `--poll`, `--vite-port` (zero picks a free port), and `--vite-config`. `routes` prints the route table (views, API handlers, and middleware) without building the app (`-C` and `--vite-config`).
+Flags precede the package path. `init` runs `bun install` automatically (`--no-install` skips it). `build` accepts `--sourcemaps`, `--static-workers`, `--output`, `--host-bun`, `--vite-config`, and `--render-concurrency` and `--render-queue` (the App Router takes its renderer worker count and its queue depth here). `dev` accepts `--poll`, `--vite-port` (zero picks a free port), and `--vite-config`. `routes` prints the route table (views, API handlers, and middleware) without building the app (`-C` and `--vite-config`).
 
 `dev` runs one validated bootstrap build, then owns a Bun process hosting Vite's development server and the SSR bridge. The bridge outlives Go child restarts, so a Go edit never discards frontend module state. Browser assets are proxied through your Go origin at `/_bifrost/dev/`, so HMR, module loads, and page requests share one origin and the Vite server never has to be reachable from the browser. Server and Static pages include stylesheet links from Vite's live SSR module graph, so development pages keep their styles instead of flashing unstyled content. Go replacement is detected by a long-poll to `/_bifrost/build-id` that holds until the process is replaced, so idle development generates almost no requests.
 
@@ -94,7 +94,7 @@ Bifrost uses two isolated Bun renderer processes by default, about 40 MB of RSS 
 
 Module globals persist between sequential requests handled by the same worker, so keep locale, user, authentication, and request data out of module-level variables: derive them from props or request-local React context.
 
-Expose renderer readiness through the user-owned health endpoint:
+The App Router serves `GET /_bifrost/ready` with `app.Ready`; point health checks there instead of rendering a page. Classic apps can expose the same check themselves:
 
 ```go
 if err := app.Ready(request.Context()); err != nil {
@@ -103,6 +103,8 @@ if err := app.Ready(request.Context()); err != nil {
 }
 writer.WriteHeader(http.StatusNoContent)
 ```
+
+`build --host-bun` writes the renderer script instead of compiling Bun into the app. The binary shrinks by about 109 MB; at runtime the app runs the script with `bun`, from `BIFROST_BUN` or `PATH`. A supervisor can keep one renderer process alive and have app instances attach through `BIFROST_RENDERER_SOCKET`; set `BIFROST_RUNTIME_SCRIPT` so every app start publishes the script for the supervisor.
 
 ## Frontend plugins
 
@@ -286,7 +288,8 @@ type AppPlugin interface {
 - Tailwind, React Compiler, Vite aliases, linked workspace packages, virtual modules, CSS Modules, assets, and shared client/SSR chunks are covered by integration tests.
 - Static and client requests do no render work; SSR streams head and body frames.
 - Isolated renderer workers with bounded concurrency and queue, readiness checks, and restart after transport failure.
-- The extracted renderer runtime is cached per build and reused across starts, and every start removes the leftovers nothing is using.
+- The extracted renderer runtime is cached and reused across starts; stale builds are pruned after a week.
+- `--host-bun` keeps the renderer out of the app binary, and `BIFROST_RENDERER_SOCKET` lets several app processes share one warm renderer.
 - End-to-end request cancellation through Go, Bun, and React streams.
 - Required build failures fail the whole build.
 
