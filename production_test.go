@@ -212,3 +212,33 @@ func TestExtractVerifiedReaderRejectsWrongHash(t *testing.T) {
 		t.Fatalf("artifact survived: %v", err)
 	}
 }
+
+func TestPublishRuntimeScript(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "runtime"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(root, "runtime", "bifrost-runtime.ts")
+	if err := os.WriteFile(source, []byte("console.log('renderer')"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), ".bee", "blue-renderer.ts")
+	ref := protocol.FileRef{Path: "runtime/bifrost-runtime.ts"}
+	if err := publishRuntimeScript(root, ref, destination); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "console.log('renderer')" {
+		t.Fatalf("script = %q", data)
+	}
+	info, err := os.Stat(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %v", info.Mode().Perm())
+	}
+}

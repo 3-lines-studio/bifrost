@@ -343,6 +343,40 @@ func removeRuntimeDirectory(root string) error {
 	return os.RemoveAll(root)
 }
 
+func publishRuntimeScript(root string, ref protocol.FileRef, destination string) error {
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(ref.Path)))
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(filepath.Dir(destination), ".bifrost-runtime-*")
+	if err != nil {
+		return err
+	}
+	temporary := temp.Name()
+	if err := temp.Chmod(0o600); err != nil {
+		_ = temp.Close()
+		_ = os.Remove(temporary)
+		return err
+	}
+	if _, err := temp.Write(data); err != nil {
+		_ = temp.Close()
+		_ = os.Remove(temporary)
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(temporary)
+		return err
+	}
+	if err := os.Rename(temporary, destination); err != nil {
+		_ = os.Remove(temporary)
+		return err
+	}
+	return nil
+}
+
 func hostBun() (string, error) {
 	if value := os.Getenv("BIFROST_BUN"); value != "" {
 		return value, nil
@@ -385,6 +419,40 @@ func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency
 			extracted[file.Path] = struct{}{}
 		}
 	}
+	if socket := os.Getenv("BIFROST_RENDERER_SOCKET"); socket != "" {
+		if scriptPath := os.Getenv("BIFROST_RUNTIME_SCRIPT"); scriptPath != "" && manifest.manifest.RuntimeKind == "bun" {
+			if err := publishRuntimeScript(root, *manifest.manifest.Runtime, scriptPath); err != nil {
+				return fail(err)
+			}
+		}
+		renderer := &productionRenderer{
+			assets:      assets,
+			manifest:    manifest,
+			root:        root,
+			attach:      true,
+			workDir:     root,
+			runtimeLock: lock,
+			admission:   make(chan struct{}, concurrency+queue),
+			idle:        make(chan *rendererWorker, concurrency),
+			workers:     make([]*rendererWorker, 0, concurrency),
+			logger:      logger,
+			queueHooks:  slices.Clone(queueHooks),
+		}
+		for index := range concurrency {
+			process, attachErr := renderproc.Attach(socket)
+			if attachErr != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				_ = renderer.closeWorkers(ctx)
+				cancel()
+				return fail(fmt.Errorf("bifrost: attach renderer worker %d: %w", index+1, attachErr))
+			}
+			worker := &rendererWorker{process: process}
+			renderer.workers = append(renderer.workers, worker)
+			renderer.idle <- worker
+		}
+		return renderer, nil
+	}
+
 	runtimePath := filepath.Join(root, filepath.FromSlash(manifest.manifest.Runtime.Path))
 	executable := runtimePath
 	var args []string
