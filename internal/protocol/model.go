@@ -54,6 +54,7 @@ type Manifest struct {
 	BuildID     string        `json:"buildId"`
 	Toolchain   Toolchain     `json:"toolchain"`
 	Runtime     *FileRef      `json:"runtime,omitempty"`
+	RuntimeKind string        `json:"runtimeKind,omitempty"`
 	Views       []BuiltView   `json:"views"`
 	Routes      []BuiltRoute  `json:"routes"`
 	ClientFiles []FileRef     `json:"clientFiles,omitempty"`

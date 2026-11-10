@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +20,26 @@ type readinessRenderer struct{ err error }
 func (*readinessRenderer) Render(context.Context, renderRequest, renderSink) error { return nil }
 func (*readinessRenderer) Close(context.Context) error                             { return nil }
 func (r *readinessRenderer) Ready(context.Context) error                           { return r.err }
+
+func TestRegisterReadyEndpoint(t *testing.T) {
+	app := &App{runtime: &runtimeState{}}
+	mux := http.NewServeMux()
+	if err := app.Register(mux); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/_bifrost/ready", nil)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("ready status = %d", recorder.Code)
+	}
+	app.runtime.renderer = &readinessRenderer{err: errors.New("not ready")}
+	recorder = httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("not ready status = %d", recorder.Code)
+	}
+}
 
 func TestAppReady(t *testing.T) {
 	want := errors.New("not ready")

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/3-lines-studio/bifrost/internal/protocol"
+	"github.com/3-lines-studio/bifrost/internal/renderproc"
 )
 
 func TestPlanViewsDeduplicatesSharedViews(t *testing.T) {
@@ -264,5 +265,23 @@ func TestWriteEntriesAddsReloadOnlyInDevelopment(t *testing.T) {
 	data, _ = os.ReadFile(plan.ClientFile)
 	if strings.Contains(string(data), "/_bifrost/build-id") {
 		t.Fatal("production entry contains reload polling")
+	}
+}
+
+func TestWriteRuntimeScript(t *testing.T) {
+	output := t.TempDir()
+	ref, err := writeRuntimeScript(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Path != "runtime/bifrost-runtime.ts" {
+		t.Fatalf("path = %q", ref.Path)
+	}
+	data, err := os.ReadFile(filepath.Join(output, filepath.FromSlash(ref.Path)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != renderproc.RuntimeSource {
+		t.Fatal("script does not match the runtime source")
 	}
 }

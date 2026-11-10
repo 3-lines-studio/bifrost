@@ -125,6 +125,13 @@ func (a *App) Register(mux *http.ServeMux) (err error) {
 	for _, pattern := range patterns {
 		mux.Handle("GET "+pattern, a.runtime.handlers[pattern])
 	}
+	mux.HandleFunc("GET "+dochtml.AssetPrefix+"ready", func(w http.ResponseWriter, request *http.Request) {
+		if err := a.Ready(request.Context()); err != nil {
+			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET "+dochtml.AssetPrefix+"build-id", func(w http.ResponseWriter, request *http.Request) {
 		id := a.runtime.manifest.manifest.BuildID
 		if request.URL.Query().Get("wait") == id && a.runtime.devProxy != nil {
@@ -336,6 +343,17 @@ func removeRuntimeDirectory(root string) error {
 	return os.RemoveAll(root)
 }
 
+func hostBun() (string, error) {
+	if value := os.Getenv("BIFROST_BUN"); value != "" {
+		return value, nil
+	}
+	value, err := exec.LookPath("bun")
+	if err != nil {
+		return "", errors.New("bifrost: BIFROST_BUN is required for the host runtime")
+	}
+	return value, nil
+}
+
 func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency, queue int, logger *slog.Logger, queueHooks []QueueHook) (*productionRenderer, error) {
 	root, lock, err := runtimeDirectory(manifest)
 	if err != nil {
@@ -367,12 +385,22 @@ func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency
 			extracted[file.Path] = struct{}{}
 		}
 	}
-	executable := filepath.Join(root, filepath.FromSlash(manifest.manifest.Runtime.Path))
+	runtimePath := filepath.Join(root, filepath.FromSlash(manifest.manifest.Runtime.Path))
+	executable := runtimePath
+	var args []string
+	if manifest.manifest.RuntimeKind == "bun" {
+		executable, err = hostBun()
+		if err != nil {
+			return fail(err)
+		}
+		args = []string{runtimePath}
+	}
 	renderer := &productionRenderer{
 		assets:      assets,
 		manifest:    manifest,
 		root:        root,
 		executable:  executable,
+		args:        args,
 		workDir:     root,
 		runtimeLock: lock,
 		admission:   make(chan struct{}, concurrency+queue),
@@ -382,7 +410,7 @@ func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency
 		queueHooks:  slices.Clone(queueHooks),
 	}
 	for index := range concurrency {
-		process, startErr := renderproc.Start(executable, root)
+		process, startErr := renderproc.StartCommand(executable, args, root)
 		if startErr != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			_ = renderer.closeWorkers(ctx)

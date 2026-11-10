@@ -62,6 +62,7 @@ func runBuild(args []string) error {
 	renderConcurrency := flags.Int("render-concurrency", 0, "production renderer processes (default two)")
 	renderQueue := flags.Int("render-queue", 0, "requests waiting on renderer capacity (default 64)")
 	sourceMaps := flags.Bool("sourcemaps", false, "include inline production source maps")
+	hostBun := flags.Bool("host-bun", false, "run the renderer with Bun from the host instead of embedding it")
 	viteConfig := flags.String("vite-config", "", "path to the Vite configuration file")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -74,7 +75,7 @@ func runBuild(args []string) error {
 		return fmt.Errorf("build accepts one package path")
 	}
 	var app *appRouter
-	options := builder.Options{Package: packagePath, Dir: *dir, Output: *output, StaticWorkers: *staticWorkers, SourceMaps: *sourceMaps, ViteConfig: *viteConfig, OnDescribe: func(description protocol.DescribeResult) {
+	options := builder.Options{Package: packagePath, Dir: *dir, Output: *output, StaticWorkers: *staticWorkers, SourceMaps: *sourceMaps, HostBun: *hostBun, ViteConfig: *viteConfig, OnDescribe: func(description protocol.DescribeResult) {
 		printRouteTable(description, app.routeRows())
 	}, Version: bifrost.Version}
 	projectRoot, routeRoot, isAppRouter, err := appRouterRoots(*dir, packagePath)

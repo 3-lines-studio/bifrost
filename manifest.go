@@ -164,8 +164,14 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 		return nil, fmt.Errorf("bifrost: manifest is missing routes: %s", strings.Join(missing, ", "))
 	}
 
+	if manifest.RuntimeKind != "" && manifest.RuntimeKind != "bun" {
+		return nil, fmt.Errorf("bifrost: unsupported runtime kind %q", manifest.RuntimeKind)
+	}
+	if manifest.RuntimeKind == "bun" && manifest.Runtime == nil {
+		return nil, errors.New("bifrost: bun runtime requires a runtime artifact")
+	}
 	if needsRuntime && manifest.Runtime == nil && os.Getenv("BIFROST_DEV_DIR") == "" {
-		return nil, errors.New("bifrost: server routes require an embedded renderer runtime")
+		return nil, errors.New("bifrost: server routes require a renderer runtime")
 	}
 	if manifest.Runtime != nil {
 		if err := validateFileRef(*manifest.Runtime); err != nil {

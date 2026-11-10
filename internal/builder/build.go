@@ -38,6 +38,7 @@ type Options struct {
 	ExternalDevelopment bool
 	StaticWorkers       int
 	SourceMaps          bool
+	HostBun             bool
 	ViteConfig          string
 	RouteParams         map[string][]string
 	OnDescribe          func(protocol.DescribeResult)
@@ -175,13 +176,15 @@ func Build(ctx context.Context, options Options) error {
 	}
 	buildRender := needsRender && !options.Development
 	embedRuntime := needsProductionRuntime && !options.Development
+	embedScript := embedRuntime && options.HostBun
 	var runtimeRef *protocol.FileRef
-	if buildRender || embedRuntime {
+	runtimeKind := ""
+	if buildRender || (embedRuntime && !embedScript) {
 		ref, err := buildRuntime(ctx, describe.SourceRoot, temporary)
 		if err != nil {
 			return err
 		}
-		if embedRuntime {
+		if embedRuntime && !embedScript {
 			runtimeRef = &ref
 		}
 	}
@@ -208,6 +211,14 @@ func Build(ctx context.Context, options Options) error {
 		if err := pruneBuildOnlyServerArtifacts(temporary, routes, views); err != nil {
 			return err
 		}
+	}
+	if embedScript {
+		ref, err := writeRuntimeScript(temporary)
+		if err != nil {
+			return err
+		}
+		runtimeRef = &ref
+		runtimeKind = "bun"
 	}
 	if !embedRuntime {
 		if err := os.RemoveAll(filepath.Join(temporary, "runtime")); err != nil {
@@ -240,6 +251,7 @@ func Build(ctx context.Context, options Options) error {
 			React:   reactVersion,
 		},
 		Runtime:     runtimeRef,
+		RuntimeKind: runtimeKind,
 		Views:       views,
 		Routes:      routes,
 		ClientFiles: clientFiles,
@@ -566,6 +578,21 @@ func buildFrontend(ctx context.Context, describe protocol.DescribeResult, output
 		return commandError(command, err)
 	}
 	return nil
+}
+
+func writeRuntimeScript(output string) (protocol.FileRef, error) {
+	runtimeDir := filepath.Join(output, "runtime")
+	if err := os.RemoveAll(runtimeDir); err != nil {
+		return protocol.FileRef{}, err
+	}
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		return protocol.FileRef{}, err
+	}
+	destination := filepath.Join(runtimeDir, "bifrost-runtime.ts")
+	if err := os.WriteFile(destination, []byte(renderproc.RuntimeSource), 0o644); err != nil {
+		return protocol.FileRef{}, err
+	}
+	return fileRef(output, destination)
 }
 
 func buildRuntime(ctx context.Context, sourceRoot, output string) (protocol.FileRef, error) {
