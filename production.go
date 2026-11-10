@@ -420,6 +420,12 @@ func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency
 		}
 	}
 	if socket := os.Getenv("BIFROST_RENDERER_SOCKET"); socket != "" {
+		if concurrency > 1 {
+			if logger != nil {
+				logger.Warn("bifrost: shared renderer uses one worker", "requested", concurrency)
+			}
+			concurrency = 1
+		}
 		if scriptPath := os.Getenv("BIFROST_RUNTIME_SCRIPT"); scriptPath != "" && manifest.manifest.RuntimeKind == "bun" {
 			if err := publishRuntimeScript(root, *manifest.manifest.Runtime, scriptPath); err != nil {
 				return fail(err)

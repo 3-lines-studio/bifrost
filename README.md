@@ -104,7 +104,9 @@ if err := app.Ready(request.Context()); err != nil {
 writer.WriteHeader(http.StatusNoContent)
 ```
 
-`build --host-bun` writes the renderer script instead of compiling Bun into the app. The binary shrinks by about 109 MB; at runtime the app runs the script with `bun`, from `BIFROST_BUN` or `PATH`. A supervisor can keep one renderer process alive and have app instances attach through `BIFROST_RENDERER_SOCKET`; set `BIFROST_RUNTIME_SCRIPT` so every app start publishes the script for the supervisor.
+`build --host-bun` writes the renderer script instead of compiling Bun into the app. The binary shrinks by about 109 MB; at runtime the app runs the script with `bun`, from `BIFROST_BUN` or `PATH`. A supervisor can keep one renderer process alive and have app instances attach through `BIFROST_RENDERER_SOCKET`; set `BIFROST_RUNTIME_SCRIPT` so every app start publishes the script for the supervisor. One shared renderer serves one worker at a time; `render_concurrency` above 1 is capped and logged.
+
+`bifrost.Serve` listens on `BIFROST_ADDR`, or on the systemd socket when `LISTEN_FDS=1`, and exits cleanly after `BIFROST_IDLE_TIMEOUT` with no connections. The App Router uses it automatically.
 
 ## Frontend plugins
 
