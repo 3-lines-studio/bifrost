@@ -1,7 +1,6 @@
 package bifrost
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -194,7 +193,11 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 		public[asset.URL] = asset.File
 	}
 
-	if err := verifyFiles(assets, files); err != nil {
+	runtimePath := ""
+	if manifest.Runtime != nil {
+		runtimePath = manifest.Runtime.Path
+	}
+	if err := verifyFiles(assets, files, runtimePath); err != nil {
 		return nil, err
 	}
 	return &compiledManifest{manifest: manifest, views: views, routes: routes, files: files, clientFiles: clientFiles, public: public}, nil
@@ -386,7 +389,7 @@ func collectFile(files map[string]protocol.FileRef, file protocol.FileRef) error
 	return nil
 }
 
-func verifyFiles(assets fs.FS, files map[string]protocol.FileRef) error {
+func verifyFiles(assets fs.FS, files map[string]protocol.FileRef, skipHash string) error {
 	paths := make([]string, 0, len(files))
 	for filePath := range files {
 		paths = append(paths, filePath)
@@ -394,12 +397,22 @@ func verifyFiles(assets fs.FS, files map[string]protocol.FileRef) error {
 	slices.Sort(paths)
 	for _, filePath := range paths {
 		ref := files[filePath]
+		if filePath == skipHash {
+			info, err := fs.Stat(assets, filePath)
+			if err != nil {
+				return fmt.Errorf("bifrost: stat artifact %q: %w", filePath, err)
+			}
+			if info.Size() != ref.Size {
+				return fmt.Errorf("bifrost: artifact %q size %d does not match manifest size %d", filePath, info.Size(), ref.Size)
+			}
+			continue
+		}
 		file, err := assets.Open(filePath)
 		if err != nil {
 			return fmt.Errorf("bifrost: open artifact %q: %w", filePath, err)
 		}
-		hash := sha256.New()
-		size, copyErr := io.Copy(hash, bufio.NewReader(file))
+		digest := sha256.New()
+		size, copyErr := io.Copy(digest, file)
 		closeErr := file.Close()
 		if copyErr != nil {
 			return fmt.Errorf("bifrost: hash artifact %q: %w", filePath, copyErr)
@@ -410,7 +423,7 @@ func verifyFiles(assets fs.FS, files map[string]protocol.FileRef) error {
 		if size != ref.Size {
 			return fmt.Errorf("bifrost: artifact %q size %d does not match manifest size %d", filePath, size, ref.Size)
 		}
-		actualHash := hex.EncodeToString(hash.Sum(nil))
+		actualHash := hex.EncodeToString(digest.Sum(nil))
 		if actualHash != ref.Hash {
 			return fmt.Errorf("bifrost: artifact %q hash %s does not match manifest hash %s", filePath, actualHash, ref.Hash)
 		}

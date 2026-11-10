@@ -4,9 +4,12 @@ package bifrost
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -27,6 +30,8 @@ import (
 )
 
 var ErrRendererBusy = errors.New("bifrost: renderer is busy")
+
+const runtimeRetention = 7 * 24 * time.Hour
 
 func (a *App) initializeProduction(config Config) error {
 	manifestData, err := fs.ReadFile(config.Assets, "manifest.json")
@@ -231,8 +236,21 @@ type runtimeLock struct {
 	file *os.File
 }
 
+func runtimeBase() string {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return os.TempDir()
+	}
+	base := filepath.Join(cache, "bifrost")
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return os.TempDir()
+	}
+	return base
+}
+
 func runtimeDirectory(manifest *compiledManifest) (string, *runtimeLock, error) {
-	root := filepath.Join(os.TempDir(), "bifrost-runtime-"+manifest.manifest.BuildID)
+	base := runtimeBase()
+	root := filepath.Join(base, "bifrost-runtime-"+manifest.manifest.BuildID)
 	info, err := os.Lstat(root)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return "", nil, fmt.Errorf("bifrost: inspect runtime directory: %w", err)
@@ -244,7 +262,9 @@ func runtimeDirectory(manifest *compiledManifest) (string, *runtimeLock, error) 
 	if err != nil {
 		return "", nil, err
 	}
-	pruneRuntimeDirectories(os.TempDir(), root)
+	now := time.Now()
+	_ = os.Chtimes(root, now, now)
+	pruneRuntimeDirectories(base, root)
 	return root, lock, nil
 }
 
@@ -290,6 +310,10 @@ func pruneRuntimeDirectories(base, current string) {
 		if root == current {
 			continue
 		}
+		info, err := entry.Info()
+		if err != nil || time.Since(info.ModTime()) < runtimeRetention {
+			continue
+		}
 		_ = removeRuntimeDirectory(root)
 	}
 }
@@ -324,7 +348,7 @@ func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency
 	if manifest.manifest.Runtime == nil {
 		return fail(errors.New("bifrost: manifest has no renderer runtime"))
 	}
-	if err := extractArtifact(assets, root, *manifest.manifest.Runtime, 0o700); err != nil {
+	if err := extractVerifiedArtifact(assets, root, *manifest.manifest.Runtime, 0o700); err != nil {
 		return fail(err)
 	}
 	extracted := make(map[string]struct{})
@@ -466,16 +490,34 @@ func extractArtifact(assets fs.FS, root string, ref protocol.FileRef, mode fs.Fi
 	return extractReader(root, ref.Path, source, mode)
 }
 
+func extractVerifiedArtifact(assets fs.FS, root string, ref protocol.FileRef, mode fs.FileMode) error {
+	source, err := assets.Open(ref.Path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = source.Close() }()
+	return extractVerifiedReader(root, ref, source, mode)
+}
+
 const maxExtractedArtifactBytes = 256 << 20
 
 func extractReader(root, artifactPath string, source io.Reader, mode fs.FileMode) error {
+	return extractVerifiedReader(root, protocol.FileRef{Path: artifactPath}, source, mode)
+}
+
+func extractVerifiedReader(root string, ref protocol.FileRef, source io.Reader, mode fs.FileMode) error {
+	artifactPath := ref.Path
 	destination := filepath.Join(root, filepath.FromSlash(artifactPath))
 	rel, err := filepath.Rel(root, destination)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("bifrost: artifact %q escapes extraction root", artifactPath)
 	}
 	if info, err := os.Stat(destination); err == nil && info.Mode().IsRegular() {
-		return nil
+		if ref.Hash != "" && info.Size() != ref.Size {
+			_ = os.Remove(destination)
+		} else {
+			return nil
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 		return err
@@ -490,7 +532,13 @@ func extractReader(root, artifactPath string, source io.Reader, mode fs.FileMode
 		_ = os.Remove(temporary)
 		return err
 	}
-	written, copyErr := io.Copy(output, io.LimitReader(source, maxExtractedArtifactBytes+1))
+	var digest hash.Hash
+	writer := io.Writer(output)
+	if ref.Hash != "" {
+		digest = sha256.New()
+		writer = io.MultiWriter(output, digest)
+	}
+	written, copyErr := io.Copy(writer, io.LimitReader(source, maxExtractedArtifactBytes+1))
 	if copyErr == nil && written > maxExtractedArtifactBytes {
 		copyErr = fmt.Errorf("bifrost: extracted artifact %q exceeds %d bytes", artifactPath, maxExtractedArtifactBytes)
 	}
@@ -502,6 +550,13 @@ func extractReader(root, artifactPath string, source io.Reader, mode fs.FileMode
 	if closeErr != nil {
 		_ = os.Remove(temporary)
 		return closeErr
+	}
+	if digest != nil {
+		actualHash := hex.EncodeToString(digest.Sum(nil))
+		if actualHash != ref.Hash {
+			_ = os.Remove(temporary)
+			return fmt.Errorf("bifrost: artifact %q hash %s does not match manifest hash %s", artifactPath, actualHash, ref.Hash)
+		}
 	}
 	if err := os.Rename(temporary, destination); err != nil {
 		_ = os.Remove(temporary)
@@ -660,7 +715,6 @@ func (r *productionRenderer) Close(ctx context.Context) error {
 		}
 		if r.runtimeLock != nil {
 			r.runtimeLock.release()
-			_ = removeRuntimeDirectory(r.workDir)
 		}
 	})
 	return result

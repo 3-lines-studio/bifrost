@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/3-lines-studio/bifrost/internal/protocol"
 )
 
 type readinessRenderer struct{ err error }
@@ -118,14 +120,19 @@ func TestPruneRuntimeDirectoriesRemovesUnusedCopies(t *testing.T) {
 	defer locked.release()
 	current := filepath.Join(base, "bifrost-runtime-current")
 	unused := filepath.Join(base, "bifrost-runtime-unused")
+	recent := filepath.Join(base, "bifrost-runtime-recent")
 	unrelated := filepath.Join(base, "unrelated")
-	for _, root := range []string{current, unused, unrelated} {
+	for _, root := range []string{current, unused, recent, unrelated} {
 		if err := os.MkdirAll(root, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
+	old := time.Now().Add(-runtimeRetention - time.Hour)
+	if err := os.Chtimes(unused, old, old); err != nil {
+		t.Fatal(err)
+	}
 	pruneRuntimeDirectories(base, current)
-	for _, kept := range []string{filepath.Join(base, "bifrost-runtime-locked"), current, unrelated} {
+	for _, kept := range []string{filepath.Join(base, "bifrost-runtime-locked"), current, recent, unrelated} {
 		if _, err := os.Stat(kept); err != nil {
 			t.Fatalf("%s was removed: %v", kept, err)
 		}
@@ -153,5 +160,33 @@ func TestRemoveRuntimeDirectoryKeepsLockedRuntime(t *testing.T) {
 	}
 	if _, err := os.Stat(root); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("runtime directory survived removal: %v", err)
+	}
+}
+
+func TestRuntimeBaseUsesUserCache(t *testing.T) {
+	cache := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache)
+	if got, want := runtimeBase(), filepath.Join(cache, "bifrost"); got != want {
+		t.Fatalf("runtimeBase = %q, want %q", got, want)
+	}
+}
+
+func TestRuntimeBaseFallsBackToTempDir(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("HOME", "")
+	if got, want := runtimeBase(), os.TempDir(); got != want {
+		t.Fatalf("runtimeBase = %q, want %q", got, want)
+	}
+}
+
+func TestExtractVerifiedReaderRejectsWrongHash(t *testing.T) {
+	root := t.TempDir()
+	ref := protocol.FileRef{Path: "runtime/renderer", Hash: digestString("other"), Size: 5}
+	err := extractVerifiedReader(root, ref, strings.NewReader("hello"), 0o700)
+	if err == nil {
+		t.Fatal("wrong hash accepted")
+	}
+	if _, err := os.Stat(filepath.Join(root, "runtime", "renderer")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("artifact survived: %v", err)
 	}
 }

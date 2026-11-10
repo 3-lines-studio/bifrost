@@ -204,7 +204,7 @@ func (p *Process) waitHealthy() error {
 			return errors.New("renderer exited during startup")
 		default:
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 	return fmt.Errorf("renderer did not start within %s", startupTimeout)
 }

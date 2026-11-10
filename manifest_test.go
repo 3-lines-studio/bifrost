@@ -213,3 +213,18 @@ func TestPathMatchesPattern(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifyFilesSkipsRuntimeHash(t *testing.T) {
+	files := fstest.MapFS{"artifact": &fstest.MapFile{Data: []byte("hello")}}
+	refs := map[string]protocol.FileRef{"artifact": {Path: "artifact", Hash: digestString("other"), Size: 5}}
+	if err := verifyFiles(files, refs, ""); err == nil {
+		t.Fatal("wrong hash accepted")
+	}
+	if err := verifyFiles(files, refs, "artifact"); err != nil {
+		t.Fatal(err)
+	}
+	refs["artifact"] = protocol.FileRef{Path: "artifact", Hash: digestString("other"), Size: 6}
+	if err := verifyFiles(files, refs, "artifact"); err == nil {
+		t.Fatal("size mismatch accepted")
+	}
+}
