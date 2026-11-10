@@ -60,6 +60,13 @@ fi
 pure="$tmp/pure"
 mkdir -p "$pure/public"
 ln -s "$deps/node_modules" "$pure/node_modules"
+cat >"$pure/go.mod" <<EOF
+module release.test/pure
+
+go 1.25.0
+
+$module_requirement
+EOF
 printf 'export function Page() { return <main>pure-page</main> }\n' >"$pure/page.tsx"
 printf 'public-ok\n' >"$pure/public/status.txt"
 "$cli" build "$pure" >"$tmp/pure-build.log" 2>&1
