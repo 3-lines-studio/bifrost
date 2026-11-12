@@ -129,3 +129,19 @@ func BenchmarkDocumentStreaming(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkMarshalProps(b *testing.B) {
+	props := map[string]any{
+		"title":    "Hello <world> & friends",
+		"count":    42,
+		"tags":     []string{"a", "b", "c"},
+		"nested":   map[string]string{"path": "/post/{slug}", "query": "?name=<x>"},
+		"pathname": "/",
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := marshalProps(props); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

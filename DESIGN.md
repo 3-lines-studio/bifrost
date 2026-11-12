@@ -422,6 +422,6 @@ The completed slices include Vite client/SSR builds, normal Vite plugins, Tailwi
 - Server and Static pages hydrate.
 - Static generation starts with a slice API.
 - SSR streaming is part of the renderer contract.
-- The latest two stable Go releases are supported, starting with Go 1.25 as the minimum.
+- Go 1.27 is the minimum: its runtime carries the Green Tea GC and size-specialized allocation, and encoding/json is backed by v2.
 - Production uses a pinned Bun runtime and Unix sockets. Windows is out of scope.
 - Module path: `github.com/3-lines-studio/bifrost`; package: `bifrost`; license: MIT.

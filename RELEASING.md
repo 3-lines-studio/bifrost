@@ -2,7 +2,7 @@
 
 ## Required checks
 
-Run from a clean checkout with Go 1.25.0 or newer and Bun (used for frontend installs and the SSR renderer):
+Run from a clean checkout with Go 1.27.0 or newer and Bun (used for frontend installs and the SSR renderer):
 
 ```bash
 make check

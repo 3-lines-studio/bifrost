@@ -31,7 +31,11 @@ import (
 
 var ErrRendererBusy = errors.New("bifrost: renderer is busy")
 
-const runtimeRetention = 7 * 24 * time.Hour
+const (
+	runtimeRetention = 7 * 24 * time.Hour
+	renderQueueWait  = 2 * time.Second
+	renderRetryAfter = "1"
+)
 
 func (a *App) initializeProduction(config Config) error {
 	manifestData, err := fs.ReadFile(config.Assets, "manifest.json")
@@ -237,6 +241,7 @@ type productionRenderer struct {
 	closeOnce  sync.Once
 	logger     *slog.Logger
 	queueHooks []QueueHook
+	queueWait  time.Duration
 }
 
 type runtimeLock struct {
@@ -383,7 +388,7 @@ func hostBun() (string, error) {
 	}
 	value, err := exec.LookPath("bun")
 	if err != nil {
-		return "", errors.New("bifrost: BIFROST_BUN is required for the host runtime")
+		return "", errors.New("bifrost: the renderer needs Bun on the host: install bun, set BIFROST_BUN, or build with --embed-bun")
 	}
 	return value, nil
 }
@@ -677,19 +682,34 @@ func (r *productionRenderer) Render(ctx context.Context, request renderRequest, 
 	r.lifecycleMu.Unlock()
 	defer r.active.Done()
 
+	wait := r.queueWait
+	if wait <= 0 {
+		wait = renderQueueWait
+	}
+	started := time.Now()
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	busy := func() error {
+		r.observeQueue(ctx, QueueEvent{Pattern: request.Pattern, Wait: time.Since(started), Err: ErrRendererBusy})
+		return ErrRendererBusy
+	}
 	select {
 	case r.admission <- struct{}{}:
 		defer func() { <-r.admission }()
-	default:
-		r.observeQueue(ctx, QueueEvent{Pattern: request.Pattern, Err: ErrRendererBusy})
-		return ErrRendererBusy
+	case <-timer.C:
+		return busy()
+	case <-ctx.Done():
+		err := ctx.Err()
+		r.observeQueue(ctx, QueueEvent{Pattern: request.Pattern, Wait: time.Since(started), Err: err})
+		return err
 	}
-	started := time.Now()
 	var worker *rendererWorker
 	select {
 	case worker = <-r.idle:
 		defer func() { r.idle <- worker }()
 		r.observeQueue(ctx, QueueEvent{Pattern: request.Pattern, Wait: time.Since(started)})
+	case <-timer.C:
+		return busy()
 	case <-ctx.Done():
 		err := ctx.Err()
 		r.observeQueue(ctx, QueueEvent{Pattern: request.Pattern, Wait: time.Since(started), Err: err})

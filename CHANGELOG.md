@@ -2,6 +2,31 @@
 
 Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
+## Unreleased
+
+### Build
+
+- `bifrost build` uses the host Bun by default: the App Router binary is 9.4 MB instead of 118 MB, and the runtime runs the renderer script with `bun` from `BIFROST_BUN` or `PATH`. `--embed-bun` compiles Bun into the binary for self-contained deploys; `--host-bun` stays accepted and defaults to true.
+- App Router binaries build with `-trimpath -buildvcs=false -ldflags=-s -w`, which drops the artifact from 13.5 MB to 9.4 MB.
+
+### Runtime
+
+- Renderer admission is bounded by time instead of an instant reject: a request waits up to two seconds for capacity and then fails with 503 and `Retry-After`. Under a burst the old queue returned 503 for 98% of requests while workers were free microseconds later.
+- The missing-Bun error names `BIFROST_BUN`, the Bun install, and `--embed-bun`.
+
+### Performance
+
+- Props skip the second escaping pass: `json.Marshal` already escapes `<`, `>` and the JavaScript line separators, so only `RawProps` needs the three `bytes.ReplaceAll` scans. `marshalProps` drops from 1279 ns, 937 B and 24 allocs to 1141 ns, 456 B and 21 allocs.
+- The renderer request frames the encoded props instead of re-marshaling them, so a 4 KB props page spends 0.6 us instead of 4.4 us on the wire payload.
+- Request throughput with 4 KB props: 21.6k to 23.1k requests per second at 32 connections, and p50 at one connection drops from 75.7 us to 71.8 us.
+- Go 1.27 is the minimum. Its toolchain brings the Green Tea GC, size-specialized small allocations, and `encoding/json` backed by v2 to every build.
+
+### CLI
+
+- `init` resolves the CLI with `go get -tool`, so `go tool bifrost` runs offline from the module graph instead of `go run` fetching it every time.
+- The classic scaffold uses `bifrost.Serve`, so it gets `BIFROST_ADDR`, systemd socket activation, and `BIFROST_IDLE_TIMEOUT` like generated App Router mains.
+- New `DEPLOY.md`: artifact sizes, environment variables, readiness, saturation, containers, and the bee setup.
+
 ## v1.3.11
 
 ### App Router

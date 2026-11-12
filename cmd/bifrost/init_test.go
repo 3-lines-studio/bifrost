@@ -70,7 +70,7 @@ func TestRunInitScaffoldsTheClassicRouterWithClassic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"bifrost.Building()", "bifrost.Server", "app.Close", "BIFROST_ADDR"} {
+	for _, expected := range []string{"bifrost.Building()", "bifrost.Server", "app.Close", "bifrost.Serve"} {
 		if !strings.Contains(string(mainData), expected) {
 			t.Fatalf("main.go does not contain %q", expected)
 		}

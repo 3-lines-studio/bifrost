@@ -59,15 +59,45 @@ func TestAppReady(t *testing.T) {
 func TestRendererQueueHookReportsOverload(t *testing.T) {
 	var event QueueEvent
 	renderer := &productionRenderer{
-		admission: make(chan struct{}),
+		admission: make(chan struct{}, 1),
 		idle:      make(chan *rendererWorker),
+		queueWait: 10 * time.Millisecond,
 		queueHooks: []QueueHook{func(_ context.Context, received QueueEvent) {
 			event = received
 		}},
 	}
+	renderer.admission <- struct{}{}
 	err := renderer.Render(context.Background(), renderRequest{Pattern: "/busy"}, nil)
 	if !errors.Is(err, ErrRendererBusy) || !errors.Is(event.Err, ErrRendererBusy) || event.Pattern != "/busy" {
 		t.Fatalf("render error = %v, event = %+v", err, event)
+	}
+}
+
+func TestRendererQueueWaitsBeforeReportingBusy(t *testing.T) {
+	renderer := &productionRenderer{
+		admission: make(chan struct{}, 1),
+		idle:      make(chan *rendererWorker),
+		queueWait: 30 * time.Millisecond,
+	}
+	renderer.admission <- struct{}{}
+	started := time.Now()
+	err := renderer.Render(context.Background(), renderRequest{Pattern: "/busy"}, nil)
+	if !errors.Is(err, ErrRendererBusy) {
+		t.Fatalf("render error = %v", err)
+	}
+	if waited := time.Since(started); waited < renderer.queueWait {
+		t.Fatalf("render gave up after %v, before the %v queue wait", waited, renderer.queueWait)
+	}
+}
+
+func TestRendererBusyResponseCarriesRetryAfter(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	serveDefaultError(recorder, httptest.NewRequest(http.MethodGet, "/busy", nil), ErrRendererBusy)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+	if got := recorder.Header().Get("Retry-After"); got != renderRetryAfter {
+		t.Fatalf("Retry-After = %q", got)
 	}
 }
 

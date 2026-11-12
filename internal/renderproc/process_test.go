@@ -52,7 +52,10 @@ func writeTestFrame(t *testing.T, w http.ResponseWriter, kind byte, payload stri
 
 func TestRenderDecodesOrderedFrames(t *testing.T) {
 	process := processForHandler(t, http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		var payload renderPayload
+		var payload struct {
+			Entry string          `json:"entry"`
+			Props json.RawMessage `json:"props"`
+		}
 		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
 			t.Error(err)
 		}

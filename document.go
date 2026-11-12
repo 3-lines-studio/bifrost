@@ -23,7 +23,7 @@ func marshalProps(props any) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return requirePropsObject(safePropsJSON(data))
+	return requirePropsObject(data)
 }
 
 func normalizeRawProps(props json.RawMessage) (json.RawMessage, error) {
@@ -34,7 +34,10 @@ func normalizeRawProps(props json.RawMessage) (json.RawMessage, error) {
 	if err := json.Compact(&compact, props); err != nil {
 		return nil, err
 	}
-	return requirePropsObject(safePropsJSON(compact.Bytes()))
+	data := bytes.ReplaceAll(compact.Bytes(), []byte("<"), []byte(`\u003c`))
+	data = bytes.ReplaceAll(data, []byte("\u2028"), []byte(`\u2028`))
+	data = bytes.ReplaceAll(data, []byte("\u2029"), []byte(`\u2029`))
+	return requirePropsObject(data)
 }
 
 func requirePropsObject(data []byte) (json.RawMessage, error) {
@@ -42,13 +45,6 @@ func requirePropsObject(data []byte) (json.RawMessage, error) {
 		return nil, errors.New("bifrost: page props must be a JSON object")
 	}
 	return data, nil
-}
-
-func safePropsJSON(data []byte) json.RawMessage {
-	data = bytes.ReplaceAll(data, []byte("<"), []byte(`\u003c`))
-	data = bytes.ReplaceAll(data, []byte("\u2028"), []byte(`\u2028`))
-	data = bytes.ReplaceAll(data, []byte("\u2029"), []byte(`\u2029`))
-	return data
 }
 
 func normalizeDocument(document Document) (Document, error) {

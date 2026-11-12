@@ -239,15 +239,29 @@ func (p *Process) Healthy(ctx context.Context) error {
 	return nil
 }
 
-type renderPayload struct {
-	Entry string          `json:"entry"`
-	Props json.RawMessage `json:"props"`
-}
-
 const maxWireFrameBytes = 16 << 20
 
+var emptyPayloadProps = []byte(`{}`)
+
+func renderPayloadJSON(entry string, props json.RawMessage) ([]byte, error) {
+	quoted, err := json.Marshal(entry)
+	if err != nil {
+		return nil, err
+	}
+	if len(props) == 0 {
+		props = emptyPayloadProps
+	}
+	body := make([]byte, 0, len(quoted)+len(props)+16)
+	body = append(body, `{"entry":`...)
+	body = append(body, quoted...)
+	body = append(body, `,"props":`...)
+	body = append(body, props...)
+	body = append(body, '}')
+	return body, nil
+}
+
 func (p *Process) Render(ctx context.Context, entry string, props json.RawMessage, sink Sink) error {
-	body, err := json.Marshal(renderPayload{Entry: entry, Props: props})
+	body, err := renderPayloadJSON(entry, props)
 	if err != nil {
 		return fmt.Errorf("encode render request: %w", err)
 	}

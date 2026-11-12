@@ -97,6 +97,7 @@ func ErrorStatus(err error) (int, bool) {
 
 func serveDefaultError(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, ErrRendererBusy) {
+		w.Header().Set("Retry-After", renderRetryAfter)
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}

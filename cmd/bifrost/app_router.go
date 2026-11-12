@@ -1257,7 +1257,7 @@ func buildAppRouter(ctx context.Context, app appRouter, options builder.Options,
 	if !buildExecutable {
 		return nil
 	}
-	command := exec.CommandContext(ctx, "go", "build", "-o", app.Executable, app.Package)
+	command := exec.CommandContext(ctx, "go", "build", "-trimpath", "-buildvcs=false", "-ldflags=-s -w", "-o", app.Executable, app.Package)
 	command.Dir = app.WorkDir
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr

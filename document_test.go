@@ -23,6 +23,17 @@ func TestRawPropsAreValidatedCompactedAndEscaped(t *testing.T) {
 	}
 }
 
+func TestPropsAreEscapedForTheScriptTag(t *testing.T) {
+	props, err := marshalProps(map[string]string{"html": "</script>", "line": "a\u2028b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"html":"\u003c/script\u003e","line":"a\u2028b"}`
+	if string(props) != want {
+		t.Fatalf("props = %s", props)
+	}
+}
+
 func TestPropsMustBeJSONObject(t *testing.T) {
 	for _, props := range []any{
 		RawProps(`[1,2,3]`),
