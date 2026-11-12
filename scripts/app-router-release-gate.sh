@@ -63,7 +63,7 @@ ln -s "$deps/node_modules" "$pure/node_modules"
 cat >"$pure/go.mod" <<EOF
 module release.test/pure
 
-go 1.25.0
+go 1.27.0
 
 $module_requirement
 EOF
@@ -85,7 +85,7 @@ ln -s "$deps/node_modules" "$app/node_modules"
 cat >"$app/go.mod" <<EOF
 module release.test/app
 
-go 1.25.0
+go 1.27.0
 
 $module_requirement
 EOF

@@ -50,7 +50,7 @@ BIFROST_BUN=/usr/local/bin/bun .bifrost/bifrost-app
 
 A Server page waits up to two seconds for renderer capacity. Past that wait the app answers 503 with `Retry-After: 1`, so a burst degrades instead of failing at the first full queue.
 
-A small page renders in about 45 us and one renderer worker holds about 40 MB of RSS. Two workers served 41k requests per second on a Ryzen 5 9600X with p99 at 130 us idle; the process that renders is CPU-bound, so raise workers with cores and memory, not with traffic alone. `RenderConcurrency` (App Router: `bifrost build --render-concurrency N`) sets the count.
+A small page renders in about 32 us and one renderer worker holds about 20 MB of RSS at rest, 55 MB under load. Two workers served 60k requests per second on a Ryzen 5 9600X with p99 at 116 us idle; the process that renders is CPU-bound, so raise workers with cores and memory, not with traffic alone. `RenderConcurrency` (App Router: `bifrost build --render-concurrency N`) sets the count.
 
 ## Renderer runtime cache
 

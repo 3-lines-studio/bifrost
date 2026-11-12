@@ -46,8 +46,8 @@ This file separates the accepted scope from ideas explicitly deferred by the que
 
 - One default deployable Go binary.
 - Embedded standalone Bun renderer, extracted on first start into a per-build directory that is reused and pruned.
-- Linux Unix-socket renderer transport.
-- JSON request followed by length-prefixed binary head/body/done/error frames.
+- Linux Unix-socket renderer transport without HTTP: each connection carries one render at a time and is pooled afterwards.
+- Length-prefixed JSON request followed by length-prefixed binary head/body/done/error frames.
 - SSR head and body streaming.
 - Request-scoped props and validated root document language, class, and direction.
 - Two isolated renderer processes by default, with an explicit multi-process worker pool for production concurrency; JavaScript module globals persist only between sequential requests on the same worker.

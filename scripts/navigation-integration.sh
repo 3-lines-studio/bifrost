@@ -34,7 +34,7 @@ ln -s "$root/node_modules" "$app/node_modules"
 cat >"$app/go.mod" <<EOF
 module navigation.test/app
 
-go 1.25.0
+go 1.27.0
 
 require github.com/3-lines-studio/bifrost v0.0.0
 replace github.com/3-lines-studio/bifrost => $root
@@ -175,6 +175,7 @@ func Middleware(next http.Handler) http.Handler {
 }
 EOF
 printf 'file body\n' >"$app/public/file.txt"
+( cd "$app" && go mod tidy )
 
 for mode in production development; do
   assert_free

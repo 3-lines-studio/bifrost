@@ -288,11 +288,11 @@ Its output is ordered:
 2. zero or more body frames;
 3. one end frame or one error frame.
 
-The Go side streams without a channel or `RenderedPage{Body string, Head string}` in the core model. The renderer uses one JSON request followed by length-prefixed binary head, body, done, or error frames. A local 32 KiB decoder benchmark measured about 126 µs and 110 allocations for NDJSON versus 0.49 µs and 35 allocations for binary framing. The renderer interface exposes no Bun or React types.
+The Go side streams without a channel or `RenderedPage{Body string, Head string}` in the core model. The renderer speaks length-prefixed frames over its Unix socket without HTTP: one length-prefixed JSON request, then zero or more length-prefixed binary head, body, done, or error frames. A local 32 KiB decoder benchmark measured about 126 µs and 110 allocations for NDJSON versus 0.49 µs and 35 allocations for binary framing. The renderer interface exposes no Bun or React types.
 
 If rendering fails before the first body byte, return a normal error page. If it fails after the response is committed, stop the stream and log the request and renderer error. No model can replace HTTP status after bytes have been sent.
 
-Production defaults to two Bun worker processes, each with one active render. `RenderConcurrency` creates an explicit pool of isolated worker processes; each worker still handles one render at a time. An idle-worker channel provides bounded assignment without a shared mutable scheduler. Request cancellation propagates through the Go transport, Bun request signal, React stream, and body reader. `App.Ready` probes every worker.
+Production defaults to two Bun worker processes, each with one active render and one pooled connection per concurrent render. `RenderConcurrency` creates an explicit pool of isolated worker processes; each worker still handles one render at a time. An idle-worker channel provides bounded assignment without a shared mutable scheduler. Request cancellation propagates through the Go transport, Bun request signal, React stream, and body reader. `App.Ready` probes every worker.
 
 ## Build flow
 

@@ -76,11 +76,11 @@ func BenchmarkBinaryFrames(b *testing.B) {
 	}
 }
 
-func BenchmarkRenderPayloadJSON(b *testing.B) {
+func BenchmarkEncodeRenderRequest(b *testing.B) {
 	props := json.RawMessage(`{"title":"Hello \u003cworld\u003e","count":42,"tags":["a","b","c"]}`)
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := renderPayloadJSON("ssr/app.js", props); err != nil {
+		if _, err := encodeRenderRequest("ssr/app.js", props); err != nil {
 			b.Fatal(err)
 		}
 	}

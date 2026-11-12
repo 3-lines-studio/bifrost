@@ -16,9 +16,10 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
 ### Performance
 
+- The renderer no longer speaks HTTP. Each worker serves length-prefixed frames over its Unix socket: one length-prefixed JSON request, then head, body, done and error frames. The transport costs 1.7 us instead of 10.4 us per render in Go, and Bun answers in 3.2 us instead of 11.6 us. Two workers went from 41k to 60k requests per second, p99 at one connection from 130 us to 116 us, and p50 from 42 us to 32 us. Connections are pooled, so static prerender keeps its parallel workers.
 - Props skip the second escaping pass: `json.Marshal` already escapes `<`, `>` and the JavaScript line separators, so only `RawProps` needs the three `bytes.ReplaceAll` scans. `marshalProps` drops from 1279 ns, 937 B and 24 allocs to 1141 ns, 456 B and 21 allocs.
 - The renderer request frames the encoded props instead of re-marshaling them, so a 4 KB props page spends 0.6 us instead of 4.4 us on the wire payload.
-- Request throughput with 4 KB props: 21.6k to 23.1k requests per second at 32 connections, and p50 at one connection drops from 75.7 us to 71.8 us.
+- Request throughput with 4 KB props: 21.6k to 32.0k requests per second at 32 connections, and p50 at one connection drops from 75.7 us to 49.8 us.
 - Go 1.27 is the minimum. Its toolchain brings the Green Tea GC, size-specialized small allocations, and `encoding/json` backed by v2 to every build.
 
 ### CLI

@@ -200,20 +200,27 @@ func (a *App) Close(ctx context.Context) error {
 	return a.runtime.renderer.Close(ctx)
 }
 
+type renderProcess interface {
+	Render(context.Context, string, json.RawMessage, renderproc.Sink) error
+	Healthy(context.Context) error
+	Recover()
+	Close(context.Context) error
+}
+
 type rendererWorker struct {
 	mu                 sync.RWMutex
-	process            *renderproc.Process
+	process            renderProcess
 	restartTimes       []time.Time
 	restartLimitLogged bool
 }
 
-func (w *rendererWorker) current() *renderproc.Process {
+func (w *rendererWorker) current() renderProcess {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.process
 }
 
-func (w *rendererWorker) replace(process *renderproc.Process) {
+func (w *rendererWorker) replace(process renderProcess) {
 	w.mu.Lock()
 	w.process = process
 	w.mu.Unlock()
@@ -228,6 +235,7 @@ type productionRenderer struct {
 	environment []string
 	workDir     string
 	devRoutes   string
+	start       func() (renderProcess, error)
 	attach      bool
 	runtimeLock *runtimeLock
 	admission   chan struct{}
@@ -482,11 +490,14 @@ func newProductionRenderer(assets fs.FS, manifest *compiledManifest, concurrency
 		args:        args,
 		workDir:     root,
 		runtimeLock: lock,
-		admission:   make(chan struct{}, concurrency+queue),
-		idle:        make(chan *rendererWorker, concurrency),
-		workers:     make([]*rendererWorker, 0, concurrency),
-		logger:      logger,
-		queueHooks:  slices.Clone(queueHooks),
+		start: func() (renderProcess, error) {
+			return renderproc.StartCommand(executable, args, root)
+		},
+		admission:  make(chan struct{}, concurrency+queue),
+		idle:       make(chan *rendererWorker, concurrency),
+		workers:    make([]*rendererWorker, 0, concurrency),
+		logger:     logger,
+		queueHooks: slices.Clone(queueHooks),
 	}
 	for index := range concurrency {
 		process, startErr := renderproc.StartCommand(executable, args, root)
@@ -546,24 +557,21 @@ func newDevelopmentRenderer(sourceRoot, devDir string, port int, routesFile stri
 		environment = append(environment, "BIFROST_ROUTES_FILE="+routesFile)
 	}
 	environment = append(environment, "BIFROST_DEV_ENTRIES="+filepath.Join(devDir, "entries"))
-	process, err := renderproc.StartCommand(bun, []string{"run", script}, sourceRoot, environment...)
+	bridge, err := renderproc.StartBridge(bun, []string{"run", script}, sourceRoot, environment...)
 	if err != nil {
 		return nil, fmt.Errorf("bifrost: start Vite development bridge: %w", err)
 	}
-	worker := &rendererWorker{process: process}
+	worker := &rendererWorker{process: bridge}
 	idle := make(chan *rendererWorker, 1)
 	idle <- worker
 	return &productionRenderer{
-		executable:  bun,
-		args:        []string{"run", script},
-		environment: environment,
-		workDir:     sourceRoot,
-		devRoutes:   routesFile,
-		admission:   make(chan struct{}, 1+queue),
-		idle:        idle,
-		workers:     []*rendererWorker{worker},
-		logger:      logger,
-		queueHooks:  slices.Clone(queueHooks),
+		workDir:    sourceRoot,
+		devRoutes:  routesFile,
+		admission:  make(chan struct{}, 1+queue),
+		idle:       idle,
+		workers:    []*rendererWorker{worker},
+		logger:     logger,
+		queueHooks: slices.Clone(queueHooks),
 	}, nil
 }
 
@@ -571,11 +579,11 @@ func newDevelopmentRenderer(sourceRoot, devDir string, port int, routesFile stri
 // process and is owned by the bifrost dev command. Restart policy belongs to
 // the owner.
 func newAttachedDevelopmentRenderer(socket string, queue int, logger *slog.Logger, queueHooks []QueueHook) (*productionRenderer, error) {
-	process, err := renderproc.Attach(socket)
+	bridge, err := renderproc.AttachBridge(socket)
 	if err != nil {
 		return nil, fmt.Errorf("bifrost: attach Vite development bridge: %w", err)
 	}
-	worker := &rendererWorker{process: process}
+	worker := &rendererWorker{process: bridge}
 	idle := make(chan *rendererWorker, 1)
 	idle <- worker
 	return &productionRenderer{
@@ -739,14 +747,14 @@ func (r *productionRenderer) observeQueue(ctx context.Context, event QueueEvent)
 	}
 }
 
-func (r *productionRenderer) restart(worker *rendererWorker, failed *renderproc.Process) {
+func (r *productionRenderer) restart(worker *rendererWorker, failed renderProcess) {
 	if worker.current() != failed || !worker.allowRestart(time.Now(), r.logger) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	_ = failed.Close(ctx)
 	cancel()
-	process, err := renderproc.StartCommand(r.executable, r.args, r.workDir, r.environment...)
+	process, err := r.start()
 	if err != nil {
 		if r.logger != nil {
 			r.logger.Error("bifrost renderer restart failed", "error", err)

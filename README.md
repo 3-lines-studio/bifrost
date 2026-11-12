@@ -292,7 +292,7 @@ type AppPlugin interface {
 - Props are encoded once and safely embedded for hydration.
 - Immutable startup model and strict stale-manifest checks; Vite manifests are authoritative, and Go hashes but never renames Vite output.
 - Tailwind, React Compiler, Vite aliases, linked workspace packages, virtual modules, CSS Modules, assets, and shared client/SSR chunks are covered by integration tests.
-- Static and client requests do no render work; SSR streams head and body frames.
+- Static and client requests do no render work; SSR streams head and body frames over a Unix socket, without HTTP between Go and Bun.
 - Isolated renderer workers with bounded concurrency and queue, readiness checks, and restart after transport failure.
 - The extracted renderer runtime is cached and reused across starts; stale builds are pruned after a week.
 - Queueing is bounded by time, not by an instant reject: a request waits up to two seconds for renderer capacity and then returns 503 with `Retry-After`.
