@@ -844,6 +844,33 @@ func TestGeneratedMainDeclaresTheRouteCache(t *testing.T) {
 	}
 }
 
+func TestResolveModuleSeparatesTheRootFromTheRouteRoot(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/site\n\ngo 1.24\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	route := filepath.Join(dir, "app")
+	if err := os.MkdirAll(route, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	module, err := resolveModule(context.Background(), route, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The route root is where pages live; the module root is where a package
+	// that the generated main imports lives (`commands`). Confusing the two
+	// imports a package that does not exist.
+	if module.Root != "example.com/site" {
+		t.Fatalf("module root = %q", module.Root)
+	}
+	if module.Path != "example.com/site/app" {
+		t.Fatalf("route root package = %q", module.Path)
+	}
+	if module.Dir != dir {
+		t.Fatalf("module dir = %q", module.Dir)
+	}
+}
+
 func TestGeneratedMainRunsCommandsBeforeTheApp(t *testing.T) {
 	root := t.TempDir()
 	generated := filepath.Join(root, ".bifrost", "app")

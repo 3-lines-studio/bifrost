@@ -207,10 +207,11 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 	if err != nil {
 		return appRouter{}, err
 	}
-	modulePath, moduleDir, err := resolveModule(ctx, routeRoot, routes, len(goDirs) > 0)
+	module, err := resolveModule(ctx, routeRoot, routes, len(goDirs) > 0)
 	if err != nil {
 		return appRouter{}, err
 	}
+	modulePath, moduleDir := module.Path, module.Dir
 	generated := filepath.Join(projectRoot, ".bifrost", "app")
 	if err := os.MkdirAll(generated, 0o755); err != nil {
 		return appRouter{}, err
@@ -277,8 +278,8 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 	// one: a cron job or a migration runs `./app <command>` instead of shipping a
 	// second binary.
 	commandsImport := ""
-	if hasSymbol(ctx, moduleDir, modulePath+"/commands", "Run") {
-		commandsImport = modulePath + "/commands"
+	if hasSymbol(ctx, moduleDir, module.Root+"/commands", "Run") {
+		commandsImport = module.Root + "/commands"
 	}
 	if err := writeAppRouterMain(projectRoot, generated, routes, goDirs, renderConcurrency, renderQueue, commandsImport); err != nil {
 		return appRouter{}, err
@@ -957,41 +958,51 @@ func goIdentifierRune(r rune) bool {
 	return r == '_'
 }
 
-func resolveModule(ctx context.Context, root string, routes []appRoute, hasGo bool) (string, string, error) {
+// moduleInfo is where the app lives: the module that holds it, the import path
+// of the module, and the import path of the route root inside it.
+type moduleInfo struct {
+	Dir string
+	// Root is the import path of the module, e.g. example.com/site.
+	Root string
+	// Path is the import path of the route root, e.g. example.com/site/app.
+	Path string
+}
+
+func resolveModule(ctx context.Context, root string, routes []appRoute, hasGo bool) (moduleInfo, error) {
 	for _, route := range routes {
 		hasGo = hasGo || route.PageGo
 	}
 	if !hasGo {
-		return "", "", nil
+		return moduleInfo{}, nil
 	}
 	command := exec.CommandContext(ctx, "go", "env", "GOMOD")
 	command.Dir = root
 	output, err := command.Output()
 	if err != nil {
-		return "", "", err
+		return moduleInfo{}, err
 	}
 	modFile := strings.TrimSpace(string(output))
 	if modFile == "" || modFile == os.DevNull {
-		return "", "", errors.New("bifrost: Go App Router files require an applicable go.mod")
+		return moduleInfo{}, errors.New("bifrost: Go App Router files require an applicable go.mod")
 	}
 	moduleDir := filepath.Dir(modFile)
 	data, err := os.ReadFile(modFile)
 	if err != nil {
-		return "", "", err
+		return moduleInfo{}, err
 	}
 	fields := strings.Fields(string(data))
 	if len(fields) < 2 || fields[0] != "module" {
-		return "", "", fmt.Errorf("bifrost: cannot read module path from %s", modFile)
+		return moduleInfo{}, fmt.Errorf("bifrost: cannot read module path from %s", modFile)
 	}
 	relativeRoot, err := filepath.Rel(moduleDir, root)
 	if err != nil || relativeRoot == ".." || strings.HasPrefix(relativeRoot, ".."+string(filepath.Separator)) {
-		return "", "", fmt.Errorf("bifrost: app root is outside module %s", moduleDir)
+		return moduleInfo{}, fmt.Errorf("bifrost: app root is outside module %s", moduleDir)
 	}
-	modulePath := fields[1]
+	module := moduleInfo{Dir: moduleDir, Root: fields[1], Path: fields[1]}
 	if relativeRoot != "." {
-		modulePath += "/" + filepath.ToSlash(relativeRoot)
+		module.Path += "/" + filepath.ToSlash(relativeRoot)
 	}
-	return modulePath, moduleDir, nil
+	return module, nil
 }
 
 func importAlias(aliases map[string]string, importPath string) string {
