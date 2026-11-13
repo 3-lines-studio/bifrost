@@ -179,6 +179,8 @@ The other files in a route directory are optional:
 - `route.go` exports any of `Get`, `Post`, `Put`, `Patch`, `Delete`, `Head`, and `Options`.
 - `middleware.go` exports `Middleware`, which wraps every route below it.
 - `server.go` exports `Serve` and is only valid at the route root.
+- `commands/` in the project root exports `Run` and turns the binary into a
+  multi-command one (see [One-off commands](#one-off-commands)).
 - `public/` holds files served as they are.
 
 Every view accepts a default export instead of the named one, so `export default function Page` and `export default function Layout({ children })` work.
@@ -186,6 +188,49 @@ Every view accepts a default export instead of the named one, so `export default
 Every page receives `params`, `searchParams`, and `pathname` merged into its loader props, so a page reads `params.slug` and `searchParams.tab` without asking the loader. `params` keys by folder name, a catch-all parameter is an array of segments, and a repeated query key is an array too. Because Bifrost merges them into the props, a loader must return a map or a `bifrost.PageData` whose `Props` is a map.
 
 A layout or a page can export `metadata`, and Bifrost merges the objects from the outer layouts down to the page, so a page overrides one key and inherits the rest. A page that exports `Head` cannot also export `metadata`. It renders `title`, `description`, `keywords`, `alternates.canonical`, `robots.index`, `robots.follow`, and `openGraph` (`title`, `description`, `url`, `images`). `generateMetadata(props)` covers what depends on the request: it receives the page props, may be async, and merges the same way.
+
+## One-off commands
+
+A project with a `commands` package in the root of the module answers its own
+arguments. The generated main calls it before anything else: no renderer, no
+Bun, no port, no health check.
+
+```go
+// commands/ops.go
+package commands
+
+import (
+	"context"
+	"errors"
+)
+
+func Run(ctx context.Context, args []string) (bool, error) {
+	if len(args) == 0 {
+		return false, nil // no command: start the server
+	}
+	switch args[0] {
+	case "cleanup":
+		return true, cleanup(ctx)
+	case "migrate":
+		return true, migrate(ctx, args[1:])
+	}
+	return false, errors.New("unknown command " + args[0])
+}
+```
+
+```sh
+./app migrate          # runs the command and exits
+./app                  # starts the server
+```
+
+The first return value says whether `Run` handled the arguments: `false` falls
+through to the server, so an app without arguments behaves as it always did.
+An error exits 1 with the message, as any startup failure does. This is what a
+cron job or a migrator needs: one artifact to ship instead of a second binary,
+and the same code and modules the server already has.
+
+`bifrost build` adds the import only when the package exists and exports `Run`,
+so every other project builds exactly as before.
 
 ## App Router navigation
 

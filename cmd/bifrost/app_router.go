@@ -273,7 +273,14 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 	if err := writeViews(projectRoot, routeRoot, routes); err != nil {
 		return appRouter{}, err
 	}
-	if err := writeAppRouterMain(projectRoot, generated, routes, goDirs, renderConcurrency, renderQueue); err != nil {
+	// A package that answers os.Args turns the app binary into a multi-command
+	// one: a cron job or a migration runs `./app <command>` instead of shipping a
+	// second binary.
+	commandsImport := ""
+	if hasSymbol(ctx, moduleDir, modulePath+"/commands", "Run") {
+		commandsImport = modulePath + "/commands"
+	}
+	if err := writeAppRouterMain(projectRoot, generated, routes, goDirs, renderConcurrency, renderQueue, commandsImport); err != nil {
 		return appRouter{}, err
 	}
 	if err := writeAppRouterModule(generated, moduleDir); err != nil {
@@ -1089,7 +1096,7 @@ func directoryContains(parent, child string) bool {
 	return parent == "." || parent == child || strings.HasPrefix(child, parent+"/")
 }
 
-func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDir, renderConcurrency, renderQueue int) error {
+func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDir, renderConcurrency, renderQueue int, commandsImport string) error {
 	renderConfig := "Assets: bifrostAssets, "
 	if renderConcurrency > 0 {
 		renderConfig += "RenderConcurrency: " + strconv.Itoa(renderConcurrency) + ", "
@@ -1186,7 +1193,14 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 			break
 		}
 	}
-	source := "package main\n\nimport (\n" + standardImports() + "\n\t\"github.com/3-lines-studio/bifrost\"\n" + imports.String() + ")\n\n" + loaders.String() + pathValues.String() + "func main() {\n\tif err := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n\nfunc run() error {\n\tapp, err := bifrost.New(bifrost.Config{SourceRoot: " + strconv.Quote(root) + ", " + renderConfig + "Routes: []bifrost.Route{\n" + declarations.String() + "\t}})\n\tif err != nil {\n\t\treturn err\n\t}\n\tif bifrost.Building() {\n\t\treturn nil\n\t}\n\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\tdefer stop()\n\tdefer func() {\n\t\tcloseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\t\tdefer cancel()\n\t\t_ = app.Close(closeCtx)\n\t}()\n\tpageMux := http.NewServeMux()\n\tif err := app.Register(pageMux); err != nil {\n\t\treturn err\n\t}\n\tmux := http.NewServeMux()\n" + registrations.String() + "\tmux.Handle(\"/\", pageMux)\n\t" + serve + "\n}\n\nfunc redirectTrailingSlash(next http.Handler) http.Handler {\n\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n\t\tpath := r.URL.Path\n\t\tif len(path) < 2 || !strings.HasSuffix(path, \"/\") {\n\t\t\tnext.ServeHTTP(w, r)\n\t\t\treturn\n\t\t}\n\t\ttarget := *r.URL\n\t\ttarget.Path = strings.TrimSuffix(path, \"/\")\n\t\thttp.Redirect(w, r, target.String(), http.StatusPermanentRedirect)\n\t})\n}\n\nfunc serve(ctx context.Context, handler http.Handler) error {\n\treturn bifrost.Serve(ctx, handler)\n}"
+	commands := ""
+	if commandsImport != "" {
+		imports.WriteString("\tappcommands " + strconv.Quote(commandsImport) + "\n")
+		// A one-off command runs before the app exists: no renderer, no Bun, no
+		// port. That is what makes `./app migrate` or a cron job cheap.
+		commands = "\tif len(os.Args) > 1 {\n\t\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\t\tdefer stop()\n\t\thandled, err := appcommands.Run(ctx, os.Args[1:])\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\tif handled {\n\t\t\treturn nil\n\t\t}\n\t}\n"
+	}
+	source := "package main\n\nimport (\n" + standardImports() + "\n\t\"github.com/3-lines-studio/bifrost\"\n" + imports.String() + ")\n\n" + loaders.String() + pathValues.String() + "func main() {\n\tif err := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n\nfunc run() error {\n" + commands + "\tapp, err := bifrost.New(bifrost.Config{SourceRoot: " + strconv.Quote(root) + ", " + renderConfig + "Routes: []bifrost.Route{\n" + declarations.String() + "\t}})\n\tif err != nil {\n\t\treturn err\n\t}\n\tif bifrost.Building() {\n\t\treturn nil\n\t}\n\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\tdefer stop()\n\tdefer func() {\n\t\tcloseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\t\tdefer cancel()\n\t\t_ = app.Close(closeCtx)\n\t}()\n\tpageMux := http.NewServeMux()\n\tif err := app.Register(pageMux); err != nil {\n\t\treturn err\n\t}\n\tmux := http.NewServeMux()\n" + registrations.String() + "\tmux.Handle(\"/\", pageMux)\n\t" + serve + "\n}\n\nfunc redirectTrailingSlash(next http.Handler) http.Handler {\n\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n\t\tpath := r.URL.Path\n\t\tif len(path) < 2 || !strings.HasSuffix(path, \"/\") {\n\t\t\tnext.ServeHTTP(w, r)\n\t\t\treturn\n\t\t}\n\t\ttarget := *r.URL\n\t\ttarget.Path = strings.TrimSuffix(path, \"/\")\n\t\thttp.Redirect(w, r, target.String(), http.StatusPermanentRedirect)\n\t})\n}\n\nfunc serve(ctx context.Context, handler http.Handler) error {\n\treturn bifrost.Serve(ctx, handler)\n}"
 	formatted, err := format.Source([]byte(source))
 	if err != nil {
 		return err

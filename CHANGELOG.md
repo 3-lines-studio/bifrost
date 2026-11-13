@@ -4,6 +4,14 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
 ## Unreleased
 
+### App Router
+
+- A `commands` package in the module root turns the app binary into a
+  multi-command one: `./app migrate` runs the command and exits before the app
+  is built, and no arguments start the server. One artifact for the server, the
+  cron jobs and the migrator, instead of a second binary that ships the same
+  modules again.
+
 ### Build
 
 - `bifrost build` uses the host Bun by default: the App Router binary is 9.4 MB instead of 118 MB, and the runtime runs the renderer script with `bun` from `BIFROST_BUN` or `PATH`. `--embed-bun` compiles Bun into the binary for self-contained deploys; `--host-bun` stays accepted and defaults to true.
