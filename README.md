@@ -88,6 +88,14 @@ Use `/{$}` for an exact root page; the standard `/` pattern is a subtree fallbac
 
 Rendered documents are `Cache-Control: private, no-cache, no-store, max-age=0, must-revalidate` by default, because their props usually come from the request. Declare a route as cacheable with `Route.WithCache` in Go or with a `Cache` export next to `Load` in the App Router, for example `public, s-maxage=60` to let a CDN hold it. The document keeps `Vary: Accept`, and the client-side navigation response stays `no-store` and never reaches a shared cache.
 
+## Compression
+
+Bifrost answers with gzip when the client asks for it and the response is worth it: documents, stylesheets, scripts, JSON, SVG, and Markdown. Fonts, images, and video are left alone (they are already compressed), and so is anything that carries a `Content-Encoding`, asks for `no-transform`, or streams events. The length is dropped because the body is compressed as it goes, and the response gains `Vary: Accept-Encoding`.
+
+The App Router applies it to the whole mux, and `bifrost.Compress(handler)` wraps a handler of your own.
+
+An origin behind a CDN that speaks Brotli is the case to think about: Cloudflare asks every origin for `br, gzip` and keeps the encoding the origin sends, so enabling gzip there trades the CDN's Brotli for gzip (about 10% more bytes on the wire) against a 6 to 8 times smaller response between the CDN and the origin.
+
 ## Build and runtime boundary
 
 Build phases execute the application to collect immutable declarations, so code that constructs `Config`, routes, loaders, and generators must be side-effect free. Check `bifrost.Building()` immediately after `New`, before opening listeners, databases, queues, or background workers. When declarations live in an internal package, pass the generated package-local `bifrostAssets` from `main` into that package; `example/structured` shows the layout that keeps one generated embedded tree instead of a second copied embed.

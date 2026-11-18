@@ -36,6 +36,17 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
 ### Runtime
 
+- Responses are compressed with gzip when the client accepts it and the body
+  shrinks: documents, stylesheets, scripts, JSON, SVG, and Markdown. Fonts,
+  images, video, event streams, responses that already carry a
+  `Content-Encoding`, and responses that ask for `no-transform` are passed
+  through. The body streams through a pooled writer, so `Content-Length` is
+  dropped and `Vary: Accept-Encoding` is added. The App Router applies it to the
+  whole mux; `bifrost.Compress` wraps a handler of your own. Behind a Brotli CDN
+  the trade is explicit: the CDN keeps our gzip instead of compressing itself,
+  which costs about 10% more bytes to the browser and saves 6 to 8 times the
+  bytes between the CDN and the origin.
+
 - Renderer admission is bounded by time instead of an instant reject: a request waits up to two seconds for capacity and then fails with 503 and `Retry-After`. Under a burst the old queue returned 503 for 98% of requests while workers were free microseconds later.
 - The missing-Bun error names `BIFROST_BUN`, the Bun install, and `--embed-bun`.
 

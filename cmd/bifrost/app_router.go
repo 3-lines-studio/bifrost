@@ -1426,10 +1426,10 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 			fmt.Fprintf(&registrations, "\tmux.Handle(%s, %s)\n", strconv.Quote(strings.ToUpper(method)+" "+directory.Pattern), handler)
 		}
 	}
-	serve := "return serve(ctx, redirectTrailingSlash(app.ResolveMarkdown(mux)))"
+	serve := "return serve(ctx, bifrost.Compress(redirectTrailingSlash(app.ResolveMarkdown(mux))))"
 	for _, directory := range goDirs {
 		if directory.Serve {
-			serve = "return " + directory.Alias + ".Serve(ctx, redirectTrailingSlash(app.ResolveMarkdown(mux)))"
+			serve = "return " + directory.Alias + ".Serve(ctx, bifrost.Compress(redirectTrailingSlash(app.ResolveMarkdown(mux))))"
 			break
 		}
 	}
