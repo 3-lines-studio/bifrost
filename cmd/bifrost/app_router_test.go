@@ -1458,7 +1458,7 @@ func TestGeneratedMainScreenOnlyPage(t *testing.T) {
 	text := string(data)
 	for _, want := range []string{
 		`var body0 = sync.OnceValue(func() []byte {`,
-		`return web.Shell(nil, shellOptions...)`,
+		`return web.Shell(nil, append(shellOptions, web.Screen())...)`,
 		`page := bifrost.NativePage{Body: body0()}`,
 		`meta := route0.Metadata()`,
 		`page.Image, page.Robots, page.Schema, page.Lang, page.Dir = meta.Image, meta.Robots, meta.Schema, meta.Lang, meta.Dir`,

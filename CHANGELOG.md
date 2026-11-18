@@ -21,6 +21,8 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
 ### MyGo
 
+- `web.Screen()` is the shell of a screen of the app: the spinner shows at once instead of after the 400 ms that keep a cached build from flashing, and the page never shows the content it has none of. `bifrost build` passes it for a page with no `View`, so a screen has no bare HTML before the app draws.
+- A page with no `View` may declare `Metadata(props Props)`: its loader runs for the document, and the title and the language of a screen come from it.
 - `web.Shell` leaves the URL alone: the app reads the page the server answered from `location.pathname`, and a link to a screen is the one the site names. An app whose router follows MyGo's history in the fragment calls `web.FragmentLocation()` before its first frame, which puts the path there, as the shell used to for every app.
 - `mygo/client` sends a `Blob` where it is (memory, a range of a file of the disk or a `File` of the browser) and reports the bytes as they go out with `OnUpload`; `client.Copy` writes an answer to a writer as it arrives. In a browser a request with a blob or with progress goes with `XMLHttpRequest`, which takes a `File` without a copy and reports its upload.
 - `mygo/file` picks files in a window's dialog or in the browser's picker, opens one by path, reads a range as a request body, and saves a download. `mygo/exif` reads the size, orientation, camera, lens, exposure, time and place of a JPEG, PNG or WebP from its headers, without decoding the picture.

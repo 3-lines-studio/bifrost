@@ -47,7 +47,7 @@ func Screen() func(*ui.Context) { return View() } // the page in the app, made b
 | In `page.go` | |
 |---|---|
 | `View()` or `View(props Props) func(*ui.Context)` | the page. `props` come from `Load` |
-| `Metadata()` or `Metadata(props Props) seo.Head` | title, description, canonical, image, robots, keywords, card type, alternates, JSON-LD, `lang`, `dir` |
+| `Metadata()` or `Metadata(props Props) seo.Head` | title, description, canonical, image, robots, keywords, card type, alternates, JSON-LD, `lang`, `dir`. A screen takes props too, from its loader |
 | `Screen()` or `Screen(deps D) func(*ui.Context)` | the page in the app, typed: no `any`, no assertions |
 | `Load(*http.Request) (any, error)` | server props, as a `Props` value or `bifrost.PageData` (status, document attributes, headers) |
 | `Cache() string` | the `Cache-Control` of the rendered page |
@@ -56,7 +56,9 @@ func Screen() func(*ui.Context) { return View() } // the page in the app, made b
 
 A `page.go` with `Screen` and no `View` is a screen of the app: the server
 answers it with the shell alone, `Robots: "noindex"`, and leaves it out of the
-sitemap. A page that sells or is searched has a `View`.
+sitemap. The shell of a screen shows its spinner at once (`web.Screen()`), so a
+browser never lands on a text nobody designed. A page that sells or is searched
+has a `View`.
 
 `layout.go` in a directory wraps the pages of that directory and the ones
 below it, on the server and in the app:

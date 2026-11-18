@@ -30,29 +30,36 @@ const style = `html,body{margin:0;height:100%;color-scheme:light dark}` +
 	`@keyframes mygo-spin{to{transform:rotate(360deg)}}` +
 	`@media (prefers-reduced-motion:reduce){.mygo-spinner{animation:none}}`
 
-// The boot script starts the app at the URL it was served for, and leaves the
-// URL alone: the app reads location.pathname, or, when its router follows the
-// tab's history in the fragment, FragmentLocation puts the path there.
-// The content stays until the app runs, and stays for good when the build is
-// missing, so a failed fetch degrades to the HTML. The spinner waits 400ms
-// before showing, so a cached build does not flash it.
-const script = `(function(){` +
-	`var seo=document.getElementById("seo");` +
-	`var loader=document.getElementById("mygo-loading");` +
-	`var root=document.getElementById("mygo");` +
-	`var timer=setTimeout(function(){if(loader){loader.style.display="flex"}},400);` +
-	`if(typeof Go==="undefined"){clearTimeout(timer);return}` +
-	`var go=new Go();` +
-	`WebAssembly.instantiateStreaming(fetch("` + wasmPath + `"),go.importObject).then(function(result){` +
-	`clearTimeout(timer);` +
-	`go.run(result.instance);` +
-	`root.style.display="block";` +
-	`if(loader){loader.remove()}` +
-	`if(seo){seo.remove()}` +
-	`}).catch(function(){` +
-	`clearTimeout(timer);` +
-	`if(loader){loader.remove()}` +
-	`})})();`
+// bootScript is the script that starts the app at the URL it was served for and
+// leaves the URL alone: the app reads location.pathname, or, when its router
+// follows the tab's history in the fragment, FragmentLocation puts the path
+// there. The content stays until the app runs, and stays for good when the
+// build is missing, so a failed fetch degrades to the HTML. The spinner waits
+// 400ms before showing, so a cached build does not flash it, and a screen of
+// the app shows it at once: it has no content to keep.
+func bootScript(screen bool) string {
+	show, fail := `var timer=setTimeout(function(){if(loader){loader.style.display="flex"}},400);`, `if(loader){loader.remove()}`
+	if screen {
+		show, fail = ``, ``
+	}
+	return `(function(){` +
+		`var seo=document.getElementById("seo");` +
+		`var loader=document.getElementById("mygo-loading");` +
+		`var root=document.getElementById("mygo");` +
+		show +
+		`if(typeof Go==="undefined"){if(loader){loader.remove()}return}` +
+		`var go=new Go();` +
+		`WebAssembly.instantiateStreaming(fetch("` + wasmPath + `"),go.importObject).then(function(result){` +
+		`if(typeof timer!=="undefined"){clearTimeout(timer)}` +
+		`go.run(result.instance);` +
+		`root.style.display="block";` +
+		`if(loader){loader.remove()}` +
+		`if(seo){seo.remove()}` +
+		`}).catch(function(){` +
+		`if(typeof timer!=="undefined"){clearTimeout(timer)}` +
+		fail +
+		`})})();`
+}
 
 // The reload script follows the server: the stream sends the id of the process
 // when it connects, and a page that reads another one reloads. A dev server
@@ -72,6 +79,16 @@ type Option func(*shell)
 
 type shell struct {
 	reload bool
+	screen bool
+}
+
+// Screen says that the app draws the page and there is no content to wait for:
+// the spinner shows at once instead of after the 400ms that keep a cached build
+// from flashing it, and the page is the app's from its first frame.
+func Screen() Option {
+	return func(s *shell) {
+		s.screen = true
+	}
 }
 
 // Reload makes the page follow the server: when the process answering it is
@@ -99,10 +116,13 @@ func Shell(content []byte, options ...Option) []byte {
 	}
 	body.WriteString(`<div id="mygo"></div><div id="mygo-loading" role="status"><div class="mygo-spinner"></div></div><style>`)
 	body.WriteString(style)
+	if settings.screen {
+		body.WriteString(`#mygo-loading{display:flex}`)
+	}
 	body.WriteString(`</style><script src="`)
 	body.WriteString(execPath)
 	body.WriteString(`"></script><script>`)
-	body.WriteString(script)
+	body.WriteString(bootScript(settings.screen))
 	body.WriteString(`</script>`)
 	if settings.reload {
 		body.WriteString(`<script>`)

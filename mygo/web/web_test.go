@@ -72,3 +72,23 @@ func TestShellReloadsOnlyWhenAsked(t *testing.T) {
 		t.Fatalf("the shell does not follow the server:\n%s", body)
 	}
 }
+
+func TestScreenShowsTheSpinnerAtOnce(t *testing.T) {
+	body := string(Shell(nil, Screen()))
+	if !strings.Contains(body, "#mygo-loading{display:flex}") {
+		t.Errorf("a screen hides its spinner:\n%s", body)
+	}
+	if strings.Contains(body, "setTimeout") {
+		t.Errorf("a screen waits before showing it:\n%s", body)
+	}
+	if strings.Contains(body, "loader.remove()}") && strings.Contains(body, "catch(function(){if(loader){loader.remove()}") {
+		t.Errorf("a screen drops the spinner when the build fails:\n%s", body)
+	}
+	content := string(Shell([]byte("<main></main>")))
+	if strings.Contains(content, "#mygo-loading{display:flex}") {
+		t.Errorf("a page with content shows the spinner at once:\n%s", content)
+	}
+	if !strings.Contains(content, "setTimeout") {
+		t.Errorf("a page with content waits before showing it:\n%s", content)
+	}
+}

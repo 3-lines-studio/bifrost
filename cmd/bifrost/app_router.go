@@ -532,9 +532,6 @@ func discoverRoutes(root string) ([]appRoute, error) {
 				if (route.ViewArgs > 0 || route.MetadataArgs > 0) && !route.HasProps {
 					return nil, fmt.Errorf("bifrost: %s View or Metadata takes props but page.go has no Props type", directory)
 				}
-				if route.ScreenOnly && route.MetadataArgs > 0 {
-					return nil, fmt.Errorf("bifrost: %s page.go has no View, so Metadata takes no props", directory)
-				}
 				route.HasLinks = sourceDeclares(record.pageGo, "Links")
 				kind, declared, err := sitemapDeclaration(filepath.Dir(record.pageGo))
 				if err != nil {
@@ -1626,6 +1623,10 @@ func writeNativeRoute(loaders, declarations *strings.Builder, index int, route a
 		}
 	}
 	source := "web.Shell(nil, shellOptions...)"
+	if route.ScreenOnly {
+		// A screen has no content to keep: the spinner shows at once.
+		source = "web.Shell(nil, append(shellOptions, web.Screen())...)"
+	}
 	if view != "" {
 		source = fmt.Sprintf("web.Shell(seo.Body(%s, seo.Options{Links: %s}), shellOptions...)", view, links)
 	}
@@ -1840,7 +1841,11 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 	wasmAssets := ""
 	extraImports := ""
 	if slices.ContainsFunc(routes, func(route appRoute) bool { return route.Native }) {
-		nativeImports = "\t\"github.com/3-lines-studio/bifrost/mygo/seo\"\n\t\"github.com/3-lines-studio/bifrost/mygo/web\"\n"
+		nativeImports = "\t\"github.com/3-lines-studio/bifrost/mygo/web\"\n"
+		if strings.Contains(loaders.String(), "seo.") {
+			// Only a page or an error page with a view renders one.
+			nativeImports = "\t\"github.com/3-lines-studio/bifrost/mygo/seo\"\n" + nativeImports
+		}
 		extraImports += "\t\"encoding/json\"\n"
 	}
 	if hasCachedBody(routes) {
