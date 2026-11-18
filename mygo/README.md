@@ -10,8 +10,8 @@ library and MyGo is downloaded only by apps that use it.
 
 [example](example) is the smallest app: a page, a screen and an API.
 [demo](demo) is all of it: SEO metadata, a blog with a dynamic sitemap, a
-layout tree, an error page, a not-found page, a sign-in flow and a single-binary
-deploy. `BIFROST_E2E=1 go test ./cmd/bifrost -run TestEndToEndDemoApp` builds
+layout tree, an error page, a not-found page, a sign-in flow, an upload of
+pictures in parts and a single-binary deploy. `BIFROST_E2E=1 go test ./cmd/bifrost -run TestEndToEndDemoApp` builds
 the demo and reads every route it serves.
 
 ## The App Router contract
@@ -176,8 +176,8 @@ one. A `File` reads in ranges, so a picture of 40 MiB goes out in parts:
 
 ```go
 picture, err := file.Open(path)
-head, err := picture.Head(ctx, 256<<10)          // what a decoder needs
-metadata, err := exif.Read(ctx, picture, picture.Size())
+head, err := picture.Head(ctx, exif.HeaderSize)  // what the headers fill
+metadata, err := exif.ReadBytes(head)
 ```
 
 `exif` reads the size, the orientation, the camera and lens, the exposure, the

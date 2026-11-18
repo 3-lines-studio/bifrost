@@ -16,6 +16,7 @@ func Layout(page func(*ui.Context)) func(*ui.Context) {
 				seo.Link(c, "Blog", "/blog")
 				seo.Link(c, "About", "/about")
 				ui.Row(c).Grow(1).Justify(ui.End).Gap(18).Children(func() {
+					seo.Link(c, "Upload", "/upload")
 					seo.Link(c, "Dashboard", "/dashboard")
 					seo.Link(c, "Sign in", "/login")
 				})

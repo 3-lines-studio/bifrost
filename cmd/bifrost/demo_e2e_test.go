@@ -5,10 +5,12 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -104,6 +106,16 @@ func TestEndToEndDemoApp(t *testing.T) {
 		t.Errorf("pricing is not cached: %q", cached.Header.Get("Cache-Control"))
 	}
 
+	uploadScreen := get(t, base+"/upload", "")
+	for _, want := range []string{`<meta name="robots" content="noindex">`, `id="mygo"`} {
+		if !strings.Contains(uploadScreen, want) {
+			t.Errorf("upload misses %q:\n%s", want, uploadScreen)
+		}
+	}
+	if strings.Contains(uploadScreen, "<main>") {
+		t.Errorf("upload has server-rendered content:\n%s", uploadScreen)
+	}
+
 	screen := get(t, base+"/dashboard", "")
 	for _, want := range []string{`<meta name="robots" content="noindex">`, `id="mygo"`} {
 		if !strings.Contains(screen, want) {
@@ -144,7 +156,7 @@ func TestEndToEndDemoApp(t *testing.T) {
 			t.Errorf("sitemap misses %q:\n%s", want, sitemap)
 		}
 	}
-	for _, unwanted := range []string{"/dashboard", "/login"} {
+	for _, unwanted := range []string{"/dashboard", "/login", "/upload"} {
 		if strings.Contains(sitemap, unwanted) {
 			t.Errorf("sitemap lists the screen %s:\n%s", unwanted, sitemap)
 		}
@@ -153,6 +165,8 @@ func TestEndToEndDemoApp(t *testing.T) {
 	if robots := get(t, base+"/robots.txt", ""); !strings.Contains(robots, "Sitemap: https://demo.example.com/sitemap.xml") {
 		t.Errorf("robots:\n%s", robots)
 	}
+
+	uploadFile(t, base)
 
 	notes := get(t, base+"/api/notes", "")
 	if !strings.Contains(notes, "The server renders the page") {
@@ -272,4 +286,103 @@ func copyTree(t *testing.T, source, target string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// uploadFile sends a file in parts, as the app does, and reads it back from the
+// server: start, sign, put every part, complete, and the file the server joined.
+func uploadFile(t *testing.T, base string) {
+	t.Helper()
+	size := int64(2*1024*1024 + 512*1024)
+	content := make([]byte, size)
+	for i := range content {
+		content[i] = byte(i*17 + i/5)
+	}
+	started := postJSON(t, base+"/api/upload/start", fmt.Sprintf(`{"name":"big.jpg","size":%d,"type":"image/jpeg"}`, size), http.StatusOK)
+	var plan struct {
+		UploadID string `json:"uploadId"`
+		PartSize int64  `json:"partSize"`
+	}
+	if err := json.Unmarshal([]byte(started), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.UploadID == "" || plan.PartSize <= 0 {
+		t.Fatalf("plan %+v", plan)
+	}
+	count := int((size + plan.PartSize - 1) / plan.PartSize)
+	if count != 3 {
+		t.Fatalf("%d parts of %d bytes", count, plan.PartSize)
+	}
+	numbers := make([]int, count)
+	for i := range numbers {
+		numbers[i] = i + 1
+	}
+	signBody, err := json.Marshal(map[string]any{"uploadId": plan.UploadID, "numbers": numbers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed := postJSON(t, base+"/api/upload/sign", string(signBody), http.StatusOK)
+	var urls struct {
+		URLs map[string]string `json:"urls"`
+	}
+	if err := json.Unmarshal([]byte(signed), &urls); err != nil {
+		t.Fatal(err)
+	}
+
+	type part struct {
+		Number int    `json:"number"`
+		ETag   string `json:"etag"`
+		Size   int64  `json:"size"`
+	}
+	parts := make([]part, 0, count)
+	for _, number := range numbers {
+		start := int64(number-1) * plan.PartSize
+		end := min(start+plan.PartSize, size)
+		request, err := http.NewRequest(http.MethodPut, base+urls.URLs[strconv.Itoa(number)], bytes.NewReader(content[start:end]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		answer := read(t, response.Body)
+		if response.StatusCode != http.StatusNoContent {
+			t.Fatalf("part %d answered %d: %s", number, response.StatusCode, answer)
+		}
+		parts = append(parts, part{Number: number, ETag: strings.Trim(response.Header.Get("ETag"), `"`), Size: end - start})
+	}
+
+	body, err := json.Marshal(map[string]any{"uploadId": plan.UploadID, "parts": parts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := postJSON(t, base+"/api/upload/complete", string(body), http.StatusOK)
+	var media struct {
+		URL  string `json:"url"`
+		Size int64  `json:"size"`
+	}
+	if err := json.Unmarshal([]byte(joined), &media); err != nil {
+		t.Fatal(err)
+	}
+	if media.Size != size {
+		t.Fatalf("the server joined %d bytes of %d", media.Size, size)
+	}
+	response := request(t, base+media.URL, "")
+	got := read(t, response.Body)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("media answered %d", response.StatusCode)
+	}
+	if got != string(content) {
+		t.Fatalf("the media is %d bytes, not the %d sent", len(got), len(content))
+	}
+
+	abandoned := postJSON(t, base+"/api/upload/start", fmt.Sprintf(`{"name":"small.jpg","size":%d,"type":"image/jpeg"}`, 10), http.StatusOK)
+	var dropped struct {
+		UploadID string `json:"uploadId"`
+	}
+	if err := json.Unmarshal([]byte(abandoned), &dropped); err != nil {
+		t.Fatal(err)
+	}
+	postJSON(t, base+"/api/upload/abort", fmt.Sprintf(`{"uploadId":%q}`, dropped.UploadID), http.StatusNoContent)
+	postJSON(t, base+"/api/upload/sign", fmt.Sprintf(`{"uploadId":%q,"numbers":[1]}`, dropped.UploadID), http.StatusNotFound)
 }

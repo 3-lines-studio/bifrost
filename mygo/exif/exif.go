@@ -17,9 +17,9 @@ import (
 // reads.
 var ErrFormat = errors.New("exif: not a JPEG, PNG or WebP file")
 
-// headBytes is how much of a file Read reads: the headers of every format it
-// reads fit well inside it.
-const headBytes = 256 << 10
+// HeaderSize is how much of a file the headers of every format it reads need.
+// Read reads that much, and a file hands Head that much to ReadBytes.
+const HeaderSize = 256 << 10
 
 // Metadata is what a picture says of itself. A field the picture says nothing
 // of is the zero value, and GPS is nil when it says nothing of where it was
@@ -67,7 +67,7 @@ func (m Metadata) Rotated() (width, height int) {
 }
 
 // Read reads the metadata of the file reader holds, of size bytes. It reads the
-// first headBytes of it.
+// first HeaderSize of it.
 func Read(ctx context.Context, reader io.ReaderAt, size int64) (Metadata, error) {
 	if err := ctx.Err(); err != nil {
 		return Metadata{}, err
@@ -75,7 +75,7 @@ func Read(ctx context.Context, reader io.ReaderAt, size int64) (Metadata, error)
 	if size < 4 {
 		return Metadata{}, ErrFormat
 	}
-	length := min(size, headBytes)
+	length := min(size, HeaderSize)
 	head := make([]byte, length)
 	read, err := reader.ReadAt(head, 0)
 	if err != nil && !errors.Is(err, io.EOF) {

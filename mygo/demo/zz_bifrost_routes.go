@@ -10,6 +10,7 @@ import (
 	route5 "github.com/3-lines-studio/bifrost/mygo/demo/app/dashboard"
 	route6 "github.com/3-lines-studio/bifrost/mygo/demo/app/login"
 	route7 "github.com/3-lines-studio/bifrost/mygo/demo/app/pricing"
+	route8 "github.com/3-lines-studio/bifrost/mygo/demo/app/upload"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -26,6 +27,7 @@ func appPages(app *app) []appPage {
 		{Pattern: "/dashboard", View: route2.Layout(route5.Screen(app))},
 		{Pattern: "/login", View: route2.Layout(route6.Screen(app))},
 		{Pattern: "/pricing", View: route2.Layout(route7.Screen())},
+		{Pattern: "/upload", View: route2.Layout(route8.Screen(app))},
 		{Pattern: "/", View: route2.Layout(route2.Screen())},
 	}
 }

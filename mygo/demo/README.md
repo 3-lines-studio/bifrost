@@ -40,10 +40,13 @@ The app reads the server it is a client of from `BIFROST_DEMO_SERVER`,
 | `/blog/boom` | A loader that fails: the error page, with a 500 and `noindex`. |
 | `/dashboard` | A screen the app draws alone: the server answers a shell nobody indexes. |
 | `/login` | A form the app owns; the server issues the token it keeps. |
+| `/upload` | Files of the person, read where they are, sent in parts, and shown as a code a phone reads. |
 | `/api/notes` | `GET` and `POST` of the notes the dashboard loads. |
 | `/api/login` | Credentials for a token. Any password of four letters or more. |
 | `/api/refresh` | A token for a token: what the app calls when the server rejects one. |
 | `/api/me` | A `Middleware` that refuses a request without a token. |
+| `/api/upload/*` | The server of a multipart upload: start, sign, part, complete, abort. |
+| `/api/media/{id}` | The file the server joined, at the path its share link names. |
 | `/sitemap.xml`, `/robots.txt` | The pages a crawler reads, and not the screens. |
 
 The page of `/blog/one-source-three-targets` reads its canonical, its social
@@ -59,10 +62,19 @@ loader; `/` writes two JSON-LD blocks, its keywords and its alternate languages.
 - `app/error.go`, `app/not-found.go` — what a failed load and an unknown path
   answer.
 - `app/api/*/route.go` — `Get`, `Post` and `Middleware` beside the pages.
-- `store/` — the data, standing in for a database.
+- `uploadproto/` — the two ends of an upload: the server that signs the parts and joins them, and the `upload.Signer` the app hands to `upload.Run`.
+- `store/` — the data, standing in for a database. `store/uploads.go` keeps the parts of an upload in memory, standing in for a bucket.
 - `main.go` — the app: the window, the router over `appPages`, the session and
   the calls to the API.
 
 A screen reads the page it shows through the interface it declares, and the app
 satisfies it: `Screen(deps Deps)`. The compiler checks the app has the methods,
 so no casting and no `any`.
+
+The upload screen is the rehearsal of a real one: `file.Pick` asks for pictures,
+`exif.ReadBytes` reads what each says of itself from its first 256 KiB,
+`upload.Run` sends it in parts of 1 MiB with progress and a resume kept in
+`localStorage` (a browser) or in the app's directory (a window), and `qr.Encode`
+makes the code of the link the server answers with. The server keeps the parts
+in memory and joins them, and `uploadproto` has a test that sends a real file
+through the whole of it and reads it back.
