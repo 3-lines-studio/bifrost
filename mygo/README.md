@@ -199,6 +199,10 @@ The app implements `upload.Signer` on its own API: `Start` opens the upload,
 `Sign` gives the URL of each part, `Complete` joins them and `Abort` drops one
 nobody finishes. Everything else is the package's.
 
+A `Store` keeps the parts the server already has: `upload.NewMemory()` while the
+app runs, `upload.Disk(dir)` in a window, so a resume survives the app closing,
+and `upload.Browser()` in a page, which keeps it in `localStorage`.
+
 ## State of a screen
 
 `data.Cache` holds what a screen reads, loads it on a goroutine of its own, and
