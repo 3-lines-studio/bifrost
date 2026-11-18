@@ -28,7 +28,7 @@ func TestNavigationRouteTableMatchesClientPatterns(t *testing.T) {
 		{Pattern: "/docs/{rest...}", View: "c.tsx", Kind: "server", Navigation: true},
 		{Pattern: "GET /explicit", View: "d.tsx", Kind: "server", Navigation: true},
 	}}}
-	plans, _, client, err := planViews(describe, output, map[string][]string{"/posts/{slug}": {"post-id"}})
+	plans, _, client, err := planViews(describe, output, map[string][]string{"/posts/{slug}": {"post-id"}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestNavigationEntriesShareRouterAndLazyViews(t *testing.T) {
 		{Pattern: "/plain", View: "plain.tsx", Kind: "server"},
 		{Pattern: "/same-source", View: "a.tsx", Kind: "server"},
 	}}}
-	plans, routes, _, err := planViews(describe, output, nil)
+	plans, routes, _, err := planViews(describe, output, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

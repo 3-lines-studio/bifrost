@@ -1188,18 +1188,27 @@ func TestDiscoverHTMLPage(t *testing.T) {
 	if got := strings.Join(about.Layouts, ","); got != "layout.html" {
 		t.Fatalf("layouts = %q", got)
 	}
-	if got := strings.Join(about.Styles, ","); got != "layout.css,about/page.css" {
+	if got := strings.Join(about.Styles, ","); got != "about/page.css" {
 		t.Fatalf("styles = %q", got)
 	}
-	if got := strings.Join(about.Scripts, ","); got != "layout.js,about/page.js" {
+	if got := strings.Join(about.Scripts, ","); got != "about/page.js" {
 		t.Fatalf("scripts = %q", got)
+	}
+	if got := strings.Join(about.LayoutStyles, ","); got != "layout.css" {
+		t.Fatalf("layout styles = %q", got)
+	}
+	if got := strings.Join(about.LayoutScripts, ","); got != "layout.js" {
+		t.Fatalf("layout scripts = %q", got)
 	}
 	nested := routes[1]
 	if got := strings.Join(nested.Layouts, ","); got != "layout.html" {
 		t.Fatalf("nested layouts = %q", got)
 	}
-	if got := strings.Join(nested.Styles, ","); got != "layout.css" {
-		t.Fatalf("nested styles = %q, want the root layout only", got)
+	if got := strings.Join(nested.Styles, ","); got != "" {
+		t.Fatalf("nested styles = %q, want none of its own", got)
+	}
+	if got := strings.Join(nested.LayoutStyles, ","); got != "layout.css" {
+		t.Fatalf("nested layout styles = %q", got)
 	}
 }
 
@@ -1251,18 +1260,20 @@ func TestGeneratedMainDeclaresHTMLPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	routes := []appRoute{{
-		Directory:   "about",
-		Pattern:     "/about",
-		View:        "app/about/page.html",
-		ImportPath:  "example.com/app/about",
-		Alias:       "about",
-		PageGo:      true,
-		HTML:        true,
-		Layouts:     []string{"app/layout.html"},
-		Styles:      []string{"app/layout.css"},
-		Scripts:     []string{"app/about/page.js"},
-		HasLoader:   true,
-		HasMetadata: true,
+		Directory:     "about",
+		Pattern:       "/about",
+		View:          "app/about/page.html",
+		ImportPath:    "example.com/app/about",
+		Alias:         "about",
+		PageGo:        true,
+		HTML:          true,
+		Layouts:       []string{"app/layout.html"},
+		Styles:        []string{"app/about/page.css"},
+		Scripts:       []string{"app/about/page.js"},
+		LayoutStyles:  []string{"app/layout.css"},
+		LayoutScripts: []string{"app/layout.js"},
+		HasLoader:     true,
+		HasMetadata:   true,
 	}}
 	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0, ""); err != nil {
 		t.Fatal(err)
@@ -1272,7 +1283,7 @@ func TestGeneratedMainDeclaresHTMLPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`bifrost.HTML("/about", bifrost.HTMLPage{Page: "app/about/page.html", Layouts: []string{"app/layout.html"}, Styles: []string{"app/layout.css"}, Scripts: []string{"app/about/page.js"}, Load: load0, Metadata: about.Metadata})`,
+		`bifrost.HTML("/about", bifrost.HTMLPage{Page: "app/about/page.html", Layouts: []string{"app/layout.html"}, Styles: []string{"app/about/page.css"}, Scripts: []string{"app/about/page.js"}, LayoutStyles: []string{"app/layout.css"}, LayoutScripts: []string{"app/layout.js"}, Load: load0, Metadata: about.Metadata})`,
 		`Templates: bifrostTemplates,`,
 		`var bifrostTemplates fs.FS = func() fs.FS {`,
 		`"io/fs"`,

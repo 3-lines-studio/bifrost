@@ -55,11 +55,13 @@ type appRoute struct {
 
 	// HTML routes have no React view: a page template, the layout templates
 	// above it, and the styles and scripts they declare.
-	HTML        bool
-	Layouts     []string
-	Styles      []string
-	Scripts     []string
-	HasMetadata bool
+	HTML          bool
+	Layouts       []string
+	Styles        []string
+	Scripts       []string
+	LayoutStyles  []string
+	LayoutScripts []string
+	HasMetadata   bool
 
 	// LayoutDir is the app-relative directory of the deepest layout that ships a
 	// layout.go; LayoutData is the import path of that package once resolved.
@@ -383,6 +385,12 @@ func qualifyTemplates(projectRoot, routeRoot string, routes []appRoute) error {
 		for scriptIndex := range routes[index].Scripts {
 			routes[index].Scripts[scriptIndex] = qualify(routes[index].Scripts[scriptIndex])
 		}
+		for styleIndex := range routes[index].LayoutStyles {
+			routes[index].LayoutStyles[styleIndex] = qualify(routes[index].LayoutStyles[styleIndex])
+		}
+		for scriptIndex := range routes[index].LayoutScripts {
+			routes[index].LayoutScripts[scriptIndex] = qualify(routes[index].LayoutScripts[scriptIndex])
+		}
 	}
 	return nil
 }
@@ -470,8 +478,10 @@ func discoverRoutes(root string) ([]appRoute, error) {
 			route.HTML = true
 			route.Layouts = inheritedViews(root, filepath.ToSlash(relative), "layout.html")
 			route.LayoutDir = layoutDirectoryWithData(root, route.Layouts)
-			route.Styles = append(htmlAssets(root, filepath.ToSlash(relative), "layout", []string{"css"}, true), htmlAssets(root, filepath.ToSlash(relative), "page", []string{"css"}, false)...)
-			route.Scripts = append(htmlAssets(root, filepath.ToSlash(relative), "layout", []string{"js", "ts"}, true), htmlAssets(root, filepath.ToSlash(relative), "page", []string{"js", "ts"}, false)...)
+			route.LayoutStyles = htmlAssets(root, filepath.ToSlash(relative), "layout", []string{"css"}, true)
+			route.LayoutScripts = htmlAssets(root, filepath.ToSlash(relative), "layout", []string{"js", "ts"}, true)
+			route.Styles = htmlAssets(root, filepath.ToSlash(relative), "page", []string{"css"}, false)
+			route.Scripts = htmlAssets(root, filepath.ToSlash(relative), "page", []string{"js", "ts"}, false)
 		}
 		routes = append(routes, route)
 		return nil
@@ -1341,8 +1351,8 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 			if route.HasCache {
 				cache = ".WithCache(" + route.Alias + ".Cache())"
 			}
-			fmt.Fprintf(&declarations, "\t\t\tbifrost.HTML(%s, bifrost.HTMLPage{Page: %s, Layouts: %s, Styles: %s, Scripts: %s, %s%s%s%s})%s,\n",
-				strconv.Quote(route.Pattern), strconv.Quote(route.View), stringSlice(route.Layouts), stringSlice(route.Styles), stringSlice(route.Scripts), load, metadata, layout, params, cache)
+			fmt.Fprintf(&declarations, "\t\t\tbifrost.HTML(%s, bifrost.HTMLPage{Page: %s, Layouts: %s, Styles: %s, Scripts: %s, LayoutStyles: %s, LayoutScripts: %s, %s%s%s%s})%s,\n",
+				strconv.Quote(route.Pattern), strconv.Quote(route.View), stringSlice(route.Layouts), stringSlice(route.Styles), stringSlice(route.Scripts), stringSlice(route.LayoutStyles), stringSlice(route.LayoutScripts), load, metadata, layout, params, cache)
 			continue
 		}
 		hasSegments = hasSegments || slices.ContainsFunc(route.Params, func(param routeParam) bool { return param.Segments })

@@ -62,6 +62,13 @@ type viewPlan struct {
 	ServerFile string
 	Styles     []string
 	Scripts    []string
+
+	// LayoutID names the entry shared by every page with the same chrome: the
+	// chrome ships once, the page ships its own styles and scripts.
+	LayoutID      string
+	LayoutFile    string
+	LayoutStyles  []string
+	LayoutScripts []string
 }
 
 func Describe(ctx context.Context, options Options) (protocol.DescribeResult, error) {
@@ -152,7 +159,7 @@ func Build(ctx context.Context, options Options) error {
 	if options.Development && !options.ExternalDevelopment {
 		buildID = digest(strconv.FormatInt(time.Now().UnixNano(), 10))
 	}
-	plans, routeViews, client, err := planViews(describe, temporary, options.RouteParams)
+	plans, routeViews, client, err := planViews(describe, temporary, options.RouteParams, options.Development)
 	if err != nil {
 		return err
 	}
@@ -437,7 +444,7 @@ func waitForPhase(command *exec.Cmd, grace time.Duration) error {
 	return <-done
 }
 
-func planViews(describe protocol.DescribeResult, output string, routeParams map[string][]string) ([]viewPlan, map[string]string, []clientRoute, error) {
+func planViews(describe protocol.DescribeResult, output string, routeParams map[string][]string, development bool) ([]viewPlan, map[string]string, []clientRoute, error) {
 	byKey := make(map[string]viewPlan)
 	routeViews := make(map[string]string, len(describe.Spec.Routes))
 	navigationViews := make(map[string]string, len(describe.Spec.Routes))
@@ -466,6 +473,21 @@ func planViews(describe protocol.DescribeResult, output string, routeParams map[
 		if mode == "html" {
 			plan.Styles = route.Styles
 			plan.Scripts = route.Scripts
+			plan.LayoutStyles = route.LayoutStyles
+			plan.LayoutScripts = route.LayoutScripts
+			if development {
+				// One module graph serves every page while developing, so the
+				// split buys nothing there: one entry per page keeps a template
+				// and a stylesheet on the same refresh path.
+				plan.Styles = append(slices.Clone(plan.LayoutStyles), plan.Styles...)
+				plan.Scripts = append(slices.Clone(plan.LayoutScripts), plan.Scripts...)
+				plan.LayoutStyles, plan.LayoutScripts = nil, nil
+			}
+			if len(plan.LayoutStyles) > 0 || len(plan.LayoutScripts) > 0 {
+				layoutKey := "layout\x00" + strings.Join(plan.LayoutStyles, "\x00") + "\x00" + strings.Join(plan.LayoutScripts, "\x00")
+				plan.LayoutID = digest(layoutKey)
+				plan.LayoutFile = filepath.Join(output, "entries", plan.LayoutID+"-layout.tsx")
+			}
 		}
 		byKey[id] = plan
 		routeViews[route.Pattern] = id
@@ -487,15 +509,13 @@ func writeEntries(sourceRoot, output string, plans []viewPlan, routes []clientRo
 	}
 	for _, plan := range plans {
 		if plan.Mode == "html" {
-			var client strings.Builder
-			for _, style := range plan.Styles {
-				fmt.Fprintf(&client, "import %s;\n", strconv.Quote(filepath.ToSlash(filepath.Join(sourceRoot, filepath.FromSlash(style)))))
-			}
-			for _, script := range plan.Scripts {
-				fmt.Fprintf(&client, "import %s;\n", strconv.Quote(filepath.ToSlash(filepath.Join(sourceRoot, filepath.FromSlash(script)))))
-			}
-			if err := writePlanFile(plan.ClientFile, client.String()); err != nil {
+			if err := writeAssetEntry(sourceRoot, plan.ClientFile, plan.Styles, plan.Scripts); err != nil {
 				return err
+			}
+			if plan.LayoutFile != "" {
+				if err := writeAssetEntry(sourceRoot, plan.LayoutFile, plan.LayoutStyles, plan.LayoutScripts); err != nil {
+					return err
+				}
 			}
 			continue
 		}
@@ -527,6 +547,19 @@ func writeEntries(sourceRoot, output string, plans []viewPlan, routes []clientRo
 		}
 	}
 	return nil
+}
+
+// writeAssetEntry writes an entry that imports the styles and scripts of one
+// HTML view: the build bundles them, and the document links the result.
+func writeAssetEntry(sourceRoot, destination string, styles, scripts []string) error {
+	var entry strings.Builder
+	for _, style := range styles {
+		fmt.Fprintf(&entry, "import %s;\n", strconv.Quote(filepath.ToSlash(filepath.Join(sourceRoot, filepath.FromSlash(style)))))
+	}
+	for _, script := range scripts {
+		fmt.Fprintf(&entry, "import %s;\n", strconv.Quote(filepath.ToSlash(filepath.Join(sourceRoot, filepath.FromSlash(script)))))
+	}
+	return writePlanFile(destination, entry.String())
 }
 
 // writePlanFile writes one generated entry. A file that did not change keeps its
@@ -614,6 +647,9 @@ func buildFrontend(ctx context.Context, describe protocol.DescribeResult, output
 	serverEntries := make(map[string]string)
 	for _, plan := range plans {
 		clientEntries[plan.ID+"-client"] = filepath.ToSlash(plan.ClientFile)
+		if plan.LayoutFile != "" {
+			clientEntries[plan.LayoutID+"-layout"] = filepath.ToSlash(plan.LayoutFile)
+		}
 		if !development && plan.ServerFile != "" {
 			serverEntries[plan.ID+"-server"] = filepath.ToSlash(plan.ServerFile)
 		}
@@ -717,6 +753,29 @@ func collectExternalDevelopmentViews(output string, plans []viewPlan) ([]protoco
 	return views, files, nil
 }
 
+// collectLayoutAssets reads the chrome entry of an HTML page from the build. The
+// entry is keyed by its files alone, so two pages under one layout share it.
+func collectLayoutAssets(output string, plan viewPlan, clientManifest viteManifest) (*protocol.AssetSet, error) {
+	key, record, err := viteEntry(clientManifest, plan.LayoutID+"-layout")
+	if err != nil {
+		return nil, err
+	}
+	_, stylePaths := viteClientDependencies(clientManifest, key)
+	styles, err := refsForRelativePaths(output, filepath.Join(output, "dist"), stylePaths)
+	if err != nil {
+		return nil, err
+	}
+	assets := &protocol.AssetSet{Styles: styles}
+	if len(plan.LayoutScripts) > 0 {
+		entry, err := fileRef(output, filepath.Join(output, "dist", filepath.FromSlash(record.File)))
+		if err != nil {
+			return nil, err
+		}
+		assets.Entry = entry
+	}
+	return assets, nil
+}
+
 func collectBuiltViews(output string, plans []viewPlan, development bool) ([]protocol.BuiltView, []protocol.FileRef, error) {
 	clientManifestPath := filepath.Join(output, "dist", "client-manifest.json")
 	clientManifest, err := readViteManifest(clientManifestPath)
@@ -770,6 +829,13 @@ func collectBuiltViews(output string, plans []viewPlan, development bool) ([]pro
 			Source: plan.Source,
 			Mode:   plan.Mode,
 			Client: protocol.AssetSet{Entry: clientEntry, Imports: imports, Styles: styles},
+		}
+		if plan.LayoutID != "" {
+			layout, err := collectLayoutAssets(output, plan, clientManifest)
+			if err != nil {
+				return nil, nil, err
+			}
+			view.Layout = layout
 		}
 		if !development && plan.ServerFile != "" {
 			_, serverRecord, err := viteEntry(serverManifest, plan.ID+"-server")

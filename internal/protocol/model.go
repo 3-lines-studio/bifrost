@@ -17,6 +17,10 @@ type RouteSpec struct {
 	Layouts    []string `json:"layouts,omitempty"`
 	Styles     []string `json:"styles,omitempty"`
 	Scripts    []string `json:"scripts,omitempty"`
+	// LayoutStyles and LayoutScripts belong to the chrome: the build emits them
+	// as their own assets so a page does not re-download them.
+	LayoutStyles  []string `json:"layoutStyles,omitempty"`
+	LayoutScripts []string `json:"layoutScripts,omitempty"`
 }
 
 type DescribeResult struct {
@@ -77,10 +81,14 @@ type Toolchain struct {
 }
 
 type BuiltView struct {
-	ID     string        `json:"id"`
-	Source string        `json:"source"`
-	Mode   string        `json:"mode"`
-	Client AssetSet      `json:"client"`
+	ID     string   `json:"id"`
+	Source string   `json:"source"`
+	Mode   string   `json:"mode"`
+	Client AssetSet `json:"client"`
+	// Layout is the asset set of the chrome, shared by every HTML page that
+	// nests under the same layout: it is cached once for the whole site and the
+	// page only ships what is its own.
+	Layout *AssetSet     `json:"layout,omitempty"`
 	Server *ServerAssets `json:"server,omitempty"`
 }
 

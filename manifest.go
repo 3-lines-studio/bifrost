@@ -104,6 +104,13 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 			}
 		}
 		clientRefs := slices.Clone(view.Client.Styles)
+		if view.Layout != nil {
+			clientRefs = append(clientRefs, view.Layout.Styles...)
+			clientRefs = append(clientRefs, view.Layout.Imports...)
+			if view.Layout.Entry.Path != "" {
+				clientRefs = append(clientRefs, view.Layout.Entry)
+			}
+		}
 		clientRefs = append(clientRefs, view.Client.Imports...)
 		if view.Client.Entry.Path != "" {
 			clientRefs = append(clientRefs, view.Client.Entry)
@@ -260,6 +267,21 @@ func validateBuiltView(view protocol.BuiltView) error {
 			return err
 		}
 	}
+	if view.Layout != nil {
+		if view.Mode != "html" {
+			return errors.New("only an html view may carry a layout asset set")
+		}
+		layoutRefs := slices.Clone(view.Layout.Styles)
+		layoutRefs = append(layoutRefs, view.Layout.Imports...)
+		if view.Layout.Entry.Path != "" {
+			layoutRefs = append(layoutRefs, view.Layout.Entry)
+		}
+		for _, file := range layoutRefs {
+			if err := validateFileRef(file); err != nil {
+				return fmt.Errorf("invalid layout asset: %w", err)
+			}
+		}
+	}
 	if view.Server != nil {
 		if err := validateFileRef(view.Server.Entry); err != nil {
 			return fmt.Errorf("invalid server entry: %w", err)
@@ -383,9 +405,18 @@ func viewFiles(view protocol.BuiltView) []protocol.FileRef {
 		serverFiles = 1 + len(view.Server.Imports)
 	}
 	files := make([]protocol.FileRef, 0, 1+len(view.Client.Styles)+len(view.Client.Imports)+serverFiles)
-	files = append(files, view.Client.Entry)
+	if view.Client.Entry.Path != "" {
+		files = append(files, view.Client.Entry)
+	}
 	files = append(files, view.Client.Styles...)
 	files = append(files, view.Client.Imports...)
+	if view.Layout != nil {
+		if view.Layout.Entry.Path != "" {
+			files = append(files, view.Layout.Entry)
+		}
+		files = append(files, view.Layout.Styles...)
+		files = append(files, view.Layout.Imports...)
+	}
 	if view.Server != nil {
 		files = append(files, view.Server.Entry)
 		files = append(files, view.Server.Imports...)

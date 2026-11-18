@@ -354,6 +354,8 @@ func makeBuildSpec(routes []Route) (protocol.Spec, string, error) {
 		spec.Routes[i].Layouts = route.html.Layouts
 		spec.Routes[i].Styles = route.html.Styles
 		spec.Routes[i].Scripts = route.html.Scripts
+		spec.Routes[i].LayoutStyles = route.html.LayoutStyles
+		spec.Routes[i].LayoutScripts = route.html.LayoutScripts
 	}
 
 	slices.SortFunc(spec.Routes, func(a, b protocol.RouteSpec) int {

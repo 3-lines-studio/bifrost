@@ -27,6 +27,7 @@ type htmlPageHandler struct {
 	page         HTMLPage
 	templates    fs.FS
 	assets       protocol.AssetSet
+	layoutAssets protocol.AssetSet
 	development  bool
 	hooks        registeredHooks
 	limits       Limits
@@ -256,6 +257,13 @@ func (h *htmlPageHandler) writeDocument(w io.Writer, document Document, head, bo
 	var out strings.Builder
 	out.WriteString(dochtml.Open(protocol.DocumentAttributes{Lang: document.Lang, Class: document.Class, Dir: document.Dir}))
 	out.Write(head)
+	// The chrome first: its styles are the ones a page refines, and its script is
+	// the theme switch a page never replaces.
+	for _, style := range h.layoutAssets.Styles {
+		out.WriteString(`<link rel="stylesheet" href="`)
+		out.WriteString(html.EscapeString(dochtml.FrontendAssetURL(style.Path)))
+		out.WriteString(`">`)
+	}
 	for _, style := range h.assets.Styles {
 		out.WriteString(`<link rel="stylesheet" href="`)
 		out.WriteString(html.EscapeString(dochtml.FrontendAssetURL(style.Path)))
@@ -263,6 +271,11 @@ func (h *htmlPageHandler) writeDocument(w io.Writer, document Document, head, bo
 	}
 	out.WriteString(`</head><body>`)
 	out.Write(body)
+	if entry := h.layoutAssets.Entry.Path; entry != "" {
+		out.WriteString(`<script type="module" src="`)
+		out.WriteString(html.EscapeString(dochtml.FrontendAssetURL(entry)))
+		out.WriteString(`"></script>`)
+	}
 	if entry := h.assets.Entry.Path; entry != "" {
 		out.WriteString(`<script type="module" src="`)
 		out.WriteString(html.EscapeString(dochtml.FrontendAssetURL(entry)))

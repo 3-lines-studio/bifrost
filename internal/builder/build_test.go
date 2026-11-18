@@ -16,7 +16,7 @@ func TestPlanViewsDeduplicatesSharedViews(t *testing.T) {
 		{Pattern: "/b", View: "pages/shared.tsx", Kind: "static"},
 		{Pattern: "/client", View: "pages/shared.tsx", Kind: "client"},
 	}}}
-	plans, routes, _, err := planViews(describe, t.TempDir(), nil)
+	plans, routes, _, err := planViews(describe, t.TempDir(), nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,5 +283,48 @@ func TestWriteRuntimeScript(t *testing.T) {
 	}
 	if string(data) != renderproc.RuntimeSource {
 		t.Fatal("script does not match the runtime source")
+	}
+}
+
+func TestHTMLPlanSplitsLayoutAssets(t *testing.T) {
+	output := t.TempDir()
+	describe := protocol.DescribeResult{
+		Spec: protocol.Spec{Routes: []protocol.RouteSpec{{
+			Pattern:       "/about",
+			View:          "app/about/page.html",
+			Kind:          "html",
+			Styles:        []string{"app/about/page.css"},
+			Scripts:       []string{"app/about/page.js"},
+			LayoutStyles:  []string{"app/layout.css"},
+			LayoutScripts: []string{"app/layout.js"},
+		}}},
+	}
+	plans, _, _, err := planViews(describe, output, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans = %d", len(plans))
+	}
+	plan := plans[0]
+	if plan.LayoutID == "" || plan.LayoutFile == "" {
+		t.Fatalf("layout entry missing: %+v", plan)
+	}
+	if got := strings.Join(plan.Styles, ","); got != "app/about/page.css" {
+		t.Fatalf("page styles = %q", got)
+	}
+	if got := strings.Join(plan.LayoutStyles, ","); got != "app/layout.css" {
+		t.Fatalf("layout styles = %q", got)
+	}
+
+	development, _, _, err := planViews(describe, output, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if development[0].LayoutID != "" {
+		t.Fatal("development must keep one entry per page")
+	}
+	if got := strings.Join(development[0].Styles, ","); got != "app/layout.css,app/about/page.css" {
+		t.Fatalf("development styles = %q", got)
 	}
 }

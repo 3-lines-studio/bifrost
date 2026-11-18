@@ -16,6 +16,12 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
   layout reads `bifrost.Frame`. The build copies the templates into the binary,
   and `bifrost dev` reads them from the tree so an edit lands on the next
   request.
+- The chrome and the page ship their own assets. `layout.css`/`layout.js` are
+  built once per layout and linked first, so every page below it shares one
+  cached file; `page.css`/`page.js` carry only what that page brings. A page of
+  picsel went from 29.5 KB of compressed CSS for the whole site to 5.5 KB: 4.5 KB
+  of chrome, cached, and 0.95 KB of its own. Development keeps one entry per
+  page, because one module graph serves every page there.
 
 - A `commands` package in the module root turns the app binary into a
   multi-command one: `./app migrate` runs the command and exits before the app

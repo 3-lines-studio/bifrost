@@ -203,7 +203,7 @@ app/about/page.go        # Load and Metadata of the page
 - `page.html` needs `page.go` in the same directory: its data comes from Go.
 - `page.go` exports `Load` (the data the page template reads), `Metadata` (the head of that page), and `Cache`.
 - `layout.html` wraps every HTML page below it, outermost first. `layout.go` exports `Data` (the value every layout reads as `Frame.Data`), `Metadata` (the head every page shares), and only needs to exist next to the template it feeds.
-- `layout.css`, `layout.js`, `page.css`, and `page.js` are the styles and scripts of the page: Bifrost bundles them, and the document links the result. A page with no script ships styles only.
+- `layout.css` and `layout.js` belong to the chrome and `page.css` and `page.js` to one page. Bifrost builds them as separate assets: the document links the layout first, so the chrome is cached once for the whole site and a page downloads only what is its own. A page with no script ships styles only, and a page with no styles of its own ships the chrome alone.
 - A page template reads its loaded value directly (`.Title`); a layout reads `Frame` (`.Data`, `.Children`, `.Path`, `.Query`, `.Params`).
 - `page.go` and `layout.go` may not be mixed with `page.tsx` in the same directory: one directory, one kind of page.
 

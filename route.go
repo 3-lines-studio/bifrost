@@ -163,11 +163,17 @@ type HTMLPage struct {
 	// request and exposed to every template as Frame.Params.
 	Params []string
 
-	// Styles and Scripts are the files the browser needs on this page, relative
-	// to the source root. They are build inputs: the build bundles them and the
-	// served document links the result.
+	// Styles and Scripts are the files this page needs, relative to the source
+	// root. They are build inputs: the build bundles them and the document links
+	// the result.
 	Styles  []string
 	Scripts []string
+
+	// LayoutStyles and LayoutScripts belong to the chrome. The build emits them
+	// as their own assets, shared by every page under the same layout, so a page
+	// ships only what is its own and the browser caches the rest once.
+	LayoutStyles  []string
+	LayoutScripts []string
 }
 
 // MetadataFunc builds the head of one HTML document.

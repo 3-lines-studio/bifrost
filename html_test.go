@@ -123,6 +123,50 @@ func TestHTMLPageWrapsLayoutsAndLoads(t *testing.T) {
 	}
 }
 
+func TestHTMLPageLinksLayoutAssetsFirst(t *testing.T) {
+	templates := fstest.MapFS{aboutTemplates: {Data: []byte(`<p>page</p>`)}}
+	app := newHTMLApp(t, templates, HTML("/about", HTMLPage{Page: aboutTemplates}))
+	app.templates = templates
+	files, manifest := htmlManifest(t, app)
+	layoutStyle := addFixtureFile(files, "dist/chrome.css", "nav{}")
+	layoutScript := addFixtureFile(files, "dist/chrome.js", "theme()")
+	manifest.Views[0].Layout = &protocol.AssetSet{Entry: layoutScript, Styles: []protocol.FileRef{layoutStyle}}
+	manifest.ClientFiles = append(manifest.ClientFiles, layoutStyle, layoutScript)
+
+	compiled, err := validateManifest(files, app.spec, app.specHash, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := compileRuntime(app, files, compiled, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	state.handlers["/about"].ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/about", nil))
+
+	body := recorder.Body.String()
+	chromeStyle := strings.Index(body, "chrome.css")
+	pageStyle := strings.Index(body, "layout.css")
+	chromeScript := strings.Index(body, "chrome.js")
+	if chromeStyle < 0 || pageStyle < 0 || chromeScript < 0 {
+		t.Fatalf("layout assets missing:\n%s", body)
+	}
+	if chromeStyle > pageStyle {
+		t.Fatalf("the chrome must come first:\n%s", body)
+	}
+	if !strings.Contains(body, `<script type="module" src="/_bifrost/dist/chrome.js"></script>`) {
+		t.Fatalf("layout script missing:\n%s", body)
+	}
+}
+
+func TestManifestRejectsLayoutAssetsOutsideHTML(t *testing.T) {
+	files, app, manifest := validManifestFixture(t)
+	manifest.Views[0].Layout = &protocol.AssetSet{Styles: manifest.Views[0].Client.Styles}
+	if _, err := validateManifest(files, app.spec, app.specHash, manifest); err == nil {
+		t.Fatal("a server view accepted a layout asset set")
+	}
+}
+
 func TestHTMLPageMetadataIsEscaped(t *testing.T) {
 	templates := fstest.MapFS{aboutTemplates: {Data: []byte(`<p>page</p>`)}}
 	page := HTMLPage{

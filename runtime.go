@@ -196,11 +196,16 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 			if app.templates == nil {
 				return nil, fmt.Errorf("bifrost: html route %q needs Config.Templates", pattern)
 			}
+			layoutAssets := protocol.AssetSet{}
+			if view.Layout != nil {
+				layoutAssets = *view.Layout
+			}
 			handler = &htmlPageHandler{
 				pattern:      pattern,
 				page:         *declaration.html,
 				templates:    app.templates,
 				assets:       clientAssets,
+				layoutAssets: layoutAssets,
 				development:  devDir != "",
 				hooks:        app.hooks,
 				limits:       app.limits,
