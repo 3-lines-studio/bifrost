@@ -23,13 +23,17 @@ const (
 
 // Options configures a snapshot. Width and Height are the viewport the view
 // lays out in, in DIPs; zero uses a mobile viewport, as crawlers read.
-// Links maps an accessible name to the URL it opens, for the links a view
-// draws with ui.Link: Link records its own, and a recorded one wins. A link
-// with neither renders as its text.
+// Locale is the language the view shows, as "es-AR", which its messages and
+// its text take; empty is the one MyGo draws without. Direction lays the view
+// out from the right when it is ui.RightToLeft. Links maps an accessible name
+// to the URL it opens, for the links a view draws with ui.Link: Link records
+// its own, and a recorded one wins. A link with neither renders as its text.
 type Options struct {
-	Width  int
-	Height int
-	Links  map[string]string
+	Width     int
+	Height    int
+	Locale    string
+	Direction ui.Direction
+	Links     map[string]string
 }
 
 // Body renders view and returns the HTML of its content inside a main element,
@@ -54,7 +58,14 @@ func Body(view func(*ui.Context), options Options) []byte {
 	renderMu.Lock()
 	recorded := map[string]string{}
 	recording = recorded
-	elements := ui.NewTester(view, width, height).AccessAll()
+	tester := ui.NewTester(view, width, height)
+	if options.Locale != "" {
+		tester.SetLocale(options.Locale)
+	}
+	if options.Direction == ui.RightToLeft {
+		tester.SetDirection(ui.RightToLeft)
+	}
+	elements := tester.AccessAll()
 	recording = nil
 	renderMu.Unlock()
 	links := mergeLinks(options.Links, recorded)

@@ -4,7 +4,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 
+	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -122,5 +124,26 @@ func TestRecordNeedsARender(t *testing.T) {
 	record("Pricing", "/pricing")
 	if recording != nil {
 		t.Fatal("a link outside a render was recorded")
+	}
+}
+
+func TestBodyInTheLanguageOfTheRequest(t *testing.T) {
+	view := func(c *ui.Context) {
+		catalog, err := i18n.NewCatalog(fstest.MapFS{
+			"es.json": &fstest.MapFile{Data: []byte(`{"greeting":"Hola"}`)},
+			"en.json": &fstest.MapFile{Data: []byte(`{"greeting":"Hello"}`)},
+		}, "es")
+		if err != nil {
+			panic(err)
+		}
+		ui.Text(c, catalog.Format(c.Locale(), "greeting", nil)).Role(ui.RoleHeading).Level(1)
+	}
+	body := Body(view, Options{Locale: "es"})
+	if !strings.Contains(string(body), "Hola") {
+		t.Fatalf("spanish body %q", body)
+	}
+	body = Body(view, Options{Locale: "en"})
+	if !strings.Contains(string(body), "Hello") {
+		t.Fatalf("english body %q", body)
 	}
 }

@@ -70,18 +70,7 @@ func accept(filters []mygo.FileFilter) string {
 			values = append(values, value)
 		}
 	}
-	return joinComma(values)
-}
-
-func joinComma(values []string) string {
-	out := ""
-	for _, value := range values {
-		if out != "" {
-			out += ","
-		}
-		out += value
-	}
-	return out
+	return strings.Join(values, ",")
 }
 
 // browserExtension turns an extension of a filter, as ".jpg", "jpg" or

@@ -220,6 +220,42 @@ notes.OnChange(func(int) { win.Update(screen.refresh) })
 loads it now, `Set` and `Update` write a value the app knows, and `Forget`
 drops one. A failure stays until the app asks again.
 
+## Signing people in
+
+`auth.Flow` builds the authorization code flow of OAuth 2.0 with PKCE: `Start`
+returns the page to open and the secrets that check the answer, and `Verify`
+the code. `auth.Open` opens the browser of the system. In a window,
+`auth.Listen` waits for the browser to come back on the loopback address; in a
+browser the provider redirects to the app's server, which sets the session
+cookie, and nothing listens there.
+
+```go
+flow := auth.Flow{AuthorizeURL: ..., ClientID: ..., RedirectURI: callback.URL(), Scopes: []string{"openid"}}
+request, err := flow.Start()
+auth.Open(request.URL)
+answer, err := callback.Wait(ctx)
+code, err := flow.Verify(answer, request)
+```
+
+The same pair opens what a payment needs: `auth.Open(gateway.URL)` sends the
+person to the checkout page of the provider, and `mygo.App.OnOpenURL` gets them
+back when the provider redirects to the scheme the app registered, as
+`picsel://paid/...` in `urlSchemes` of `mygo.config.ts`. An app waits for the
+order by polling the state of it in `data.Cache`, not by blocking the screen.
+
+## Codes and files
+
+`qr.Encode` makes a QR code of a text, `qr.Element` draws it in a view, and
+`Code.PNG` and `Code.SVG` write it for a page or an email. It carries no
+dependency, and the codes it makes read back in `zbar` at every level, from
+version 1 to 36.
+
+`web.Static` serves a directory of files, as the favicons, the manifest and the
+pictures of a page, with the cache header a deploy wants.
+
+`seo.Options.Locale` renders a page in the language of the request, as its
+messages and its text take it, so one page serves `es`, `en` and `pt-BR` with
+the words of each.
 
 ## Limits
 
@@ -245,12 +281,17 @@ drops one. A failure stays until the app asks again.
 - Server code in a page package (`Load` with `net/http`) is linked into the
   wasm: the linker drops what nothing calls, but `net/http` keeps about 1.6 MB
   of its own. `client` keeps it out of the app.
-- `file.Pick`, `File.Head` and `file.Save` wait for the person and for the
+- `file.Pick`, `File.Head` and `auth.Listen` wait for the person and for the
   browser: call them from a goroutine. On the goroutine that draws, a browser
   answers `file.ErrUIThread`, which is `client.ErrUIThread`.
 - In a browser a download is the browser's: `file.Save` hands it the URL, so
   the URL must authorize itself, as a signed one does, or ride the cookies of
   the page. Progress is a window's.
+- `auth.Listen` is a window's: a browser signs in through the server that
+  answers the redirect.
+- A QR code chooses its mask by the score of the specification, and correct
+  encoders differ in how they break a tie, as `python-qrcode` and `qrencode` do.
+  Encode a code once and draw the `Code`: `Element` converts its bitmap once.
 
 ## Size
 
