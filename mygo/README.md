@@ -283,8 +283,14 @@ the words of each.
 - Assistive technology in browsers still does not see MyGo's canvas. This adds
   no accessibility to the app, only text for crawlers.
 - Server code in a page package (`Load` with `net/http`) is linked into the
-  wasm: the linker drops what nothing calls, but `net/http` keeps about 1.6 MB
-  of its own. `client` keeps it out of the app.
+  wasm: the build compiles the package, and the linker only drops what nothing
+  calls, so a loader in `page.go` carries the database into the browser. Put it
+  in a file tagged `//go:build !js`, and tag every other file of a package the
+  app draws: the route root holds `layout.go` beside its `page.go` and, in a
+  site that grew from pages, beside a loader or a `server.go` of its own.
+- The paths the app does not draw are the site's: a link that leaves the
+  screens, as `/` from a screen, navigates the tab to the server, which answers
+  the React page or the page of `not-found.go`.
 - `file.Pick`, `File.Head` and `auth.Listen` wait for the person and for the
   browser: call them from a goroutine. On the goroutine that draws, a browser
   answers `file.ErrUIThread`, which is `client.ErrUIThread`.
