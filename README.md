@@ -82,7 +82,7 @@ mux.Handle("/", apiRouter)
 handler := sharedMiddleware(app.ResolveMarkdown(mux))
 ```
 
-`ResolveMarkdown` serves server-rendered routes as Markdown for a `.md` path suffix or a preferred `Accept: text/markdown` media type. It leaves static pages, client pages, public files, and other mux handlers unchanged. `Handler` applies it automatically, and so do generated App Router apps.
+`ResolveMarkdown` serves server-rendered routes and HTML pages as Markdown for a `.md` path suffix or a preferred `Accept: text/markdown` media type. The answer keeps the status the loader chose, so a page that answers 404 keeps answering 404. It leaves static pages, client pages, public files, and other mux handlers unchanged. `Handler` applies it automatically, and so do generated App Router apps.
 
 Use `/{$}` for an exact root page; the standard `/` pattern is a subtree fallback. Bifrost does not add router-specific adapters.
 
@@ -216,6 +216,8 @@ app/about/page.go        # Load and Metadata of the page
 - `page.go` and `layout.go` may not be mixed with `page.tsx` in the same directory: one directory, one kind of page.
 
 `Load` returns any value, so a page template is typed by the struct the loader returns, and `Metadata` returns `bifrost.Metadata{Title, Description, Keywords, Robots, Canonical, Image, ImageAlt, Type, Locale, Head}`. A page field that is empty keeps the layout's, and both `Head` fragments are kept, the layout's first, so JSON-LD and preloads live next to the chrome that needs them.
+
+A page answers Markdown like any other rendered route: `Accept: text/markdown` or an `/about.md` path returns the page the templates rendered, chrome included, converted to Markdown. Only the body travels; the head of the document is metadata, not content.
 
 Templates are read from the tree while `bifrost dev` runs, so editing `page.html` shows up on the next request; `bifrost build` copies them into the output the binary embeds.
 

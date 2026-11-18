@@ -174,7 +174,7 @@ func TestSubtreePattern(t *testing.T) {
 }
 
 func TestResolveMarkdownPreservesEscapedPathAndQuery(t *testing.T) {
-	app := &App{runtime: &runtimeState{serverPatterns: map[string]struct{}{"GET /files/{name}": {}}}}
+	app := &App{runtime: &runtimeState{markdownPatterns: map[string]struct{}{"GET /files/{name}": {}}}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /files/{name}", func(w http.ResponseWriter, request *http.Request) {
 		_, _ = w.Write([]byte(request.URL.EscapedPath() + " " + request.RequestURI + " " + request.PathValue("name")))
@@ -260,5 +260,25 @@ func TestServerHandlerServesErrorWhenMarkdownRenderFails(t *testing.T) {
 
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d body:\n%s", response.Code, response.Body.String())
+	}
+}
+
+func TestMarkdownRenderSinkWritesTheLoaderStatus(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	sink := &markdownRenderSink{writer: recorder, status: http.StatusNotFound, limits: Limits{MaxHeadBytes: 1 << 12, MaxFrameBytes: 1 << 16, MaxMarkdownBytes: 1 << 16}}
+	if err := sink.Head(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Body([]byte(`<h1>No está</h1>`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "# No está") {
+		t.Fatalf("body is not markdown:\n%s", recorder.Body.String())
 	}
 }

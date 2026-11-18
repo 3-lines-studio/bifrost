@@ -71,6 +71,13 @@ func (h *htmlPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 		return
 	}
 
+	if markdownRequested(request.Context()) {
+		if err := serveMarkdown(w, body, status, h.limits); err != nil {
+			h.serveError(w, request, err)
+		}
+		return
+	}
+
 	var out bytes.Buffer
 	h.writeDocument(&out, document, head, body)
 	h.writeResponse(w, out.Bytes(), status)

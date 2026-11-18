@@ -24,8 +24,8 @@ func markdownRequested(ctx context.Context) bool {
 func (a *App) ResolveMarkdown(mux *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		_, pattern := mux.Handler(request)
-		_, serverRoute := a.runtime.serverPatterns[pattern]
-		if acceptsMarkdown(request.Header.Get("Accept")) && serverRoute {
+		_, markdownRoute := a.runtime.markdownPatterns[pattern]
+		if acceptsMarkdown(request.Header.Get("Accept")) && markdownRoute {
 			mux.ServeHTTP(w, withMarkdown(request))
 			return
 		}
@@ -36,7 +36,7 @@ func (a *App) ResolveMarkdown(mux *http.ServeMux) http.Handler {
 			mux.ServeHTTP(w, request)
 			return
 		}
-		if pattern != "" && !serverRoute && !subtreePattern(pattern) {
+		if pattern != "" && !markdownRoute && !subtreePattern(pattern) {
 			mux.ServeHTTP(w, request)
 			return
 		}
@@ -48,7 +48,8 @@ func (a *App) ResolveMarkdown(mux *http.ServeMux) http.Handler {
 		}
 		rewritten.RequestURI = rewritten.URL.RequestURI()
 		_, pattern = mux.Handler(rewritten)
-		if _, exists := a.runtime.serverPatterns[pattern]; !exists {
+		_, markdownRoute = a.runtime.markdownPatterns[pattern]
+		if !markdownRoute {
 			mux.ServeHTTP(w, request)
 			return
 		}
@@ -113,6 +114,7 @@ func acceptsMarkdown(header string) bool {
 type markdownRenderSink struct {
 	writer  http.ResponseWriter
 	body    bytes.Buffer
+	status  int
 	hasHead bool
 	started bool
 	limits  Limits
@@ -155,14 +157,26 @@ func (s *markdownRenderSink) finish() error {
 	if s.started {
 		return errors.New("bifrost: renderer completed more than once")
 	}
-	markdown, err := htmltomarkdown.ConvertString(s.body.String())
+	s.started = true
+	return serveMarkdown(s.writer, s.body.Bytes(), s.status, s.limits)
+}
+
+// serveMarkdown converts a rendered document to Markdown and writes it. Server
+// routes hand it the fragments they streamed; HTML pages hand it the page the
+// templates rendered. The status is the one the loader chose, so a page that
+// answers 404 keeps answering 404 in Markdown.
+func serveMarkdown(w http.ResponseWriter, fragment []byte, status int, limits Limits) error {
+	if len(fragment) > limits.MaxMarkdownBytes {
+		return fmt.Errorf("markdown body exceeds %d bytes", limits.MaxMarkdownBytes)
+	}
+	markdown, err := htmltomarkdown.ConvertString(string(fragment))
 	if err != nil {
 		return fmt.Errorf("bifrost: convert page to markdown: %w", err)
 	}
-	s.started = true
-	s.writer.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-	s.writer.Header().Set("Cache-Control", "no-store")
-	s.writer.WriteHeader(http.StatusOK)
-	_, err = io.WriteString(s.writer, markdown)
+	header := w.Header()
+	header.Set("Content-Type", "text/markdown; charset=utf-8")
+	header.Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_, err = io.WriteString(w, markdown)
 	return err
 }

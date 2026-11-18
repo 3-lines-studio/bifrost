@@ -299,3 +299,94 @@ func TestHTMLPageLoadErrorIsServerError(t *testing.T) {
 		t.Fatalf("status = %d, want 500", recorder.Code)
 	}
 }
+
+func markdownHTMLFixture(t *testing.T) *App {
+	t.Helper()
+	templates := fstest.MapFS{
+		"app/layout.html": {Data: []byte(`<html><body><nav><a href="/">picsel</a></nav>{{.Children}}<footer>hecho en argentina</footer></body></html>`)},
+		aboutTemplates:    {Data: []byte(`<h1>{{.Title}}</h1>{{range .Lines}}<p>{{.}}</p>{{end}}`)},
+	}
+	page := HTMLPage{
+		Page:    aboutTemplates,
+		Layouts: []string{"app/layout.html"},
+		Load: func(*http.Request) (any, error) {
+			return aboutData{Title: "Sobre picsel", Lines: []string{"Fotos de eventos"}}, nil
+		},
+	}
+	app := newHTMLApp(t, templates, HTML("/about", page))
+	app.runtime = htmlHandler(t, app, templates)
+	return app
+}
+
+func TestHTMLPageAnswersMarkdown(t *testing.T) {
+	app := markdownHTMLFixture(t)
+
+	request := httptest.NewRequest(http.MethodGet, "/about", nil)
+	request.Header.Set("Accept", "text/markdown")
+	recorder := httptest.NewRecorder()
+	app.Handler().ServeHTTP(recorder, request)
+
+	if got, want := recorder.Header().Get("Content-Type"), "text/markdown; charset=utf-8"; got != want {
+		t.Fatalf("content type = %q, want %q", got, want)
+	}
+	body := recorder.Body.String()
+	for _, want := range []string{"# Sobre picsel", "Fotos de eventos", "[picsel](/)", "hecho en argentina"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("markdown lacks %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "<h1>") || strings.Contains(body, "<footer>") {
+		t.Fatalf("markdown still carries markup:\n%s", body)
+	}
+}
+
+func TestHTMLPageAnswersMarkdownSuffix(t *testing.T) {
+	app := markdownHTMLFixture(t)
+
+	recorder := httptest.NewRecorder()
+	app.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/about.md", nil))
+
+	if got, want := recorder.Header().Get("Content-Type"), "text/markdown; charset=utf-8"; got != want {
+		t.Fatalf("content type = %q, want %q", got, want)
+	}
+	if !strings.Contains(recorder.Body.String(), "# Sobre picsel") {
+		t.Fatalf("body is not markdown:\n%s", recorder.Body.String())
+	}
+}
+
+func TestHTMLPageMarkdownKeepsStatus(t *testing.T) {
+	templates := fstest.MapFS{aboutTemplates: {Data: []byte(`<h1>{{.Title}}</h1>`)}}
+	app := newHTMLApp(t, templates, HTML("/about", HTMLPage{
+		Page: aboutTemplates,
+		Load: func(*http.Request) (any, error) {
+			return PageData{Status: http.StatusNotFound, Props: aboutData{Title: "No está"}}, nil
+		},
+	}))
+	app.runtime = htmlHandler(t, app, templates)
+
+	request := httptest.NewRequest(http.MethodGet, "/about", nil)
+	request.Header.Set("Accept", "text/markdown")
+	recorder := httptest.NewRecorder()
+	app.Handler().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "# No está") {
+		t.Fatalf("body is not markdown:\n%s", recorder.Body.String())
+	}
+}
+
+func TestHTMLPageServesHTMLWithoutMarkdownRequest(t *testing.T) {
+	app := markdownHTMLFixture(t)
+
+	recorder := httptest.NewRecorder()
+	app.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/about", nil))
+
+	if got, want := recorder.Header().Get("Content-Type"), "text/html; charset=utf-8"; got != want {
+		t.Fatalf("content type = %q, want %q", got, want)
+	}
+	if !strings.Contains(recorder.Body.String(), "<!doctype html>") {
+		t.Fatalf("body is not a document:\n%s", recorder.Body.String())
+	}
+}

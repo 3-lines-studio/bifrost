@@ -48,14 +48,14 @@ type renderer interface {
 }
 
 type runtimeState struct {
-	assets         fs.FS
-	manifest       *compiledManifest
-	renderer       renderer
-	handlers       map[string]http.Handler
-	serverPatterns map[string]struct{}
-	files          map[string]protocol.FileRef
-	public         map[string]protocol.FileRef
-	devProxy       http.Handler
+	assets           fs.FS
+	manifest         *compiledManifest
+	renderer         renderer
+	handlers         map[string]http.Handler
+	markdownPatterns map[string]struct{}
+	files            map[string]protocol.FileRef
+	public           map[string]protocol.FileRef
+	devProxy         http.Handler
 }
 
 func newDevelopmentProxy(port int) http.Handler {
@@ -70,13 +70,13 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 		return nil, errors.New("bifrost: incomplete runtime input")
 	}
 	state := &runtimeState{
-		assets:         assets,
-		manifest:       manifest,
-		renderer:       render,
-		handlers:       make(map[string]http.Handler, len(app.routes)),
-		serverPatterns: make(map[string]struct{}),
-		files:          make(map[string]protocol.FileRef),
-		public:         manifest.public,
+		assets:           assets,
+		manifest:         manifest,
+		renderer:         render,
+		handlers:         make(map[string]http.Handler, len(app.routes)),
+		markdownPatterns: make(map[string]struct{}),
+		files:            make(map[string]protocol.FileRef),
+		public:           manifest.public,
 	}
 	maps.Copy(state.files, manifest.clientFiles)
 	for _, route := range manifest.routes {
@@ -137,7 +137,7 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 			if err != nil {
 				return nil, err
 			}
-			state.serverPatterns["GET "+pattern] = struct{}{}
+			state.markdownPatterns["GET "+pattern] = struct{}{}
 			page := &serverPageHandler{
 				pattern:      pattern,
 				load:         declaration.load,
@@ -200,6 +200,7 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 			if view.Layout != nil {
 				layoutAssets = *view.Layout
 			}
+			state.markdownPatterns["GET "+pattern] = struct{}{}
 			handler = &htmlPageHandler{
 				pattern:      pattern,
 				page:         *declaration.html,
@@ -300,7 +301,7 @@ func (h *serverPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 func (h *serverPageHandler) renderProps(w http.ResponseWriter, request *http.Request, propsJSON json.RawMessage, document Document, status, errorFallbacks int) {
 	var sink pageRenderSink
 	if markdownRequested(request.Context()) {
-		sink = &markdownRenderSink{writer: w, limits: h.limits}
+		sink = &markdownRenderSink{writer: w, status: status, limits: h.limits}
 	} else {
 		sink = h.newSink(w, request, propsJSON, document, status)
 	}

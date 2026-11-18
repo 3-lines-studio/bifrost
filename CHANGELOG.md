@@ -36,6 +36,11 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
 ### Runtime
 
+- HTML pages answer Markdown like every other rendered route: `Accept: text/markdown`
+  or an `/about.md` path returns the page the templates rendered, chrome
+  included, converted in the server process. The answer keeps the status the
+  loader chose, so a page that answers 404 keeps answering 404 there too.
+
 - Responses are compressed with gzip when the client accepts it and the body
   shrinks: documents, stylesheets, scripts, JSON, SVG, and Markdown. Fonts,
   images, video, event streams, responses that already carry a
