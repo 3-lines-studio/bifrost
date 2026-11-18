@@ -103,8 +103,11 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 				return nil, fmt.Errorf("bifrost: view %q: %w", view.ID, err)
 			}
 		}
-		clientRefs := append([]protocol.FileRef{view.Client.Entry}, view.Client.Styles...)
+		clientRefs := slices.Clone(view.Client.Styles)
 		clientRefs = append(clientRefs, view.Client.Imports...)
+		if view.Client.Entry.Path != "" {
+			clientRefs = append(clientRefs, view.Client.Entry)
+		}
 		for _, file := range clientRefs {
 			registered, exists := clientFiles[file.Path]
 			if !exists || registered != file {
@@ -243,10 +246,12 @@ func validateBuiltView(view protocol.BuiltView) error {
 	if view.Source == "" || path.Clean(view.Source) != view.Source || !fs.ValidPath(view.Source) {
 		return fmt.Errorf("invalid source path %q", view.Source)
 	}
-	if view.Mode != "hydrate" && view.Mode != "mount" {
+	if view.Mode != "hydrate" && view.Mode != "mount" && view.Mode != "html" {
 		return fmt.Errorf("invalid mode %q", view.Mode)
 	}
-	if err := validateFileRef(view.Client.Entry); err != nil {
+	if view.Mode == "html" && view.Client.Entry.Path == "" {
+		// An HTML page with no script of its own ships styles only.
+	} else if err := validateFileRef(view.Client.Entry); err != nil {
 		return fmt.Errorf("invalid client entry: %w", err)
 	}
 	related := append(slices.Clone(view.Client.Styles), view.Client.Imports...)
@@ -281,6 +286,10 @@ func validateViewForRoute(view protocol.BuiltView, kind string) error {
 	case "client":
 		if view.Mode != "mount" || view.Server != nil {
 			return errors.New("client route requires a mount view without a server entry")
+		}
+	case "html":
+		if view.Mode != "html" || view.Server != nil {
+			return errors.New("html route requires an html view without a server entry")
 		}
 	default:
 		return fmt.Errorf("unknown route kind %q", kind)

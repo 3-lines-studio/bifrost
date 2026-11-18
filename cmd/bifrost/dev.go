@@ -236,7 +236,10 @@ func runDev(args []string) error {
 		child.Stdout = os.Stdout
 		child.Stderr = os.Stderr
 		child.Stdin = os.Stdin
-		child.Env = append(os.Environ(), "BIFROST_DEV_DIR="+devDir, fmt.Sprintf("BIFROST_VITE_PORT=%d", *vitePort), "BIFROST_VITE_SOCKET="+socket, "BIFROST_VITE_CONFIG="+*viteConfig)
+		// BIFROST_DEV_ROOT lets a template change show up on the next request:
+		// the generated app reads its HTML from the tree, not from the copy the
+		// build embeds.
+		child.Env = append(os.Environ(), "BIFROST_DEV_DIR="+devDir, "BIFROST_DEV_ROOT="+sourceRoot, fmt.Sprintf("BIFROST_VITE_PORT=%d", *vitePort), "BIFROST_VITE_SOCKET="+socket, "BIFROST_VITE_CONFIG="+*viteConfig)
 		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		return child.Start()
 	}

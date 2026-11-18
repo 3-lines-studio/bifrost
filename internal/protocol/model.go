@@ -10,10 +10,13 @@ type Spec struct {
 }
 
 type RouteSpec struct {
-	Pattern    string `json:"pattern"`
-	View       string `json:"view"`
-	Kind       string `json:"kind"`
-	Navigation bool   `json:"navigation,omitempty"`
+	Pattern    string   `json:"pattern"`
+	View       string   `json:"view"`
+	Kind       string   `json:"kind"`
+	Navigation bool     `json:"navigation,omitempty"`
+	Layouts    []string `json:"layouts,omitempty"`
+	Styles     []string `json:"styles,omitempty"`
+	Scripts    []string `json:"scripts,omitempty"`
 }
 
 type DescribeResult struct {

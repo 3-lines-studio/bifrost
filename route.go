@@ -3,7 +3,9 @@ package bifrost
 import (
 	"context"
 	"encoding/json"
+	"html/template"
 	"net/http"
+	"net/url"
 )
 
 // Loader returns JSON-encodable props for one server-rendered request.
@@ -47,6 +49,14 @@ const (
 	routeServer
 	routeStatic
 	routeClient
+	routeHTML
+)
+
+// Asset-only kinds reuse routeKind so a path is validated the same way whether
+// it is a template, a stylesheet, or a script.
+const (
+	routeCSS    routeKind = 200
+	routeScript routeKind = 201
 )
 
 func (k routeKind) String() string {
@@ -57,6 +67,8 @@ func (k routeKind) String() string {
 		return "static"
 	case routeClient:
 		return "client"
+	case routeHTML:
+		return "html"
 	default:
 		return "invalid"
 	}
@@ -72,6 +84,7 @@ type Route struct {
 	generate     Generator
 	navigation   bool
 	cacheControl string
+	html         *HTMLPage
 }
 
 // Server declares a page rendered on each request. A nil loader supplies empty
@@ -103,6 +116,89 @@ func Client(pattern, view string) Route {
 		view:    view,
 		kind:    routeClient,
 	}
+}
+
+// HTML declares a page the process serves from Go templates: no renderer, no
+// hydration, no JavaScript runtime unless the page brings a script of its own.
+// The template is the document the browser receives.
+func HTML(pattern string, page HTMLPage) Route {
+	return Route{
+		pattern: pattern,
+		view:    page.Page,
+		kind:    routeHTML,
+		load:    page.Load,
+		html:    &page,
+	}
+}
+
+// HTMLPage describes an App Router HTML page: one page template, the layouts
+// that wrap it, and the loader that feeds both.
+//
+// Page and Layouts are paths inside Config.Templates, in the same forward-slash
+// form as every other view. Layouts are applied outermost first, so the last
+// entry is the layout closest to the page.
+type HTMLPage struct {
+	Page    string
+	Layouts []string
+
+	// Load returns the data the page template reads. It may return a PageData to
+	// set the document language, attributes, and status.
+	Load Loader
+
+	// LayoutData is the value every layout template reads as Frame.Data. Page
+	// data feeds the page; the chrome gets its own, so it does not ride along in
+	// every page's data.
+	LayoutData Loader
+
+	// Metadata builds the document head. An empty func leaves the head to the
+	// templates' static content.
+	Metadata MetadataFunc
+
+	// LayoutMetadata builds the part of the head that belongs to the chrome: the
+	// theme script, the preloads, the tags every page shares. A field the page
+	// also sets wins, and both Head fragments are kept, the layout first.
+	LayoutMetadata MetadataFunc
+
+	// Params names the dynamic segments of the pattern. Each one is read from the
+	// request and exposed to every template as Frame.Params.
+	Params []string
+
+	// Styles and Scripts are the files the browser needs on this page, relative
+	// to the source root. They are build inputs: the build bundles them and the
+	// served document links the result.
+	Styles  []string
+	Scripts []string
+}
+
+// MetadataFunc builds the head of one HTML document.
+type MetadataFunc func(*http.Request) (Metadata, error)
+
+// Metadata is the head of an HTML page. The zero value emits no tags, which is
+// the right head for a page that only needs its document language.
+type Metadata struct {
+	Title       string
+	Description string
+	Keywords    string
+	Robots      string
+	Canonical   string
+	Image       string
+	ImageAlt    string
+	Type        string
+	Locale      string
+
+	// Head is trusted markup appended after the tags above. It is the only field
+	// that is not escaped, so JSON-LD belongs here.
+	Head template.HTML
+}
+
+// Frame is what every layout template reads. The page template reads the
+// loader's value directly, so a page never pays for the wrapper.
+type Frame struct {
+	Data     any
+	Children template.HTML
+	Path     string
+	Query    url.Values
+	Params   map[string]string
 }
 
 func (r Route) WithNavigation() Route {

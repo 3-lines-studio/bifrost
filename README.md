@@ -187,6 +187,30 @@ Every view accepts a default export instead of the named one, so `export default
 
 Every page receives `params`, `searchParams`, and `pathname` merged into its loader props, so a page reads `params.slug` and `searchParams.tab` without asking the loader. `params` keys by folder name, a catch-all parameter is an array of segments, and a repeated query key is an array too. Because Bifrost merges them into the props, a loader must return a map or a `bifrost.PageData` whose `Props` is a map.
 
+### HTML pages
+
+A directory can hold `page.html` instead of `page.tsx`. That page is rendered by Go with `html/template` in the server process: no renderer, no props payload, no hydration, and no JavaScript unless the page asks for one.
+
+```sh
+app/layout.html          # the chrome: every HTML page below it
+app/layout.go            # Data and Metadata of that chrome
+app/layout.css           # styles of the chrome, built by Vite
+app/layout.js            # the only script an HTML page carries
+app/about/page.html      # /about
+app/about/page.go        # Load and Metadata of the page
+```
+
+- `page.html` needs `page.go` in the same directory: its data comes from Go.
+- `page.go` exports `Load` (the data the page template reads), `Metadata` (the head of that page), and `Cache`.
+- `layout.html` wraps every HTML page below it, outermost first. `layout.go` exports `Data` (the value every layout reads as `Frame.Data`), `Metadata` (the head every page shares), and only needs to exist next to the template it feeds.
+- `layout.css`, `layout.js`, `page.css`, and `page.js` are the styles and scripts of the page: Bifrost bundles them, and the document links the result. A page with no script ships styles only.
+- A page template reads its loaded value directly (`.Title`); a layout reads `Frame` (`.Data`, `.Children`, `.Path`, `.Query`, `.Params`).
+- `page.go` and `layout.go` may not be mixed with `page.tsx` in the same directory: one directory, one kind of page.
+
+`Load` returns any value, so a page template is typed by the struct the loader returns, and `Metadata` returns `bifrost.Metadata{Title, Description, Keywords, Robots, Canonical, Image, ImageAlt, Type, Locale, Head}`. A page field that is empty keeps the layout's, and both `Head` fragments are kept, the layout's first, so JSON-LD and preloads live next to the chrome that needs them.
+
+Templates are read from the tree while `bifrost dev` runs, so editing `page.html` shows up on the next request; `bifrost build` copies them into the output the binary embeds.
+
 A layout or a page can export `metadata`, and Bifrost merges the objects from the outer layouts down to the page, so a page overrides one key and inherits the rest. A page that exports `Head` cannot also export `metadata`. It renders `title`, `description`, `keywords`, `alternates.canonical`, `robots.index`, `robots.follow`, and `openGraph` (`title`, `description`, `url`, `images`). `generateMetadata(props)` covers what depends on the request: it receives the page props, may be async, and merges the same way.
 
 ## One-off commands

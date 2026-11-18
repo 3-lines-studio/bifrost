@@ -60,6 +60,8 @@ type viewPlan struct {
 	Mode       string
 	ClientFile string
 	ServerFile string
+	Styles     []string
+	Scripts    []string
 }
 
 func Describe(ctx context.Context, options Options) (protocol.DescribeResult, error) {
@@ -155,6 +157,9 @@ func Build(ctx context.Context, options Options) error {
 		return err
 	}
 	if err := writeEntries(describe.SourceRoot, temporary, plans, client, buildID); err != nil {
+		return err
+	}
+	if err := copyTemplates(describe, temporary); err != nil {
 		return err
 	}
 	if options.Development && !options.ExternalDevelopment {
@@ -438,17 +443,29 @@ func planViews(describe protocol.DescribeResult, output string, routeParams map[
 	navigationViews := make(map[string]string, len(describe.Spec.Routes))
 	for _, route := range describe.Spec.Routes {
 		mode := "hydrate"
-		if route.Kind == "client" {
+		switch route.Kind {
+		case "client":
 			mode = "mount"
+		case "html":
+			mode = "html"
 		}
 		key := route.View + "\x00" + mode
 		if route.Navigation {
 			key += "\x00navigation"
 		}
+		if mode == "html" {
+			// Assets are part of the key: two HTML pages can share a layout file
+			// and still ship different scripts.
+			key += "\x00" + strings.Join(route.Styles, "\x00") + "\x00" + strings.Join(route.Scripts, "\x00")
+		}
 		id := digest(key)
 		plan := viewPlan{Navigation: route.Navigation, ID: id, Source: route.View, Mode: mode, ClientFile: filepath.Join(output, "entries", id+"-client.tsx")}
 		if mode == "hydrate" {
 			plan.ServerFile = filepath.Join(output, "entries", id+"-server.tsx")
+		}
+		if mode == "html" {
+			plan.Styles = route.Styles
+			plan.Scripts = route.Scripts
 		}
 		byKey[id] = plan
 		routeViews[route.Pattern] = id
@@ -469,6 +486,19 @@ func writeEntries(sourceRoot, output string, plans []viewPlan, routes []clientRo
 		return err
 	}
 	for _, plan := range plans {
+		if plan.Mode == "html" {
+			var client strings.Builder
+			for _, style := range plan.Styles {
+				fmt.Fprintf(&client, "import %s;\n", strconv.Quote(filepath.ToSlash(filepath.Join(sourceRoot, filepath.FromSlash(style)))))
+			}
+			for _, script := range plan.Scripts {
+				fmt.Fprintf(&client, "import %s;\n", strconv.Quote(filepath.ToSlash(filepath.Join(sourceRoot, filepath.FromSlash(script)))))
+			}
+			if err := writePlanFile(plan.ClientFile, client.String()); err != nil {
+				return err
+			}
+			continue
+		}
 		source, err := resolveSourceFile(sourceRoot, plan.Source)
 		if err != nil {
 			return err
@@ -486,13 +516,59 @@ func writeEntries(sourceRoot, output string, plans []viewPlan, routes []clientRo
 		if buildID != "" {
 			client += "const bifrostBuild=" + strconv.Quote(buildID) + ";async function bifrostPoll(){try{const r=await fetch('/_bifrost/build-id?wait='+bifrostBuild,{cache:'no-store'});if(r.ok){if((await r.text())!==bifrostBuild){location.reload();return;}setTimeout(bifrostPoll,0);}else{setTimeout(bifrostPoll,500);}}catch{setTimeout(bifrostPoll,500);}}bifrostPoll();\n"
 		}
-		if err := os.WriteFile(plan.ClientFile, []byte(client), 0o644); err != nil {
+		if err := writePlanFile(plan.ClientFile, client); err != nil {
 			return err
 		}
 		if plan.ServerFile != "" {
 			server := "import React from 'react';\nimport { renderToReadableStream, renderToString } from 'react-dom/server';\nimport * as M from " + quoted + ";\nexport async function render(props, signal) { let renderError; const headElement = typeof M.renderHead === 'function' ? await M.renderHead(props) : typeof M.Head === 'function' ? React.createElement(M.Head, props) : null; const head = headElement ? renderToString(headElement) : ''; const source = await renderToReadableStream(React.createElement(M.Page, props), { signal, onError(error) { renderError = error instanceof Error ? error : new Error(String(error)); } }); const reader = source.getReader(); const body = new ReadableStream({ async pull(controller) { try { const result = await reader.read(); if (renderError) throw renderError; if (result.done) controller.close(); else controller.enqueue(result.value); } catch (error) { controller.error(error); } }, cancel(reason) { return reader.cancel(reason); } }); return { head, body }; }\n"
 			if err := os.WriteFile(plan.ServerFile, []byte(server), 0o644); err != nil {
 				return err
+			}
+		}
+	}
+	return nil
+}
+
+// writePlanFile writes one generated entry. A file that did not change keeps its
+// timestamp, so a rebuild does not invalidate the Vite cache of every plan.
+func writePlanFile(path, content string) error {
+	if current, err := os.ReadFile(path); err == nil && string(current) == content {
+		return nil
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// copyTemplates puts the templates of every HTML route in the build output, so
+// the app binary embeds the documents it serves and a deploy is one file.
+func copyTemplates(describe protocol.DescribeResult, output string) error {
+	seen := make(map[string]struct{})
+	for _, route := range describe.Spec.Routes {
+		if route.Kind != "html" {
+			continue
+		}
+		names := append([]string{route.View}, route.Layouts...)
+		for _, name := range names {
+			if !fs.ValidPath(name) {
+				return fmt.Errorf("bifrost: template %q is not a clean relative path", name)
+			}
+			if _, exists := seen[name]; exists {
+				continue
+			}
+			seen[name] = struct{}{}
+			source, err := resolveSourceFile(describe.SourceRoot, name)
+			if err != nil {
+				return err
+			}
+			data, err := os.ReadFile(source)
+			if err != nil {
+				return fmt.Errorf("bifrost: read template %q: %w", name, err)
+			}
+			destination := filepath.Join(output, "templates", filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(destination, data, 0o644); err != nil {
+				return fmt.Errorf("bifrost: copy template %q: %w", name, err)
 			}
 		}
 	}
@@ -683,6 +759,11 @@ func collectBuiltViews(output string, plans []viewPlan, development bool) ([]pro
 		styles, err := refsForRelativePaths(output, filepath.Join(output, "dist"), stylePaths)
 		if err != nil {
 			return nil, nil, err
+		}
+		if plan.Mode == "html" && len(plan.Scripts) == 0 {
+			// An HTML page with no script of its own ships styles only: the
+			// browser never downloads the glue module the build had to emit.
+			clientEntry = protocol.FileRef{}
 		}
 		view := protocol.BuiltView{
 			ID:     plan.ID,

@@ -773,7 +773,7 @@ func TestGeneratedModuleUsesTheWorkingTreeForDevelopmentVersions(t *testing.T) {
 	development := []string{"devel", "devel+1a2b3c4d5e6f", "v1.3.11-0.20260924213727-f23f09ff9bad", "v0.0.0-20260924213727-f23f09ff9bad", "v1.3.11-0.20260924213727-f23f09ff9bad+dirty"}
 	for _, version := range development {
 		bifrost.Version = version
-		if err := writeAppRouterModule(generated, userModule); err != nil {
+		if err := writeAppRouterModule(generated, userModule, ""); err != nil {
 			t.Fatal(err)
 		}
 		if source := read(); !strings.Contains(source, "replace github.com/3-lines-studio/bifrost => ") {
@@ -782,7 +782,7 @@ func TestGeneratedModuleUsesTheWorkingTreeForDevelopmentVersions(t *testing.T) {
 	}
 
 	bifrost.Version = "v1.3.10"
-	if err := writeAppRouterModule(generated, userModule); err != nil {
+	if err := writeAppRouterModule(generated, userModule, ""); err != nil {
 		t.Fatal(err)
 	}
 	if source := read(); strings.Contains(source, "replace github.com/3-lines-studio/bifrost => ") {
@@ -987,7 +987,7 @@ func TestGeneratedModuleRequiresUserModule(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.25.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeAppRouterModule(generated, root); err != nil {
+	if err := writeAppRouterModule(generated, root, ""); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(generated, "go.mod"))
@@ -1148,5 +1148,141 @@ func TestPrepareAppRouterAppRejectsEmptyTrees(t *testing.T) {
 	}
 	if _, err := prepareAppRouter(context.Background(), projectRoot, appRoot, 0, 0); err == nil {
 		t.Fatal("an empty route root was accepted")
+	}
+}
+
+func writeTestFile(t *testing.T, root, name, content string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDiscoverHTMLPage(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "layout.html", "<html>{{.Children}}</html>")
+	writeTestFile(t, root, "layout.css", "body{}")
+	writeTestFile(t, root, "layout.js", "console.log('chrome')")
+	writeTestFile(t, root, "about/page.html", "<h1>about</h1>")
+	writeTestFile(t, root, "about/page.go", "package about")
+	writeTestFile(t, root, "about/page.css", "h1{}")
+	writeTestFile(t, root, "about/page.js", "console.log('about')")
+	writeTestFile(t, root, "about/notes/page.html", "<p>notes</p>")
+	writeTestFile(t, root, "about/notes/page.go", "package notes")
+
+	routes, err := discoverRoutes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 2 {
+		t.Fatalf("routes = %d, want 2", len(routes))
+	}
+	about := routes[0]
+	if !about.HTML || about.Pattern != "/about" || about.View != "about/page.html" {
+		t.Fatalf("route = %+v", about)
+	}
+	if got := strings.Join(about.Layouts, ","); got != "layout.html" {
+		t.Fatalf("layouts = %q", got)
+	}
+	if got := strings.Join(about.Styles, ","); got != "layout.css,about/page.css" {
+		t.Fatalf("styles = %q", got)
+	}
+	if got := strings.Join(about.Scripts, ","); got != "layout.js,about/page.js" {
+		t.Fatalf("scripts = %q", got)
+	}
+	nested := routes[1]
+	if got := strings.Join(nested.Layouts, ","); got != "layout.html" {
+		t.Fatalf("nested layouts = %q", got)
+	}
+	if got := strings.Join(nested.Styles, ","); got != "layout.css" {
+		t.Fatalf("nested styles = %q, want the root layout only", got)
+	}
+}
+
+func TestDiscoverHTMLPageRequiresGoFile(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "about/page.html", "<h1>about</h1>")
+	_, err := discoverRoutes(root)
+	if err == nil || !strings.Contains(err.Error(), "needs page.go") {
+		t.Fatalf("error = %v, want a page.go hint", err)
+	}
+}
+
+func TestDiscoverRejectsTwoPageFiles(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "about/page.html", "<h1>about</h1>")
+	writeTestFile(t, root, "about/page.go", "package about")
+	writeTestFile(t, root, "about/page.tsx", "export function Page() {}")
+	_, err := discoverRoutes(root)
+	if err == nil || !strings.Contains(err.Error(), "both page.tsx and page.html") {
+		t.Fatalf("error = %v, want a two-page hint", err)
+	}
+}
+
+func TestQualifyTemplates(t *testing.T) {
+	projectRoot := t.TempDir()
+	routeRoot := filepath.Join(projectRoot, "app")
+	routes := []appRoute{{HTML: true, View: "about/page.html", Layouts: []string{"layout.html"}, Styles: []string{"layout.css"}, Scripts: []string{"about/page.js"}}}
+	if err := qualifyTemplates(projectRoot, routeRoot, routes); err != nil {
+		t.Fatal(err)
+	}
+	if routes[0].View != "app/about/page.html" {
+		t.Fatalf("view = %q", routes[0].View)
+	}
+	if got := strings.Join(routes[0].Layouts, ","); got != "app/layout.html" {
+		t.Fatalf("layouts = %q", got)
+	}
+	if got := strings.Join(routes[0].Styles, ","); got != "app/layout.css" {
+		t.Fatalf("styles = %q", got)
+	}
+	if got := strings.Join(routes[0].Scripts, ","); got != "app/about/page.js" {
+		t.Fatalf("scripts = %q", got)
+	}
+}
+
+func TestGeneratedMainDeclaresHTMLPage(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	routes := []appRoute{{
+		Directory:   "about",
+		Pattern:     "/about",
+		View:        "app/about/page.html",
+		ImportPath:  "example.com/app/about",
+		Alias:       "about",
+		PageGo:      true,
+		HTML:        true,
+		Layouts:     []string{"app/layout.html"},
+		Styles:      []string{"app/layout.css"},
+		Scripts:     []string{"app/about/page.js"},
+		HasLoader:   true,
+		HasMetadata: true,
+	}}
+	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`bifrost.HTML("/about", bifrost.HTMLPage{Page: "app/about/page.html", Layouts: []string{"app/layout.html"}, Styles: []string{"app/layout.css"}, Scripts: []string{"app/about/page.js"}, Load: load0, Metadata: about.Metadata})`,
+		`Templates: bifrostTemplates,`,
+		`var bifrostTemplates fs.FS = func() fs.FS {`,
+		`"io/fs"`,
+		`return about.Load(r)`,
+	} {
+		if !strings.Contains(string(source), want) {
+			t.Fatalf("main lacks %q:\n%s", want, source)
+		}
+	}
+	if strings.Contains(string(source), "bifrost.Server(\"/about\"") {
+		t.Fatalf("an HTML route must not be declared as a server route:\n%s", source)
 	}
 }

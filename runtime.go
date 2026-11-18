@@ -114,9 +114,17 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 				serverEntry = (&url.URL{Path: "/@fs" + filepath.ToSlash(serverFile)}).EscapedPath()
 			}
 		}
-		shell, err := dochtml.NewShell(clientAssets)
-		if err != nil {
-			return nil, fmt.Errorf("bifrost: compile route %q shell: %w", pattern, err)
+		// The shell carries hydration, which an HTML route never does: only the
+		// routes that ship React ask for one.
+		newShell := func() (dochtml.Shell, error) {
+			shell, err := dochtml.NewShell(clientAssets)
+			if err != nil {
+				return dochtml.Shell{}, fmt.Errorf("bifrost: compile route %q shell: %w", pattern, err)
+			}
+			if declaration.navigation {
+				shell = shell.WithNavigation(manifest.manifest.BuildID)
+			}
+			return shell, nil
 		}
 
 		var handler http.Handler
@@ -124,6 +132,10 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 		case routeServer:
 			if render == nil || serverEntry == "" {
 				return nil, fmt.Errorf("bifrost: server route %q has no renderer", pattern)
+			}
+			shell, err := newShell()
+			if err != nil {
+				return nil, err
 			}
 			state.serverPatterns["GET "+pattern] = struct{}{}
 			page := &serverPageHandler{
@@ -140,10 +152,13 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 			if declaration.navigation {
 				page.navigationView = view.ID
 				page.navigationBuild = manifest.manifest.BuildID
-				page.shell = shell.WithNavigation(page.navigationBuild)
 			}
 			handler = page
 		case routeStatic:
+			shell, err := newShell()
+			if err != nil {
+				return nil, err
+			}
 			if devDir != "" {
 				if render == nil || serverEntry == "" {
 					return nil, fmt.Errorf("bifrost: static development route %q has no renderer", pattern)
@@ -165,11 +180,33 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 				handler = &staticPageHandler{assets: assets, files: files, headers: app.hooks.assetHeaders}
 			}
 		case routeClient:
+			shell, err := newShell()
+			if err != nil {
+				return nil, err
+			}
 			document, err := shell.ClientDocument(emptyProps)
 			if err != nil {
 				return nil, fmt.Errorf("bifrost: compile client route %q: %w", pattern, err)
 			}
 			handler = &clientPageHandler{document: document, contentLength: strconv.Itoa(len(document))}
+		case routeHTML:
+			if declaration.html == nil {
+				return nil, fmt.Errorf("bifrost: html route %q has no page", pattern)
+			}
+			if app.templates == nil {
+				return nil, fmt.Errorf("bifrost: html route %q needs Config.Templates", pattern)
+			}
+			handler = &htmlPageHandler{
+				pattern:      pattern,
+				page:         *declaration.html,
+				templates:    app.templates,
+				assets:       clientAssets,
+				development:  devDir != "",
+				hooks:        app.hooks,
+				limits:       app.limits,
+				logger:       app.logger,
+				cacheControl: declaration.cacheControl,
+			}
 		default:
 			return nil, fmt.Errorf("bifrost: route %q has invalid kind", pattern)
 		}

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"go/format"
@@ -51,6 +52,23 @@ type appRoute struct {
 	NotFoundView string
 	LoadingView  string
 	NotFoundPage bool
+
+	// HTML routes have no React view: a page template, the layout templates
+	// above it, and the styles and scripts they declare.
+	HTML        bool
+	Layouts     []string
+	Styles      []string
+	Scripts     []string
+	HasMetadata bool
+
+	// LayoutDir is the app-relative directory of the deepest layout that ships a
+	// layout.go; LayoutData is the import path of that package once resolved.
+	// HasLayout and HasLayoutMetadata say which symbols it exports.
+	LayoutDir         string
+	LayoutData        string
+	LayoutAlias       string
+	HasLayout         bool
+	HasLayoutMetadata bool
 }
 
 type goDir struct {
@@ -120,7 +138,7 @@ func walkTree(root string, match func(path string, entry os.DirEntry) bool) bool
 
 func hasPage(root string) bool {
 	return walkTree(root, func(_ string, entry os.DirEntry) bool {
-		return !entry.IsDir() && entry.Name() == "page.tsx"
+		return !entry.IsDir() && (entry.Name() == "page.tsx" || entry.Name() == "page.html")
 	})
 }
 
@@ -207,6 +225,9 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 	if err != nil {
 		return appRouter{}, err
 	}
+	if err := qualifyTemplates(projectRoot, routeRoot, routes); err != nil {
+		return appRouter{}, err
+	}
 	module, err := resolveModule(ctx, routeRoot, routes, len(goDirs) > 0)
 	if err != nil {
 		return appRouter{}, err
@@ -230,6 +251,17 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 		}
 		routes[index].HasLoader = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Load")
 		routes[index].HasCache = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Cache")
+		if routes[index].HTML {
+			routes[index].HasMetadata = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Metadata")
+			if routes[index].LayoutDir != "" {
+				routes[index].LayoutData = modulePath
+				if routes[index].LayoutDir != "." {
+					routes[index].LayoutData = modulePath + "/" + routes[index].LayoutDir
+				}
+				routes[index].HasLayout = hasSymbol(ctx, moduleDir, routes[index].LayoutData, "Data")
+				routes[index].HasLayoutMetadata = hasSymbol(ctx, moduleDir, routes[index].LayoutData, "Metadata")
+			}
+		}
 	}
 	for index := range goDirs {
 		if goDirs[index].Directory == "." {
@@ -252,6 +284,9 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 	for index := range routes {
 		if routes[index].PageGo {
 			routes[index].Alias = importAlias(aliases, routes[index].ImportPath)
+		}
+		if routes[index].HasLayout {
+			routes[index].LayoutAlias = importAlias(aliases, routes[index].LayoutData)
 		}
 	}
 	for index := range goDirs {
@@ -284,7 +319,11 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 	if err := writeAppRouterMain(projectRoot, generated, routes, goDirs, renderConcurrency, renderQueue, commandsImport); err != nil {
 		return appRouter{}, err
 	}
-	if err := writeAppRouterModule(generated, moduleDir); err != nil {
+	bifrostDir, err := replacedModuleDir(ctx, moduleDir, "github.com/3-lines-studio/bifrost")
+	if err != nil {
+		return appRouter{}, err
+	}
+	if err := writeAppRouterModule(generated, moduleDir, bifrostDir); err != nil {
 		return appRouter{}, err
 	}
 	if err := os.MkdirAll(filepath.Join(generated, "build"), 0o755); err != nil {
@@ -301,6 +340,51 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 		return appRouter{}, fmt.Errorf("bifrost: prepare generated module: %w", err)
 	}
 	return appRouter{ProjectRoot: projectRoot, WorkDir: generated, Package: ".", Output: filepath.Join(generated, "build"), Executable: filepath.Join(projectRoot, ".bifrost", "bifrost-app"), RouteParams: routeParams(routes), Rows: goRouteRows(goDirs)}, nil
+}
+
+// layoutDirectoryWithData returns the app-relative directory of the deepest
+// layout that ships a layout.go, the file that loads the chrome.
+func layoutDirectoryWithData(root string, layouts []string) string {
+	for index := len(layouts) - 1; index >= 0; index-- {
+		directory := path.Dir(layouts[index])
+		if fileExists(filepath.Join(root, filepath.FromSlash(directory), "layout.go")) {
+			return directory
+		}
+	}
+	return ""
+}
+
+// qualifyTemplates turns the app-relative paths of an HTML route into paths the
+// app resolves against its source root, so a template is named the same way in
+// the declaration, the build spec, and the manifest.
+func qualifyTemplates(projectRoot, routeRoot string, routes []appRoute) error {
+	prefix, err := filepath.Rel(projectRoot, routeRoot)
+	if err != nil {
+		return fmt.Errorf("bifrost: locate app directory: %w", err)
+	}
+	prefix = filepath.ToSlash(prefix)
+	qualify := func(value string) string {
+		if prefix == "." {
+			return value
+		}
+		return path.Join(prefix, value)
+	}
+	for index := range routes {
+		if !routes[index].HTML {
+			continue
+		}
+		routes[index].View = qualify(routes[index].View)
+		for layoutIndex := range routes[index].Layouts {
+			routes[index].Layouts[layoutIndex] = qualify(routes[index].Layouts[layoutIndex])
+		}
+		for styleIndex := range routes[index].Styles {
+			routes[index].Styles[styleIndex] = qualify(routes[index].Styles[styleIndex])
+		}
+		for scriptIndex := range routes[index].Scripts {
+			routes[index].Scripts[scriptIndex] = qualify(routes[index].Scripts[scriptIndex])
+		}
+	}
+	return nil
 }
 
 func routeParams(routes []appRoute) map[string][]string {
@@ -333,7 +417,7 @@ func discoverRoutes(root string) ([]appRoute, error) {
 		if entry.IsDir() {
 			return nil
 		}
-		if entry.Name() != "page.tsx" {
+		if entry.Name() != "page.tsx" && entry.Name() != "page.html" {
 			if !isRouteView(entry.Name()) || !hasHeadExport(filePath) {
 				return nil
 			}
@@ -344,6 +428,21 @@ func discoverRoutes(root string) ([]appRoute, error) {
 			return fmt.Errorf("bifrost: %s exports Head; keep it in page.tsx", filepath.ToSlash(relative))
 		}
 		directory := filepath.Dir(filePath)
+		html := entry.Name() == "page.html"
+		if html && fileExists(filepath.Join(directory, "page.tsx")) {
+			relative, err := filepath.Rel(root, directory)
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("bifrost: %s has both page.tsx and page.html; keep one", filepath.ToSlash(relative))
+		}
+		if !html && fileExists(filepath.Join(directory, "page.html")) {
+			relative, err := filepath.Rel(root, directory)
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("bifrost: %s has both page.tsx and page.html; keep one", filepath.ToSlash(relative))
+		}
 		relative, err := filepath.Rel(root, directory)
 		if err != nil {
 			return err
@@ -356,13 +455,23 @@ func discoverRoutes(root string) ([]appRoute, error) {
 			return fmt.Errorf("bifrost: duplicate route %q from %s and %s", pattern, previous, filepath.ToSlash(relative))
 		}
 		patterns[pattern] = filepath.ToSlash(relative)
-		route := appRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, Params: params, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), HasHead: hasHeadExport(filePath)}
+		route := appRoute{Directory: filepath.ToSlash(relative), Pattern: pattern, Params: params, View: filepath.ToSlash(strings.TrimPrefix(filePath, root+string(filepath.Separator))), HasHead: !html && hasHeadExport(filePath)}
 		if _, err := os.Stat(filepath.Join(directory, "page.go")); err == nil {
 			route.PageGo = true
 			route.ImportPath = filepath.ToSlash(relative)
 			if relative == "." {
 				route.ImportPath = ""
 			}
+		}
+		if html {
+			if !route.PageGo {
+				return fmt.Errorf("bifrost: %s/page.html needs page.go: its data and metadata are Go", filepath.ToSlash(relative))
+			}
+			route.HTML = true
+			route.Layouts = inheritedViews(root, filepath.ToSlash(relative), "layout.html")
+			route.LayoutDir = layoutDirectoryWithData(root, route.Layouts)
+			route.Styles = append(htmlAssets(root, filepath.ToSlash(relative), "layout", []string{"css"}, true), htmlAssets(root, filepath.ToSlash(relative), "page", []string{"css"}, false)...)
+			route.Scripts = append(htmlAssets(root, filepath.ToSlash(relative), "layout", []string{"js", "ts"}, true), htmlAssets(root, filepath.ToSlash(relative), "page", []string{"js", "ts"}, false)...)
 		}
 		routes = append(routes, route)
 		return nil
@@ -457,6 +566,9 @@ func writeViews(projectRoot, routeRoot string, routes []appRoute) error {
 	}
 	needsMetadata := false
 	for index := range routes {
+		if routes[index].HTML {
+			continue
+		}
 		wrappers := inheritedWrappers(routeRoot, routes[index].Directory)
 		layouts := make([]string, 0, len(wrappers))
 		for _, wrapper := range wrappers {
@@ -757,6 +869,59 @@ func inheritedWrappers(root, directory string) []viewWrapper {
 		}
 	}
 	return wrappers
+}
+
+// inheritedViews lists the templates of one name that apply to a directory,
+// outermost first: the App Router rule that a layout wraps everything below it.
+func inheritedViews(root, directory, name string) []string {
+	var views []string
+	if fileExists(filepath.Join(root, name)) {
+		views = append(views, name)
+	}
+	if directory == "." {
+		return views
+	}
+	current := "."
+	for _, part := range strings.Split(directory, "/") {
+		current = filepath.Join(current, part)
+		if fileExists(filepath.Join(root, current, name)) {
+			views = append(views, filepath.ToSlash(filepath.Join(current, name)))
+		}
+	}
+	return views
+}
+
+// htmlAssets lists the styles or scripts an HTML page ships. With chain, it
+// walks from the app root to the page directory, so a layout.css at the root
+// belongs to every page below it; without it, only the page directory counts.
+func htmlAssets(root, directory, base string, extensions []string, chain bool) []string {
+	directories := []string{directory}
+	if chain {
+		directories = []string{"."}
+		if directory != "." {
+			current := "."
+			for _, part := range strings.Split(directory, "/") {
+				current = filepath.Join(current, part)
+				directories = append(directories, current)
+			}
+		}
+	}
+	var assets []string
+	seen := make(map[string]struct{})
+	for _, current := range directories {
+		for _, extension := range extensions {
+			relative := filepath.ToSlash(filepath.Join(current, base+"."+extension))
+			if !fileExists(filepath.Join(root, filepath.FromSlash(relative))) {
+				continue
+			}
+			if _, exists := seen[relative]; exists {
+				continue
+			}
+			seen[relative] = struct{}{}
+			assets = append(assets, relative)
+		}
+	}
+	return assets
 }
 
 func inheritedFiles(root, directory, name string) []string {
@@ -1066,6 +1231,25 @@ func standardImports() string {
 	return imports + "\t\"syscall\"\n\t\"time\"\n"
 }
 
+func paramNames(params []routeParam) []string {
+	names := make([]string, 0, len(params))
+	for _, param := range params {
+		names = append(names, param.Name)
+	}
+	return names
+}
+
+func stringSlice(values []string) string {
+	if len(values) == 0 {
+		return "nil"
+	}
+	quoted := make([]string, len(values))
+	for index, value := range values {
+		quoted[index] = strconv.Quote(value)
+	}
+	return "[]string{" + strings.Join(quoted, ", ") + "}"
+}
+
 func paramsLiteral(params []routeParam) string {
 	values := make([]string, 0, len(params))
 	for _, param := range params {
@@ -1120,10 +1304,45 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 	var loaders strings.Builder
 	hasNotFoundPage := false
 	hasSegments := false
+	hasHTML := false
 	for index, route := range routes {
 		if route.NotFoundPage {
 			hasNotFoundPage = true
 			fmt.Fprintf(&declarations, "\t\t\tbifrost.Server(%s, %s, loadNotFound).WithNavigation(),\n", strconv.Quote(route.Pattern), strconv.Quote(route.View))
+			continue
+		}
+		if route.HTML {
+			hasHTML = true
+			importsByPath[route.ImportPath] = route.Alias
+			loader := fmt.Sprintf("load%d", index)
+			load := ""
+			if route.HasLoader {
+				load = "Load: " + loader + ", "
+				fmt.Fprintf(&loaders, "func %s(r *http.Request) (any, error) {\n\treturn %s.Load(r)\n}\n\n", loader, route.Alias)
+			}
+			metadata := ""
+			if route.HasMetadata {
+				metadata = "Metadata: " + route.Alias + ".Metadata, "
+			}
+			layout := ""
+			if route.HasLayout {
+				importsByPath[route.LayoutData] = route.LayoutAlias
+				layout = "LayoutData: " + route.LayoutAlias + ".Data, "
+			}
+			if route.HasLayoutMetadata {
+				importsByPath[route.LayoutData] = route.LayoutAlias
+				layout += "LayoutMetadata: " + route.LayoutAlias + ".Metadata, "
+			}
+			params := ""
+			if names := paramNames(route.Params); len(names) > 0 {
+				params = "Params: " + stringSlice(names) + ", "
+			}
+			cache := ""
+			if route.HasCache {
+				cache = ".WithCache(" + route.Alias + ".Cache())"
+			}
+			fmt.Fprintf(&declarations, "\t\t\tbifrost.HTML(%s, bifrost.HTMLPage{Page: %s, Layouts: %s, Styles: %s, Scripts: %s, %s%s%s%s})%s,\n",
+				strconv.Quote(route.Pattern), strconv.Quote(route.View), stringSlice(route.Layouts), stringSlice(route.Styles), stringSlice(route.Scripts), load, metadata, layout, params, cache)
 			continue
 		}
 		hasSegments = hasSegments || slices.ContainsFunc(route.Params, func(param routeParam) bool { return param.Segments })
@@ -1211,7 +1430,16 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 		// port. That is what makes `./app migrate` or a cron job cheap.
 		commands = "\tif len(os.Args) > 1 {\n\t\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\t\tdefer stop()\n\t\thandled, err := appcommands.Run(ctx, os.Args[1:])\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\tif handled {\n\t\t\treturn nil\n\t\t}\n\t}\n"
 	}
-	source := "package main\n\nimport (\n" + standardImports() + "\n\t\"github.com/3-lines-studio/bifrost\"\n" + imports.String() + ")\n\n" + loaders.String() + pathValues.String() + "func main() {\n\tif err := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n\nfunc run() error {\n" + commands + "\tapp, err := bifrost.New(bifrost.Config{SourceRoot: " + strconv.Quote(root) + ", " + renderConfig + "Routes: []bifrost.Route{\n" + declarations.String() + "\t}})\n\tif err != nil {\n\t\treturn err\n\t}\n\tif bifrost.Building() {\n\t\treturn nil\n\t}\n\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\tdefer stop()\n\tdefer func() {\n\t\tcloseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\t\tdefer cancel()\n\t\t_ = app.Close(closeCtx)\n\t}()\n\tpageMux := http.NewServeMux()\n\tif err := app.Register(pageMux); err != nil {\n\t\treturn err\n\t}\n\tmux := http.NewServeMux()\n" + registrations.String() + "\tmux.Handle(\"/\", pageMux)\n\t" + serve + "\n}\n\nfunc redirectTrailingSlash(next http.Handler) http.Handler {\n\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n\t\tpath := r.URL.Path\n\t\tif len(path) < 2 || !strings.HasSuffix(path, \"/\") {\n\t\t\tnext.ServeHTTP(w, r)\n\t\t\treturn\n\t\t}\n\t\ttarget := *r.URL\n\t\ttarget.Path = strings.TrimSuffix(path, \"/\")\n\t\thttp.Redirect(w, r, target.String(), http.StatusPermanentRedirect)\n\t})\n}\n\nfunc serve(ctx context.Context, handler http.Handler) error {\n\treturn bifrost.Serve(ctx, handler)\n}"
+	templates := ""
+	templatesImport := ""
+	if hasHTML {
+		templatesImport = "\t\"io/fs\"\n"
+		renderConfig += "Templates: bifrostTemplates, "
+		templates = "var bifrostTemplates fs.FS = func() fs.FS {\n" +
+			"\tif root := os.Getenv(\"BIFROST_DEV_ROOT\"); root != \"\" {\n\t\treturn os.DirFS(root)\n\t}\n" +
+			"\ttemplates, err := fs.Sub(bifrostAssets, \"templates\")\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\treturn templates\n}()\n\n"
+	}
+	source := "package main\n\nimport (\n" + standardImports() + templatesImport + "\n\t\"github.com/3-lines-studio/bifrost\"\n" + imports.String() + ")\n\n" + templates + loaders.String() + pathValues.String() + "func main() {\n\tif err := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}\n\nfunc run() error {\n" + commands + "\tapp, err := bifrost.New(bifrost.Config{SourceRoot: " + strconv.Quote(root) + ", " + renderConfig + "Routes: []bifrost.Route{\n" + declarations.String() + "\t}})\n\tif err != nil {\n\t\treturn err\n\t}\n\tif bifrost.Building() {\n\t\treturn nil\n\t}\n\tctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)\n\tdefer stop()\n\tdefer func() {\n\t\tcloseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)\n\t\tdefer cancel()\n\t\t_ = app.Close(closeCtx)\n\t}()\n\tpageMux := http.NewServeMux()\n\tif err := app.Register(pageMux); err != nil {\n\t\treturn err\n\t}\n\tmux := http.NewServeMux()\n" + registrations.String() + "\tmux.Handle(\"/\", pageMux)\n\t" + serve + "\n}\n\nfunc redirectTrailingSlash(next http.Handler) http.Handler {\n\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n\t\tpath := r.URL.Path\n\t\tif len(path) < 2 || !strings.HasSuffix(path, \"/\") {\n\t\t\tnext.ServeHTTP(w, r)\n\t\t\treturn\n\t\t}\n\t\ttarget := *r.URL\n\t\ttarget.Path = strings.TrimSuffix(path, \"/\")\n\t\thttp.Redirect(w, r, target.String(), http.StatusPermanentRedirect)\n\t})\n}\n\nfunc serve(ctx context.Context, handler http.Handler) error {\n\treturn bifrost.Serve(ctx, handler)\n}"
 	formatted, err := format.Source([]byte(source))
 	if err != nil {
 		return err
@@ -1224,10 +1452,35 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 	return os.WriteFile(path, formatted, 0o644)
 }
 
-func writeAppRouterModule(generated, userModuleDir string) error {
+// replacedModuleDir reports the directory a module was replaced with, so a
+// generated app builds against the same tree the tool was built from instead of
+// resolving a version from the network.
+func replacedModuleDir(ctx context.Context, dir, modulePath string) (string, error) {
+	command := exec.CommandContext(ctx, "go", "list", "-m", "-json", modulePath)
+	command.Dir = dir
+	output, err := command.Output()
+	if err != nil {
+		// The module is not in this project's graph, so the generated app has
+		// nothing to replace: it will require the version the tool runs.
+		return "", nil
+	}
+	var info struct {
+		Dir     string
+		Replace *struct{ Dir string }
+	}
+	if err := json.Unmarshal(output, &info); err != nil {
+		return "", err
+	}
+	if info.Replace != nil {
+		return info.Replace.Dir, nil
+	}
+	return "", nil
+}
+
+func writeAppRouterModule(generated, userModuleDir, bifrostModuleDir string) error {
 	version := bifrost.Version
-	bifrostModuleDir := ""
 	if developmentVersion(version) {
+		bifrostModuleDir = ""
 		_, source, _, ok := runtime.Caller(0)
 		if !ok {
 			return errors.New("bifrost: cannot locate the development module")

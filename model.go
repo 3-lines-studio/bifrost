@@ -32,6 +32,10 @@ type Config struct {
 	// phases.
 	Assets fs.FS
 
+	// Templates holds the Go templates of HTML routes. It is required as soon as
+	// one route is declared with HTML, and ignored otherwise.
+	Templates fs.FS
+
 	// RenderConcurrency is the number of isolated production renderer processes.
 	// Each process handles one render at a time. Zero uses two processes. Development
 	// always uses one process because it owns one Vite module graph.
@@ -52,6 +56,7 @@ type App struct {
 	spec       protocol.Spec
 	specHash   string
 	runtime    *runtimeState
+	templates  fs.FS
 	appPlugins []string
 	limits     Limits
 	logger     *slog.Logger
@@ -137,6 +142,7 @@ func newApp(config Config) (*App, error) {
 		hooks:      cloneHooks(state.hooks),
 		spec:       spec,
 		specHash:   specHash,
+		templates:  config.Templates,
 		appPlugins: pluginNames,
 		limits:     limits,
 		logger:     logger,
@@ -183,7 +189,7 @@ func validateRoutes(sourceRoot string, routes []Route) ([]Route, error) {
 
 	for i, route := range routes {
 		if route.kind == routeInvalid {
-			return nil, fmt.Errorf("bifrost: route %d was not created by Server, Static, or Client", i)
+			return nil, fmt.Errorf("bifrost: route %d was not created by Server, Static, Client, or HTML", i)
 		}
 		if err := validatePattern(route.pattern); err != nil {
 			return nil, fmt.Errorf("bifrost: route %d: %w", i, err)
@@ -193,11 +199,24 @@ func validateRoutes(sourceRoot string, routes []Route) ([]Route, error) {
 		}
 		seen[route.pattern] = struct{}{}
 
-		view, err := normalizeView(sourceRoot, route.view)
+		view, err := normalizeView(sourceRoot, route.view, route.kind)
 		if err != nil {
 			return nil, fmt.Errorf("bifrost: route %q: %w", route.pattern, err)
 		}
 		route.view = view
+
+		if route.kind == routeHTML {
+			page := *route.html
+			page.Page = view
+			layouts := make([]string, len(page.Layouts))
+			for index, layout := range page.Layouts {
+				if layouts[index], err = normalizeView(sourceRoot, layout, routeHTML); err != nil {
+					return nil, fmt.Errorf("bifrost: route %q layout: %w", route.pattern, err)
+				}
+			}
+			page.Layouts = layouts
+			route.html = &page
+		}
 
 		if route.navigation && route.kind != routeServer {
 			return nil, fmt.Errorf("bifrost: navigation requires a server route: %q", route.pattern)
@@ -249,7 +268,28 @@ func validateMuxConflicts(routes []Route) (err error) {
 	return nil
 }
 
-func normalizeView(sourceRoot, view string) (string, error) {
+func normalizeView(sourceRoot, view string, kind routeKind) (string, error) {
+	return normalizeAssetPath(sourceRoot, view, kind)
+}
+
+func normalizeAssets(sourceRoot string, values []string, kind routeKind) ([]string, error) {
+	cleaned := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		path, err := normalizeAssetPath(sourceRoot, value, kind)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		cleaned = append(cleaned, path)
+	}
+	return cleaned, nil
+}
+
+func normalizeAssetPath(sourceRoot, view string, kind routeKind) (string, error) {
 	if view == "" {
 		return "", errors.New("view path is empty")
 	}
@@ -264,10 +304,21 @@ func normalizeView(sourceRoot, view string) (string, error) {
 	}
 
 	clean := path.Clean(view)
-	switch strings.ToLower(path.Ext(clean)) {
-	case ".tsx", ".jsx", ".ts", ".js":
-	default:
-		return "", fmt.Errorf("view path %q must use .tsx, .jsx, .ts, or .js", view)
+	extensions := ".tsx, .jsx, .ts, or .js"
+	allowed := []string{".tsx", ".jsx", ".ts", ".js"}
+	switch kind {
+	case routeHTML:
+		extensions = ".html"
+		allowed = []string{".html"}
+	case routeCSS:
+		extensions = ".css"
+		allowed = []string{".css"}
+	case routeScript:
+		extensions = ".tsx, .jsx, .ts, or .js"
+		allowed = []string{".tsx", ".jsx", ".ts", ".js"}
+	}
+	if !slices.Contains(allowed, strings.ToLower(path.Ext(clean))) {
+		return "", fmt.Errorf("path %q must use %s", view, extensions)
 	}
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
 		return "", fmt.Errorf("view path %q escapes the source root", view)
@@ -297,6 +348,12 @@ func makeBuildSpec(routes []Route) (protocol.Spec, string, error) {
 			Kind:       route.kind.String(),
 			Navigation: route.navigation,
 		}
+		if route.kind != routeHTML {
+			continue
+		}
+		spec.Routes[i].Layouts = route.html.Layouts
+		spec.Routes[i].Styles = route.html.Styles
+		spec.Routes[i].Scripts = route.html.Scripts
 	}
 
 	slices.SortFunc(spec.Routes, func(a, b protocol.RouteSpec) int {

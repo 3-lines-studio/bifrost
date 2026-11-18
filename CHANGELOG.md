@@ -6,6 +6,17 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
 ### App Router
 
+- `page.html` is a page Go renders with `html/template`: no renderer process, no
+  props payload, no hydration, and no JavaScript unless the page ships a
+  `page.js`. `page.go` supplies its data through `Load`, its head through
+  `Metadata`, and its cache policy through `Cache`; `layout.html` wraps the pages
+  below it, with `layout.go` loading the chrome once through `Data` and
+  `Metadata`. `layout.css`/`page.css` and `layout.js`/`page.js` are bundled by
+  Vite and linked in the document. A page template reads its loader's value; a
+  layout reads `bifrost.Frame`. The build copies the templates into the binary,
+  and `bifrost dev` reads them from the tree so an edit lands on the next
+  request.
+
 - A `commands` package in the module root turns the app binary into a
   multi-command one: `./app migrate` runs the command and exits before the app
   is built, and no arguments start the server. One artifact for the server, the
