@@ -15,7 +15,9 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
   Vite and linked in the document. A page template reads its loader's value; a
   layout reads `bifrost.Frame`. The build copies the templates into the binary,
   and `bifrost dev` reads them from the tree so an edit lands on the next
-  request.
+  request. A page that lives in its layout's directory shares its `Metadata`: Go
+  has one symbol per package, so the head is read once, as the page's, and the
+  layout adds none.
 - The chrome and the page ship their own assets. `layout.css`/`layout.js` are
   built once per layout and linked first, so every page below it shares one
   cached file; `page.css`/`page.js` carry only what that page brings. A page of

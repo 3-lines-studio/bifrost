@@ -261,7 +261,12 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 					routes[index].LayoutData = modulePath + "/" + routes[index].LayoutDir
 				}
 				routes[index].HasLayout = hasSymbol(ctx, moduleDir, routes[index].LayoutData, "Data")
-				routes[index].HasLayoutMetadata = hasSymbol(ctx, moduleDir, routes[index].LayoutData, "Metadata")
+
+				// A page that lives in its layout's package shares its Metadata: Go has
+				// one symbol per package, so the one the page exports is the one the
+				// chrome exports, and reading it twice would emit its head twice.
+				routes[index].HasLayoutMetadata = routes[index].LayoutData != routes[index].ImportPath &&
+					hasSymbol(ctx, moduleDir, routes[index].LayoutData, "Metadata")
 			}
 		}
 	}

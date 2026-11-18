@@ -1253,6 +1253,43 @@ func TestQualifyTemplates(t *testing.T) {
 	}
 }
 
+func TestGeneratedMainReadsOneHeadForAPageInTheLayoutPackage(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	routes := []appRoute{{
+		Pattern:       "/{$}",
+		View:          "app/page.html",
+		ImportPath:    "example.com",
+		LayoutData:    "example.com",
+		Alias:         "app",
+		LayoutAlias:   "app",
+		PageGo:        true,
+		HTML:          true,
+		Layouts:       []string{"app/layout.html"},
+		LayoutStyles:  []string{"app/layout.css"},
+		LayoutScripts: []string{"app/layout.js"},
+		HasLoader:     true,
+		HasMetadata:   true,
+		HasLayout:     true,
+	}}
+	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), "Metadata: app.Metadata, LayoutData: app.Data})") {
+		t.Fatalf("main must read Data and one Metadata:\n%s", source)
+	}
+	if strings.Contains(string(source), "LayoutMetadata") {
+		t.Fatalf("the layout shares the page's Metadata and must not be read twice:\n%s", source)
+	}
+}
+
 func TestGeneratedMainDeclaresHTMLPage(t *testing.T) {
 	root := t.TempDir()
 	generated := filepath.Join(root, ".bifrost", "app")
