@@ -71,6 +71,8 @@ return bifrost.PageData{
 
 `StaticPage.Document` provides the same attributes for generated pages. Bifrost validates the language, class, and direction before writing the response.
 
+`PageData.Headers` sends headers with the page, as the cookies of a session or a `Vary`. Bifrost keeps the ones that describe the answer itself — `Content-Type`, `Content-Length`, `Cache-Control`, the framing headers of HTTP and of a proxy — to itself.
+
 ## Native pages
 
 A route rendered by a Go function needs no React, Vite, Bun, or embedded assets. Declare it with `Native` and build the app without `Assets`:
@@ -106,7 +108,7 @@ For a MyGo native UI view, the `mygo` module renders it to this HTML from the ac
 
 ## Sitemap and robots
 
-Set `Config.SiteURL` to the public address, as `https://example.com`, and `Register` serves `/sitemap.xml` with every route whose pattern has no parameter, and `/robots.txt` pointing at it. `WithSitemap(paths...)` lists the pages a pattern cannot name, as every post of a blog, which is what a Go page's `Sitemap()` returns. Both carry an ETag and an hour of cache. Routes declared `WithNoIndex` stay out of the sitemap, which is how the app's screens stay out of a search engine. The generated App Router main reads the address from `BIFROST_SITE_URL`.
+Set `Config.SiteURL` to the public address, as `https://example.com`, and `Register` serves `/sitemap.xml` with every route whose pattern has no parameter, and `/robots.txt` pointing at it. `WithSitemap(paths...)` lists the pages a pattern cannot name, as every post of a blog, which is what a Go page's `Sitemap() []string` returns. `WithSitemapEntries(entries...)` adds when each page last changed and the languages it comes in: a `bifrost.SitemapEntry` carries `LastMod` and `Alternates`, which become `<lastmod>` and `xhtml:link rel="alternate" hreflang` of the sitemap, and a Go page returns them from `Sitemap() []bifrost.SitemapEntry`. Both carry an ETag and an hour of cache. Routes declared `WithNoIndex` stay out of the sitemap, which is how the app's screens stay out of a search engine. The generated App Router main reads the address from `BIFROST_SITE_URL`.
 
 ## HTTP composition
 
@@ -224,7 +226,7 @@ A Go page can also export `Screen`, its view for the MyGo app: `func Screen(note
 
 A `page.go` with `Screen` and no `View` is a screen of the app alone: the server answers it with the shell and `noindex`, and the sitemap leaves it out. A `layout.go` exports `Layout(page func(*ui.Context)) func(*ui.Context)` and wraps the pages of its directory and the ones below it, on the server and in the app. A `not-found.go` exports `NotFound` and, optionally, `NotFoundMetadata`, and answers the paths no page holds with a 404. An `error.go` exports `Error(err error) func(*ui.Context)` and, optionally, `ErrorMetadata`, and answers a page whose `Load` failed, with the status the error wraps or a 500: it is the nearest one above the page, wrapped in the layouts of its directory, `noindex`, and never cached. A load that answers 404 shows the `not-found.go` above the page instead.
 
-`func Sitemap() []string` lists the paths of a route whose pattern has a parameter. `func Cache() string` sets the `Cache-Control` of the page. The scaffold of all of it is `bifrost init --native <directory>`.
+`func Sitemap() []string` lists the paths of a route whose pattern has a parameter, and `func Sitemap() []bifrost.SitemapEntry` adds when each last changed and the languages it comes in. `func Cache() string` sets the `Cache-Control` of the page. The scaffold of all of it is `bifrost init --native <directory>`.
 
 `bifrost build` also compiles the browser build to `dist/web`, copies it inside the generated server, and serves it from there, or from `BIFROST_WASM_DIR` when set, so one command produces the pages, the server, and the app the server hands to the browser. `bifrost dev` sets `BIFROST_DEV`, which makes `web.Shell` carry the script that reloads a page when the server restarts.
 - `route.go` exports any of `Get`, `Post`, `Put`, `Patch`, `Delete`, `Head`, and `Options`.

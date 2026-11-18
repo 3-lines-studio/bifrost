@@ -137,7 +137,7 @@ func TestEndToEndDemoApp(t *testing.T) {
 
 	sitemap := get(t, base+"/sitemap.xml", "")
 	for _, want := range []string{
-		"<loc>https://demo.example.com/blog/one-source-three-targets</loc>",
+		"<loc>https://demo.example.com/blog/one-source-three-targets</loc><lastmod>2026-01-12T00:00:00Z</lastmod>",
 		"<loc>https://demo.example.com/pricing</loc>",
 	} {
 		if !strings.Contains(sitemap, want) {

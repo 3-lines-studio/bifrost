@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"time"
 )
 
 // Loader returns JSON-encodable props for one server-rendered request.
@@ -24,11 +25,18 @@ type Document struct {
 
 // PageData lets a Server loader return props and root document attributes.
 // A loader may still return plain props when it needs no document attributes.
+//
+// Headers go with the page it answers, before the ones of the answer itself:
+// the cookies of a session, a Vary, a header of its own. Bifrost keeps the ones
+// that describe the answer (Content-Type, Content-Length, Cache-Control,
+// Transfer-Encoding, Connection and the ones of a proxy) to itself: a route
+// caches with Cache(), not with a header.
 type PageData struct {
 	Props          any
 	Document       Document
 	Status         int
 	ErrorFallbacks int
+	Headers        http.Header
 }
 
 // StaticPage describes one document emitted by a static route.
@@ -116,7 +124,7 @@ type Route struct {
 	cacheControl string
 	noIndex      bool
 	errorRender  NativeError
-	sitemap      []string
+	sitemap      []SitemapEntry
 }
 
 // Server declares a page rendered on each request. A nil loader supplies empty
@@ -192,10 +200,30 @@ func (r Route) WithNoIndex() Route {
 	return r
 }
 
+// SitemapEntry is one page a route adds to the sitemap: the path, when it last
+// changed, and the same page in other languages. LastMod and Alternates are
+// optional, and a zero LastMod writes no <lastmod>.
+type SitemapEntry struct {
+	Path       string
+	LastMod    time.Time
+	Alternates []Alternate
+}
+
 // WithSitemap adds the paths a route serves that its pattern cannot name, as
 // the pages of a pattern with a parameter, such as every post of a blog. Bifrost
 // lists them in the sitemap beside the routes whose pattern is a path.
 func (r Route) WithSitemap(paths ...string) Route {
-	r.sitemap = append(slices.Clone(r.sitemap), paths...)
+	entries := make([]SitemapEntry, 0, len(paths))
+	for _, path := range paths {
+		entries = append(entries, SitemapEntry{Path: path})
+	}
+	return r.WithSitemapEntries(entries...)
+}
+
+// WithSitemapEntries adds the pages a route serves, with when each last changed
+// and the languages it comes in. A page of the same path written twice is the
+// last one, and a page a pattern already names takes what the entry adds.
+func (r Route) WithSitemapEntries(entries ...SitemapEntry) Route {
+	r.sitemap = append(slices.Clone(r.sitemap), entries...)
 	return r
 }

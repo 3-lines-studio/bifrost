@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/3-lines-studio/bifrost"
 	"github.com/3-lines-studio/bifrost/mygo/demo/store"
@@ -84,12 +85,13 @@ func Screen(deps Deps) func(*ui.Context) {
 }
 
 // Sitemap lists the pages of this route: the pattern has a parameter, so only
-// the loader knows the paths a crawler reads.
-func Sitemap() []string {
+// the loader knows the paths a crawler reads, and when each one last changed.
+func Sitemap() []bifrost.SitemapEntry {
 	posts := store.Posts()
-	paths := make([]string, 0, len(posts))
+	entries := make([]bifrost.SitemapEntry, 0, len(posts))
 	for _, post := range posts {
-		paths = append(paths, "/blog/"+post.Slug)
+		date, _ := time.Parse("2006-01-02", post.Date)
+		entries = append(entries, bifrost.SitemapEntry{Path: "/blog/" + post.Slug, LastMod: date})
 	}
-	return paths
+	return entries
 }

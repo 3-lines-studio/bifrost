@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"unicode"
 
@@ -98,6 +99,41 @@ func protocolDocument(document Document) protocol.DocumentAttributes {
 
 func documentFromProtocol(document protocol.DocumentAttributes) Document {
 	return Document{Lang: document.Lang, Class: document.Class, Dir: document.Dir}
+}
+
+// applyPageHeaders writes the headers a loader put in its PageData. The ones
+// that frame the answer are the handler's, not the loader's.
+func applyPageHeaders(w http.ResponseWriter, value any) {
+	var headers http.Header
+	switch data := value.(type) {
+	case PageData:
+		headers = data.Headers
+	case *PageData:
+		if data == nil {
+			return
+		}
+		headers = data.Headers
+	}
+	for name, values := range headers {
+		if answerHeader(name) {
+			continue
+		}
+		for _, value := range values {
+			w.Header().Add(name, value)
+		}
+	}
+}
+
+// answerHeader reports whether a header describes the answer itself, which the
+// handler and the route write.
+func answerHeader(name string) bool {
+	switch http.CanonicalHeaderKey(name) {
+	case "Cache-Control", "Content-Length", "Content-Type", "Transfer-Encoding",
+		"Connection", "Keep-Alive", "Proxy-Connection", "Proxy-Authenticate",
+		"Proxy-Authorization", "Te", "Trailer", "Upgrade":
+		return true
+	}
+	return false
 }
 
 func splitPageData(value any) (any, Document, error) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -482,5 +483,69 @@ func TestWithErrorRequiresNativeRoute(t *testing.T) {
 	})}})
 	if err == nil || !strings.Contains(err.Error(), "native route") {
 		t.Fatalf("error %v", err)
+	}
+}
+
+func TestNativePageHeaders(t *testing.T) {
+	load := func(*http.Request) (any, error) {
+		return PageData{
+			Status: http.StatusCreated,
+			Headers: http.Header{
+				"Set-Cookie":        {"session=abc; Path=/; HttpOnly"},
+				"Vary":              {"Accept-Language"},
+				"Content-Length":    {"1"},
+				"Content-Type":      {"text/plain"},
+				"X-Answer":          {"yes"},
+				"Transfer-Encoding": {"chunked"},
+			},
+		}, nil
+	}
+	app := newNativeApp(t, Config{Routes: []Route{Native("/{$}", staticNativeRender(NativePage{Title: "Home"}), load)}})
+	recorder := serveNative(t, app, httptest.NewRequest(http.MethodGet, "/", nil))
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status %d", recorder.Code)
+	}
+	if got := recorder.Header().Get("Set-Cookie"); got != "session=abc; Path=/; HttpOnly" {
+		t.Errorf("cookie %q", got)
+	}
+	if got := recorder.Header().Get("X-Answer"); got != "yes" {
+		t.Errorf("app header %q", got)
+	}
+	if got := recorder.Header().Get("Vary"); got != "Accept-Language" {
+		t.Errorf("vary %q", got)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Errorf("content type %q", got)
+	}
+	if got := recorder.Header().Get("Content-Length"); got != strconv.Itoa(recorder.Body.Len()) {
+		t.Errorf("content length %q for %d bytes", got, recorder.Body.Len())
+	}
+	if got := recorder.Header().Get("Transfer-Encoding"); got != "" {
+		t.Errorf("transfer encoding %q", got)
+	}
+}
+
+func TestServerPageHeaders(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	applyPageHeaders(recorder, &PageData{
+		Headers: http.Header{
+			"Set-Cookie":     {"session=abc"},
+			"Content-Type":   {"text/plain"},
+			"X-From-The-App": {"yes"},
+		},
+	})
+	if got := recorder.Header().Get("Set-Cookie"); got != "session=abc" {
+		t.Errorf("cookie %q", got)
+	}
+	if got := recorder.Header().Get("X-From-The-App"); got != "yes" {
+		t.Errorf("header %q", got)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "" {
+		t.Errorf("a loader wrote the content type %q", got)
+	}
+	recorder = httptest.NewRecorder()
+	applyPageHeaders(recorder, map[string]any{"headers": "no"})
+	if got := recorder.Header().Get("Set-Cookie"); got != "" {
+		t.Errorf("props wrote a cookie %q", got)
 	}
 }

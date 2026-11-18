@@ -232,6 +232,8 @@ func (h *serverPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 		props = loaded
 	}
 
+	applyPageHeaders(w, props)
+
 	status := http.StatusOK
 	errorFallbacks := 0
 	if data, ok := props.(PageData); ok {

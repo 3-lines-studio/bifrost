@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSitemapListsStaticRoutes(t *testing.T) {
@@ -265,5 +266,82 @@ func TestNativeRejectsInvalidAlternates(t *testing.T) {
 		if response := serveNative(t, app, httptest.NewRequest(http.MethodGet, "/", nil)); response.Code != http.StatusInternalServerError {
 			t.Errorf("alternates %+v answered %d", alternates, response.Code)
 		}
+	}
+}
+
+func TestSitemapEntriesCarryLastModAndAlternates(t *testing.T) {
+	lastMod := time.Date(2025, 3, 2, 10, 0, 0, 0, time.UTC)
+	route := Native("/blog", staticNativeRender(NativePage{}), nil).WithSitemapEntries(
+		SitemapEntry{
+			Path:    "/blog/seo-sin-navegador",
+			LastMod: lastMod,
+			Alternates: []Alternate{
+				{Lang: "es", URL: "https://example.com/es/blog/seo-sin-navegador"},
+				{Lang: "x-default", URL: "https://example.com/blog/seo-sin-navegador"},
+			},
+		},
+		SitemapEntry{Path: "/blog/otro/"},
+	)
+	info, err := newSite("https://example.com", []Route{route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sitemap := string(info.sitemap)
+	for _, want := range []string{
+		`<loc>https://example.com/blog/seo-sin-navegador</loc><lastmod>2025-03-02T10:00:00Z</lastmod>`,
+		`<xhtml:link rel="alternate" hreflang="es" href="https://example.com/es/blog/seo-sin-navegador"/>`,
+		`<xhtml:link rel="alternate" hreflang="x-default" href="https://example.com/blog/seo-sin-navegador"/>`,
+		`<loc>https://example.com/blog/otro</loc></url>`,
+	} {
+		if !strings.Contains(sitemap, want) {
+			t.Errorf("sitemap misses %q: %s", want, sitemap)
+		}
+	}
+	if !strings.Contains(sitemap, `xmlns:xhtml="http://www.w3.org/1999/xhtml"`) {
+		t.Errorf("sitemap has no xhtml namespace: %s", sitemap)
+	}
+	if strings.Contains(sitemap, `<loc>https://example.com/blog/otro</loc><lastmod>`) {
+		t.Errorf("an entry without a date wrote one: %s", sitemap)
+	}
+}
+
+func TestSitemapSkipsTheNamespaceWithoutAlternates(t *testing.T) {
+	info, err := newSite("https://example.com", []Route{Native("/pricing", staticNativeRender(NativePage{}), nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(info.sitemap), "xhtml") {
+		t.Errorf("sitemap declares a namespace nothing uses: %s", info.sitemap)
+	}
+}
+
+func TestSitemapKeepsTheLastPageOfAPath(t *testing.T) {
+	route := Native("/pricing", staticNativeRender(NativePage{}), nil).WithSitemapEntries(
+		SitemapEntry{Path: "/pricing", LastMod: time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC)},
+	)
+	info, err := newSite("https://example.com", []Route{route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Count(string(info.sitemap), "<url>"), 1; got != want {
+		t.Fatalf("%d urls, want %d: %s", got, want, info.sitemap)
+	}
+	if !strings.Contains(string(info.sitemap), `<lastmod>2025-01-02T00:00:00Z</lastmod>`) {
+		t.Errorf("the entry of the pattern lost its date: %s", info.sitemap)
+	}
+}
+
+func TestSitemapRejectsAnAlternateThatIsNotAURL(t *testing.T) {
+	route := Native("/blog", staticNativeRender(NativePage{}), nil).WithSitemapEntries(
+		SitemapEntry{Path: "/blog/a", Alternates: []Alternate{{Lang: "es", URL: "/es/blog/a"}}},
+	)
+	if _, err := newSite("https://example.com", []Route{route}); err == nil {
+		t.Fatal("a relative alternate was taken")
+	}
+	route = Native("/blog", staticNativeRender(NativePage{}), nil).WithSitemapEntries(
+		SitemapEntry{Path: "/blog/a", Alternates: []Alternate{{Lang: "not a tag", URL: "https://example.com/a"}}},
+	)
+	if _, err := newSite("https://example.com", []Route{route}); err == nil {
+		t.Fatal("a bad language was taken")
 	}
 }

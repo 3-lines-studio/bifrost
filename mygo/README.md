@@ -49,9 +49,9 @@ func Screen() func(*ui.Context) { return View() } // the page in the app, made b
 | `View()` or `View(props Props) func(*ui.Context)` | the page. `props` come from `Load` |
 | `Metadata()` or `Metadata(props Props) seo.Head` | title, description, canonical, image, robots, keywords, card type, alternates, JSON-LD, `lang`, `dir` |
 | `Screen()` or `Screen(deps D) func(*ui.Context)` | the page in the app, typed: no `any`, no assertions |
-| `Load(*http.Request) (any, error)` | server props, as a `Props` value or `bifrost.PageData` |
+| `Load(*http.Request) (any, error)` | server props, as a `Props` value or `bifrost.PageData` (status, document attributes, headers) |
 | `Cache() string` | the `Cache-Control` of the rendered page |
-| `Sitemap() []string` | the paths a pattern with a parameter serves |
+| `Sitemap() []string` or `[]bifrost.SitemapEntry` | the paths a pattern with a parameter serves, with when each changed and its languages |
 | `var Links map[string]string` | where a link drawn with `ui.Link` goes |
 
 A `page.go` with `Screen` and no `View` is a screen of the app: the server
@@ -292,6 +292,10 @@ the words of each.
 - A QR code chooses its mask by the score of the specification, and correct
   encoders differ in how they break a tie, as `python-qrcode` and `qrencode` do.
   Encode a code once and draw the `Code`: `Element` converts its bitmap once.
+- The app's own font goes in with `ui.RegisterFont(data, family)` and an
+  `//go:embed` of the file, and a text takes it with `.Font(family, size)`. The
+  HTML `web.Shell` serves is styled with the system stack, so a page reads in
+  the system font until the app draws.
 
 ## Size
 

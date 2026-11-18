@@ -69,6 +69,7 @@ type appRoute struct {
 	HasLoader    bool
 	HasCache     bool
 	HasSitemap   bool
+	SitemapKind  sitemapReturn
 	HasHead      bool
 	ErrorViews   []string
 	NotFoundView string
@@ -324,7 +325,6 @@ func prepareAppRouter(ctx context.Context, projectRoot, routeRoot string, render
 		}
 		routes[index].HasLoader = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Load")
 		routes[index].HasCache = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Cache")
-		routes[index].HasSitemap = hasSymbol(ctx, moduleDir, routes[index].ImportPath, "Sitemap")
 	}
 	for index := range goDirs {
 		if goDirs[index].Directory == "." {
@@ -536,6 +536,12 @@ func discoverRoutes(root string) ([]appRoute, error) {
 					return nil, fmt.Errorf("bifrost: %s page.go has no View, so Metadata takes no props", directory)
 				}
 				route.HasLinks = sourceDeclares(record.pageGo, "Links")
+				kind, declared, err := sitemapDeclaration(filepath.Dir(record.pageGo))
+				if err != nil {
+					return nil, err
+				}
+				route.SitemapKind = kind
+				route.HasSitemap = declared
 				route.ScreenArgs, route.Screen = screenArgs, hasScreen
 				if route.Screen && route.ScreenArgs > 1 {
 					return nil, fmt.Errorf("bifrost: %s Screen takes one dependency or none", directory)
@@ -623,6 +629,62 @@ func declarationParams(filePath, name string) (int, bool) {
 		return function.Type.Params.NumFields(), true
 	}
 	return 0, false
+}
+
+// sitemapReturn is how a page declares the paths it adds to the sitemap.
+type sitemapReturn uint8
+
+const (
+	sitemapNone sitemapReturn = iota
+	sitemapPaths
+	sitemapEntries
+)
+
+// sitemapDeclaration returns how the page package in directory declares
+// Sitemap, and whether it declares it at all. Only a function of no receiver
+// that returns []string or []bifrost.SitemapEntry is one: anything else fails
+// the build where the page is read, not where the server is generated.
+func sitemapDeclaration(directory string) (sitemapReturn, bool, error) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return sitemapNone, false, err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		filePath := filepath.Join(directory, name)
+		file, err := parser.ParseFile(token.NewFileSet(), filePath, nil, parser.SkipObjectResolution)
+		if err != nil {
+			return sitemapNone, false, err
+		}
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Recv != nil || function.Name.Name != "Sitemap" {
+				continue
+			}
+			if function.Type.Params.NumFields() != 0 || function.Type.Results == nil || function.Type.Results.NumFields() != 1 {
+				return sitemapNone, false, fmt.Errorf("bifrost: %s: Sitemap takes no argument and returns []string or []bifrost.SitemapEntry", filePath)
+			}
+			array, ok := function.Type.Results.List[0].Type.(*ast.ArrayType)
+			if !ok {
+				return sitemapNone, false, fmt.Errorf("bifrost: %s: Sitemap returns []string or []bifrost.SitemapEntry", filePath)
+			}
+			switch element := array.Elt.(type) {
+			case *ast.Ident:
+				if element.Name == "string" {
+					return sitemapPaths, true, nil
+				}
+			case *ast.SelectorExpr:
+				if element.Sel.Name == "SitemapEntry" {
+					return sitemapEntries, true, nil
+				}
+			}
+			return sitemapNone, false, fmt.Errorf("bifrost: %s: Sitemap returns []string or []bifrost.SitemapEntry", filePath)
+		}
+	}
+	return sitemapNone, false, nil
 }
 
 func sourceDeclares(filePath, name string) bool {
@@ -1715,7 +1777,11 @@ func writeAppRouterMain(root, generated string, routes []appRoute, goDirs []goDi
 				cache += ".WithNoIndex()"
 			}
 			if route.HasSitemap {
-				cache += ".WithSitemap(" + route.Alias + ".Sitemap()...)"
+				if route.SitemapKind == sitemapEntries {
+					cache += ".WithSitemapEntries(" + route.Alias + ".Sitemap()...)"
+				} else {
+					cache += ".WithSitemap(" + route.Alias + ".Sitemap()...)"
+				}
 			}
 			loader := "nil"
 			switch {

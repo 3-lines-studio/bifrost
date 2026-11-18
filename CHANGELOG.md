@@ -41,6 +41,8 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
 ### App Router
 
+- `Route.WithSitemapEntries` adds a `bifrost.SitemapEntry` per page: the path, when it last changed and the same page in other languages. The sitemap writes `<lastmod>` and `xhtml:link rel="alternate" hreflang`, and declares the `xhtml` namespace only when a page has an alternate. A Go page returns them from `Sitemap() []bifrost.SitemapEntry`; `bifrost build` reads which of the two shapes the page declares.
+- `PageData.Headers` sends headers with the page a loader answers, as the `Set-Cookie` of a session or a `Vary`. Bifrost keeps the headers of the answer itself — `Content-Type`, `Content-Length`, `Cache-Control` and the framing ones — and a route caches with `Cache()`.
 - The Go page metadata is `seo.Head`, a type instead of a struct the page had to name, with `Title`, `Description`, `Canonical`, `Image`, `Robots`, `Schema`, `Lang`, and `Dir`.
 - `layout.go` wraps the pages of its directory and the ones below it on the server and in the app; `not-found.go` answers the paths no page holds with a 404; `error.go` answers a page whose `Load` failed, with the status the error wraps or a 500, `noindex` and uncached. A `page.go` with `Screen` and no `View` is a screen of the app: the server answers the shell with `noindex` and leaves it out of the sitemap.
 - A `commands` package in the module root turns the app binary into a

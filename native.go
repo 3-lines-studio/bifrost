@@ -79,6 +79,8 @@ func (h *nativePageHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 		return
 	}
 
+	applyPageHeaders(w, props)
+
 	status := http.StatusOK
 	if data, ok := props.(PageData); ok && data.Status != 0 {
 		status = data.Status

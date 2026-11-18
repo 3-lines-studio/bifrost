@@ -1637,3 +1637,39 @@ func TestNearestNotFound(t *testing.T) {
 		t.Errorf("found %d without a not-found page", at)
 	}
 }
+
+func TestSitemapDeclaration(t *testing.T) {
+	directory := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("page.go", "package page\n\nfunc Sitemap() []string { return nil }\n")
+	kind, declared, err := sitemapDeclaration(directory)
+	if err != nil || !declared || kind != sitemapPaths {
+		t.Fatalf("paths: %v, %t, %v", kind, declared, err)
+	}
+
+	write("page.go", "package page\n\nimport \"github.com/3-lines-studio/bifrost\"\n\nfunc Sitemap() []bifrost.SitemapEntry { return nil }\n")
+	if kind, declared, err = sitemapDeclaration(directory); err != nil || !declared || kind != sitemapEntries {
+		t.Fatalf("entries: %v, %t, %v", kind, declared, err)
+	}
+
+	write("other.go", "package page\n\nimport bf \"github.com/3-lines-studio/bifrost\"\n\nfunc Sitemap() []bf.SitemapEntry { return nil }\n")
+	os.Remove(filepath.Join(directory, "page.go"))
+	if kind, declared, err = sitemapDeclaration(directory); err != nil || !declared || kind != sitemapEntries {
+		t.Fatalf("entries in another file, with an alias: %v, %t, %v", kind, declared, err)
+	}
+
+	write("other.go", "package page\n\nfunc Sitemap() map[string]string { return nil }\n")
+	if _, _, err := sitemapDeclaration(directory); err == nil {
+		t.Fatal("a sitemap of another type was taken")
+	}
+
+	os.Remove(filepath.Join(directory, "other.go"))
+	if kind, declared, err = sitemapDeclaration(directory); err != nil || declared || kind != sitemapNone {
+		t.Fatalf("none: %v, %t, %v", kind, declared, err)
+	}
+}
