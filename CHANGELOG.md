@@ -21,6 +21,10 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
 ### MyGo
 
+- `mygo/client` sends a `Blob` where it is (memory, a range of a file of the disk or a `File` of the browser) and reports the bytes as they go out with `OnUpload`; `client.Copy` writes an answer to a writer as it arrives. In a browser a request with a blob or with progress goes with `XMLHttpRequest`, which takes a `File` without a copy and reports its upload.
+- `mygo/file` picks files in a window's dialog or in the browser's picker, opens one by path, reads a range as a request body, and saves a download. `mygo/exif` reads the size, orientation, camera, lens, exposure, time and place of a JPEG, PNG or WebP from its headers, without decoding the picture.
+- `mygo/data` caches the values a screen reads: one load per key on a goroutine of its own, `Loading`, `Ready` and `Failed` states, invalidation, refresh, optimistic writes, and changes to apply in `Window.Update`.
+- `mygo/upload` sends a file in parts to a server that signs them: concurrency, retries with backoff, part size, progress, and resume from a `Store` after a failure or a reload. An app implements `Signer` on its own API.
 - The `mygo` module renders a MyGo native UI view to HTML for `Native` pages: `seo.Body` reads the accessibility tree of MyGo's headless tester, and `web.Shell` boots the WebAssembly build over that HTML at the page the URL names. It is a module of its own, so Bifrost keeps no MyGo dependency.
 - `mygo/demo` is the app that exercises all of it, and the end-to-end test of `bifrost`: SEO metadata, a blog of pages a loader names, a layout tree, an error page, a not-found page, a sign-in flow on `auth.Session`, and a server binary that carries the browser build.
 - `mygo/client` calls the server with `fetch` in a browser and `net/http` elsewhere: the wasm build drops about 6.9 MB, from 21.0 MB to 14.1 MB. A call made on the goroutine the app draws on would wait for an answer that arrives on that same goroutine, so it answers `client.ErrUIThread` instead of deadlocking the build.

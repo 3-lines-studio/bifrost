@@ -22,12 +22,18 @@ import (
 )
 
 // Request is a call to the server. Header holds the request headers, as
-// "Authorization": "Bearer …"; Body is the request body, nil for none.
+// "Authorization": "[REDACTED]". The body is Body, or the Blob the request
+// sends where it is when Blob is set: a file of the person using the app goes
+// out without being read into Go first. OnUpload, when set, is called with the
+// bytes sent so far as the request goes: it runs on the goroutine sending the
+// request, which is not the one that draws.
 type Request struct {
-	Method string
-	URL    string
-	Header map[string]string
-	Body   []byte
+	Method   string
+	URL      string
+	Header   map[string]string
+	Body     []byte
+	Blob     Blob
+	OnUpload func(sent int64)
 }
 
 // Response is what the server answered.
@@ -44,6 +50,9 @@ func Do(ctx context.Context, request Request) (Response, error) {
 	}
 	if request.Method == "" {
 		request.Method = "GET"
+	}
+	if len(request.Body) > 0 && request.Blob.present() {
+		return Response{}, fmt.Errorf("client: %s %s has a body and a blob", request.Method, request.URL)
 	}
 	return send(ctx, request)
 }

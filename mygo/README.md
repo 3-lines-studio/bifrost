@@ -151,6 +151,76 @@ refresher, or one whose refresher fails, signs out and answers the 401.
 A backend without a secret store answers `errors.ErrUnsupported`; the app can
 fall back to a file of its own or to asking for the token again.
 
+A request sends a `client.Blob` where it is: the bytes of memory, or a range of
+a file the disk or the browser holds, without reading it into Go first.
+`OnUpload` reports the bytes as they go out, and in a browser the request goes
+with `XMLHttpRequest`, whose upload reports and which takes a `File` without a
+copy.
+
+```go
+client.Do(ctx, client.Request{
+	Method:   "PUT",
+	URL:      signed,
+	Blob:     picture.Blob(0, picture.Size()),
+	OnUpload: func(sent int64) { ... },
+})
+```
+
+`client.Copy` writes an answer to a writer as it arrives, which is a download.
+
+## Files, pictures and uploads
+
+`file` hands the app the files of the person: `file.Pick` in a window's dialog
+or in the browser's picker, `file.Open` by path, and `file.Save` to download
+one. A `File` reads in ranges, so a picture of 40 MiB goes out in parts:
+
+```go
+picture, err := file.Open(path)
+head, err := picture.Head(ctx, 256<<10)          // what a decoder needs
+metadata, err := exif.Read(ctx, picture, picture.Size())
+```
+
+`exif` reads the size, the orientation, the camera and lens, the exposure, the
+time and the place of a JPEG, PNG or WebP from its headers, without decoding
+the picture: what an upload sends to the server before the file.
+
+`upload` sends the file in parts to a server that signs them, as S3 takes them:
+concurrency per file, retries with backoff, the part size, progress, and a
+`Store` that resumes an upload a reload interrupted.
+
+```go
+result, err := upload.Run(ctx, picture, signer, upload.Options{
+	Store:      upload.NewMemory(),
+	OnProgress: func(p upload.Progress) { win.Update(func() { show(p) }) },
+})
+```
+
+The app implements `upload.Signer` on its own API: `Start` opens the upload,
+`Sign` gives the URL of each part, `Complete` joins them and `Abort` drops one
+nobody finishes. Everything else is the package's.
+
+## State of a screen
+
+`data.Cache` holds what a screen reads, loads it on a goroutine of its own, and
+tells what changed, so the view reads a value without waiting for it:
+
+```go
+notes := data.New(loadNotes)                       // func(ctx, key) ([]Note, error)
+
+switch entry := notes.Get(0); entry.State {
+case data.Loading: ui.Spinner(c)
+case data.Failed:  ui.Text(c, entry.Err.Error())
+default:           list(c, entry.Value)
+}
+
+notes.OnChange(func(int) { win.Update(screen.refresh) })
+```
+
+`Get` starts one load per key, `Invalidate` marks a value stale, `Refresh`
+loads it now, `Set` and `Update` write a value the app knows, and `Forget`
+drops one. A failure stays until the app asks again.
+
+
 ## Limits
 
 - A call to the server blocks until the answer arrives, and in a browser the
@@ -175,6 +245,12 @@ fall back to a file of its own or to asking for the token again.
 - Server code in a page package (`Load` with `net/http`) is linked into the
   wasm: the linker drops what nothing calls, but `net/http` keeps about 1.6 MB
   of its own. `client` keeps it out of the app.
+- `file.Pick`, `File.Head` and `file.Save` wait for the person and for the
+  browser: call them from a goroutine. On the goroutine that draws, a browser
+  answers `file.ErrUIThread`, which is `client.ErrUIThread`.
+- In a browser a download is the browser's: `file.Save` hands it the URL, so
+  the URL must authorize itself, as a signed one does, or ride the cookies of
+  the page. Progress is a window's.
 
 ## Size
 
