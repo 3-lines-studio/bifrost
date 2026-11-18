@@ -226,3 +226,23 @@ func TestHTMLPageIsCompressed(t *testing.T) {
 		t.Fatalf("body lacks the page: %d bytes", len(data))
 	}
 }
+
+func TestCompressLeavesCloudflareRequestsAlone(t *testing.T) {
+	handler := Compress(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(strings.Repeat("<p>hola</p>", 400)))
+	}))
+
+	request := httptest.NewRequest(http.MethodGet, "/about", nil)
+	request.Header.Set("Accept-Encoding", "br, gzip")
+	request.Header.Set("CF-Ray", "8f3c1a2b9d4e5f60-EZE")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if encoding := response.Header().Get("Content-Encoding"); encoding != "" {
+		t.Fatalf("content encoding = %q, the edge compresses this one", encoding)
+	}
+	if contentType := response.Header().Get("Content-Type"); contentType != "text/html; charset=utf-8" {
+		t.Fatalf("content type = %q", contentType)
+	}
+}

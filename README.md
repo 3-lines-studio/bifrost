@@ -94,7 +94,7 @@ Bifrost answers with gzip when the client asks for it and the response is worth 
 
 The App Router applies it to the whole mux, and `bifrost.Compress(handler)` wraps a handler of your own.
 
-An origin behind a CDN that speaks Brotli is the case to think about: Cloudflare asks every origin for `br, gzip` and keeps the encoding the origin sends, so enabling gzip there trades the CDN's Brotli for gzip (about 10% more bytes on the wire) against a 6 to 8 times smaller response between the CDN and the origin.
+An origin behind a CDN that speaks Brotli is the case to think about: Cloudflare asks every origin for `br, gzip` and keeps the encoding the origin sends, so compressing there would trade the CDN's Brotli for gzip (about 10% more bytes on the wire) against a 6 to 8 times smaller response between the CDN and the origin. A request that arrives through Cloudflare carries a `CF-Ray` header, and Bifrost leaves those alone: the browser gets Brotli, and the bytes between the edge and the origin stay Cloudflare's to save.
 
 ## Build and runtime boundary
 

@@ -390,3 +390,16 @@ func TestHTMLPageServesHTMLWithoutMarkdownRequest(t *testing.T) {
 		t.Fatalf("body is not a document:\n%s", recorder.Body.String())
 	}
 }
+
+func TestHTMLPageVariesByAccept(t *testing.T) {
+	templates := fstest.MapFS{aboutTemplates: {Data: []byte(`<p>page</p>`)}}
+	app := newHTMLApp(t, templates, HTML("/about", HTMLPage{Page: aboutTemplates}))
+	state := htmlHandler(t, app, templates)
+
+	recorder := httptest.NewRecorder()
+	state.handlers["/about"].ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/about", nil))
+
+	if got := recorder.Header().Values("Vary"); len(got) != 1 || got[0] != "Accept" {
+		t.Fatalf("vary = %v, want [Accept]", got)
+	}
+}

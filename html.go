@@ -45,6 +45,9 @@ type htmlTemplates struct {
 }
 
 func (h *htmlPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
+	// The same path answers a document or Markdown, so a cache has to key on
+	// Accept before it stores either.
+	w.Header().Add("Vary", "Accept")
 	data, document, status, err := h.load(request)
 	if err != nil {
 		h.serveError(w, request, err)

@@ -41,16 +41,18 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
   included, converted in the server process. The answer keeps the status the
   loader chose, so a page that answers 404 keeps answering 404 there too.
 
+- An HTML page sends `Vary: Accept`, because the same path answers the document
+  or the Markdown of it.
+
 - Responses are compressed with gzip when the client accepts it and the body
   shrinks: documents, stylesheets, scripts, JSON, SVG, and Markdown. Fonts,
   images, video, event streams, responses that already carry a
   `Content-Encoding`, and responses that ask for `no-transform` are passed
   through. The body streams through a pooled writer, so `Content-Length` is
   dropped and `Vary: Accept-Encoding` is added. The App Router applies it to the
-  whole mux; `bifrost.Compress` wraps a handler of your own. Behind a Brotli CDN
-  the trade is explicit: the CDN keeps our gzip instead of compressing itself,
-  which costs about 10% more bytes to the browser and saves 6 to 8 times the
-  bytes between the CDN and the origin.
+  whole mux; `bifrost.Compress` wraps a handler of your own. A request that
+  carries `CF-Ray` is left alone, because Cloudflare keeps the encoding the
+  origin sends and its Brotli is smaller than our gzip.
 
 - Renderer admission is bounded by time instead of an instant reject: a request waits up to two seconds for capacity and then fails with 503 and `Retry-After`. Under a burst the old queue returned 503 for 98% of requests while workers were free microseconds later.
 - The missing-Bun error names `BIFROST_BUN`, the Bun install, and `--embed-bun`.

@@ -20,16 +20,17 @@ import (
 // reach the browser one at a time.
 //
 // The body is compressed as it goes, so the length is no longer known: the
-// header is dropped and the response becomes chunked. When the origin sits
-// behind a CDN that speaks Brotli, that CDN will pass this gzip through instead
-// of compressing the response itself, so a deployment that gets Brotli from its
-// edge is better off without this middleware on the public path.
+// header is dropped and the response becomes chunked. A request that arrives
+// through Cloudflare carries a CF-Ray header: Cloudflare compresses with Brotli
+// and keeps whatever encoding the origin sends, so those requests are left
+// alone. The browser gets the smaller Brotli, and the bytes between the edge and
+// the origin are Cloudflare's to save.
 func Compress(next http.Handler) http.Handler {
 	if next == nil {
 		return http.NotFoundHandler()
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !acceptsGzip(r.Header.Get("Accept-Encoding")) {
+		if throughCloudflare(r) || !acceptsGzip(r.Header.Get("Accept-Encoding")) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -37,6 +38,10 @@ func Compress(next http.Handler) http.Handler {
 		defer writer.close()
 		next.ServeHTTP(writer, r)
 	})
+}
+
+func throughCloudflare(r *http.Request) bool {
+	return r.Header.Get("CF-Ray") != ""
 }
 
 const minimumCompressedBytes = 1024
