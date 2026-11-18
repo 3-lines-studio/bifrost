@@ -39,6 +39,11 @@ type Config struct {
 	// RenderQueue bounds requests waiting for renderer capacity. Zero uses 64.
 	RenderQueue int
 
+	// SiteURL is the public address of the site, as https://example.com. When
+	// set, Register serves /sitemap.xml with the static routes and /robots.txt
+	// pointing at it.
+	SiteURL string
+
 	Limits Limits
 	Logger *slog.Logger
 }
@@ -51,6 +56,7 @@ type App struct {
 	hooks      registeredHooks
 	spec       protocol.Spec
 	specHash   string
+	site       *site
 	runtime    *runtimeState
 	appPlugins []string
 	limits     Limits
@@ -65,8 +71,8 @@ func New(config Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	if config.Assets == nil && !Building() {
-		return nil, errors.New("bifrost: Config.Assets is required outside build phases")
+	if app.runtime == nil && !Building() {
+		return nil, errors.New("bifrost: Config.Assets is required outside build phases unless every route is Native")
 	}
 	return app, nil
 }
@@ -122,6 +128,10 @@ func newApp(config Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	siteInfo, err := newSite(config.SiteURL, normalizedRoutes)
+	if err != nil {
+		return nil, err
+	}
 	logger := config.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -137,9 +147,16 @@ func newApp(config Config) (*App, error) {
 		hooks:      cloneHooks(state.hooks),
 		spec:       spec,
 		specHash:   specHash,
+		site:       siteInfo,
 		appPlugins: pluginNames,
 		limits:     limits,
 		logger:     logger,
+	}
+	nativeRoutes := 0
+	for _, route := range normalizedRoutes {
+		if route.kind == routeNative {
+			nativeRoutes++
+		}
 	}
 	if err := app.handleBuildPhase(); err != nil {
 		return nil, err
@@ -147,8 +164,13 @@ func newApp(config Config) (*App, error) {
 	if os.Getenv(buildPhaseEnv) != "" {
 		return app, nil
 	}
-	if config.Assets != nil {
+	switch {
+	case config.Assets != nil:
 		if err := app.initializeProduction(config); err != nil {
+			return nil, err
+		}
+	case nativeRoutes > 0 && nativeRoutes == len(normalizedRoutes):
+		if err := app.initializeNative(); err != nil {
 			return nil, err
 		}
 	}
@@ -183,7 +205,7 @@ func validateRoutes(sourceRoot string, routes []Route) ([]Route, error) {
 
 	for i, route := range routes {
 		if route.kind == routeInvalid {
-			return nil, fmt.Errorf("bifrost: route %d was not created by Server, Static, or Client", i)
+			return nil, fmt.Errorf("bifrost: route %d was not created by Server, Static, Client, or Native", i)
 		}
 		if err := validatePattern(route.pattern); err != nil {
 			return nil, fmt.Errorf("bifrost: route %d: %w", i, err)
@@ -193,15 +215,26 @@ func validateRoutes(sourceRoot string, routes []Route) ([]Route, error) {
 		}
 		seen[route.pattern] = struct{}{}
 
+		if route.navigation && route.kind != routeServer {
+			return nil, fmt.Errorf("bifrost: navigation requires a server route: %q", route.pattern)
+		}
+
+		if route.kind == routeNative {
+			if route.render == nil {
+				return nil, fmt.Errorf("bifrost: native route %q has no render function", route.pattern)
+			}
+			normalized[i] = route
+			continue
+		}
+		if route.errorRender != nil {
+			return nil, fmt.Errorf("bifrost: WithError requires a native route: %q", route.pattern)
+		}
+
 		view, err := normalizeView(sourceRoot, route.view)
 		if err != nil {
 			return nil, fmt.Errorf("bifrost: route %q: %w", route.pattern, err)
 		}
 		route.view = view
-
-		if route.navigation && route.kind != routeServer {
-			return nil, fmt.Errorf("bifrost: navigation requires a server route: %q", route.pattern)
-		}
 
 		if route.kind == routeStatic && patternIsDynamic(route.pattern) && route.generate == nil {
 			return nil, fmt.Errorf("bifrost: dynamic static route %q requires a generator", route.pattern)
@@ -288,15 +321,18 @@ func patternIsDynamic(pattern string) bool {
 func makeBuildSpec(routes []Route) (protocol.Spec, string, error) {
 	spec := protocol.Spec{
 		Schema: protocol.Schema,
-		Routes: make([]protocol.RouteSpec, len(routes)),
+		Routes: make([]protocol.RouteSpec, 0, len(routes)),
 	}
-	for i, route := range routes {
-		spec.Routes[i] = protocol.RouteSpec{
+	for _, route := range routes {
+		if route.kind == routeNative {
+			continue
+		}
+		spec.Routes = append(spec.Routes, protocol.RouteSpec{
 			Pattern:    route.pattern,
 			View:       route.view,
 			Kind:       route.kind.String(),
 			Navigation: route.navigation,
-		}
+		})
 	}
 
 	slices.SortFunc(spec.Routes, func(a, b protocol.RouteSpec) int {

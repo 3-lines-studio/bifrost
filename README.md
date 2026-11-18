@@ -1,6 +1,6 @@
 # Bifrost
 
-Bifrost serves Vite-built React pages from an ordinary Go `net/http` application. Vite owns frontend builds, plugins, assets, and development HMR. Bun executes streaming React SSR. Go owns routing, loaders, HTTP, validation, and deployment.
+Bifrost serves Vite-built React pages from an ordinary Go `net/http` application. Vite owns frontend builds, plugins, assets, and development HMR. Bun executes streaming React SSR. Go owns routing, loaders, HTTP, validation, and deployment. A route can also be rendered by a Go function with `bifrost.Native`, with no frontend build at all.
 
 The App Router under `app/` is the default and recommended router: `bifrost init` scaffolds it. The classic router below is the explicit, opt-in alternative for apps that declare routes in Go.
 
@@ -36,13 +36,15 @@ go tool bifrost routes .
 go tool bifrost version
 ```
 
-`init` scaffolds the App Router, resolves the module with `go get -tool`, and runs `bun install` (`--no-install` skips both); `--classic` scaffolds the classic router instead. The tool directive makes `go tool bifrost` runnable offline from the module graph.
+`init` scaffolds the App Router, resolves the module with `go get -tool`, and runs `bun install` (`--no-install` skips both); `--classic` scaffolds the classic router instead, and `--native` a MyGo app of Go pages, with no Bun, no Vite, and no React. The tool directive makes `go tool bifrost` runnable offline from the module graph.
 
 Flags precede the package path. `build` accepts `--sourcemaps`, `--static-workers`, `--output`, `--embed-bun`, `--vite-config`, and `--render-concurrency` and `--render-queue` (the App Router takes its renderer worker count and its queue depth here). `dev` accepts `--poll`, `--vite-port` (zero picks a free port), and `--vite-config`. `routes` prints the route table (views, API handlers, and middleware) without building the app (`-C` and `--vite-config`).
 
 `dev` runs one validated bootstrap build, then owns a Bun process hosting Vite's development server and the SSR bridge. The bridge outlives Go child restarts, so a Go edit never discards frontend module state. Browser assets are proxied through your Go origin at `/_bifrost/dev/`, so HMR, module loads, and page requests share one origin and the Vite server never has to be reachable from the browser. Server and Static pages include stylesheet links from Vite's live SSR module graph, so development pages keep their styles instead of flashing unstyled content. Go replacement is detected by a long-poll to `/_bifrost/build-id` that holds until the process is replaced, so idle development generates almost no requests.
 
 `build` runs the app through describe and static-generation phases, asks Vite to build each unique client and SSR view, prerenders Static routes through Bun, compiles the Bun renderer only when the app embeds it, validates Vite's manifests, writes a strict Bifrost manifest, and atomically replaces `.bifrost`. The generated `zz_bifrost_gen.go` embeds `.bifrost` and provides the package-local `bifrostAssets` value used by `Config`.
+
+An app with Go pages skips the frontend phases it does not need: a tree of only Go pages builds with `go build` alone, and then `build` also compiles the browser build of the app to `dist/web` (`app.wasm`, its gzip, and the `wasm_exec.js` of the toolchain) and copies it inside the server, so a build deploys as one file: the server answers `/app.wasm` from the copy, or from `BIFROST_WASM_DIR` when set. `dev` rebuilds that wasm beside the server when a Go file changes, serves it from disk, and makes the open page follow the server: a restart reloads the tab.
 
 ## React module contract
 
@@ -68,6 +70,41 @@ return bifrost.PageData{
 ```
 
 `StaticPage.Document` provides the same attributes for generated pages. Bifrost validates the language, class, and direction before writing the response.
+
+## Native pages
+
+A route rendered by a Go function needs no React, Vite, Bun, or embedded assets. Declare it with `Native` and build the app without `Assets`:
+
+```go
+app, err := bifrost.New(bifrost.Config{
+    Routes: []bifrost.Route{
+        bifrost.Native("/docs/{slug}", renderDoc, loadDoc),
+    },
+})
+
+func renderDoc(ctx context.Context, props json.RawMessage) (bifrost.NativePage, error) {
+    return bifrost.NativePage{
+        Title:       "Docs",
+        Description: "What the page is about",
+        Canonical:   "https://example.com/docs",
+        Body:        []byte("<h1>Docs</h1>"),
+    }, nil
+}
+```
+
+`NativePage.Body` is HTML placed inside the document Bifrost composes: doctype, `html` attributes from `PageData.Document`, charset, viewport, title, description, and canonical link. The loader receives the request, so `request.PathValue` reads dynamic segments. Props are encoded once exactly as for Server routes, so `RawProps` and `Limits.MaxPropsBytes` apply; the body is bounded by `Limits.MaxFrameBytes` and the composed head by `Limits.MaxHeadBytes`. The document keeps the same default `Cache-Control`; `WithCache` overrides it. `ResolveMarkdown` leaves native pages unchanged.
+
+`WithError` gives a Native route a page for a loader that fails: Bifrost renders it with the status the error wraps, or 500, and never caches it. Redirects still redirect and a response hook still answers first.
+
+`NativePage` also carries what a search engine and a social card read: `Image` becomes `og:image` with a `summary_large_image` card, `Robots` sets the crawler directives, `Keywords` the subject, `Type` the `og:type` of the card, `Alternates` the same page in other languages, `Schema` a JSON-LD value written with its `<` escaped (an array of them becomes one script each), and `Lang` and `Dir` override the document's attributes. `WithNoIndex` keeps a route out of the sitemap.
+
+Native routes render in process: they start no renderer and read no assets. They share an app with Server, Static, and Client routes, so a page moves from React to Go one route at a time; the JS routes still need `Assets`, and an app of only native routes runs without them. `bifrost.Building()` is never true for one. `example/native` is a complete native-only app.
+
+For a MyGo native UI view, the `mygo` module renders it to this HTML from the accessibility tree of MyGo's headless tester: `seo.Body(view, seo.Options{Links: links})`, and `web.Shell` wraps it with a loading overlay and the script that boots the WebAssembly build over it. It is a module of its own, so Bifrost's dependencies do not change. The [App Router](#the-app-router) generates all of it from `app/page.go`.
+
+## Sitemap and robots
+
+Set `Config.SiteURL` to the public address, as `https://example.com`, and `Register` serves `/sitemap.xml` with every route whose pattern has no parameter, and `/robots.txt` pointing at it. `WithSitemap(paths...)` lists the pages a pattern cannot name, as every post of a blog, which is what a Go page's `Sitemap()` returns. Both carry an ETag and an hour of cache. Routes declared `WithNoIndex` stay out of the sitemap, which is how the app's screens stay out of a search engine. The generated App Router main reads the address from `BIFROST_SITE_URL`.
 
 ## HTTP composition
 
@@ -175,7 +212,19 @@ The other files in a route directory are optional:
 - `template.tsx` exports `Template`, wraps everything below it like a layout, and remounts on every navigation.
 - `loading.tsx` exports `Loading`, and shows while a navigation to that route runs. It covers a route and everything below it, like `layout.tsx`, and the deepest one wins.
 - `error.tsx` exports `Error`, and `not-found.tsx` exports `NotFound`. `Error` receives an `error` object and a `reset` function that re-fetches the route.
-- `page.go` exports `Load`, the Go loader for `page.tsx`, and can export `Cache`, the `Cache-Control` of the rendered document.
+- `page.go` exports `Load`, the Go loader for the page, and can export `Cache`, the `Cache-Control` of the rendered document. It exports `View` instead of a `page.tsx`: a page is React or Go, never both. A tree of only Go pages builds without Bun or Vite. `bifrost dev` rebuilds and restarts it when a file under `app/` changes, and `bifrost routes` lists its pages beside the JS routes.
+
+A Go page declares `func View(props Props) func(*ui.Context)` or `func View() func(*ui.Context)`, and `func Metadata(props Props) seo.Head` for what a crawler reads. `seo.Head` is the metadata type of the `mygo` module. Bifrost generates the server that composes `seo.Body` and `web.Shell`, and a page whose view takes no props renders once: the generated server keeps the HTML for the requests that follow.
+
+`seo.Link(c, "Pricing", "/pricing")` draws the link `ui.Link` draws and records where it goes, because the accessibility tree carries a link's name but not its URL. A view that calls `ui.Link` directly still needs the page's `var Links map[string]string`.
+
+A Go page can also export `Screen`, its view for the MyGo app: `func Screen(notes Notes) func(*ui.Context)`, where `Notes` is an interface the page declares and the app satisfies; a page that needs nothing declares `Screen()`. When the project root has a `main.go` with `type app`, `bifrost build` writes `zz_bifrost_routes.go` beside it with `func appPages(app *app) []appPage`, one entry per `Screen`. The compiler checks each `Screen` call; there is no `any` and no type assertion. The app's router is built from the same `app/` tree as the server.
+
+A `page.go` with `Screen` and no `View` is a screen of the app alone: the server answers it with the shell and `noindex`, and the sitemap leaves it out. A `layout.go` exports `Layout(page func(*ui.Context)) func(*ui.Context)` and wraps the pages of its directory and the ones below it, on the server and in the app. A `not-found.go` exports `NotFound` and, optionally, `NotFoundMetadata`, and answers the paths no page holds with a 404. An `error.go` exports `Error(err error) func(*ui.Context)` and, optionally, `ErrorMetadata`, and answers a page whose `Load` failed, with the status the error wraps or a 500: it is the nearest one above the page, wrapped in the layouts of its directory, `noindex`, and never cached. A load that answers 404 shows the `not-found.go` above the page instead.
+
+`func Sitemap() []string` lists the paths of a route whose pattern has a parameter. `func Cache() string` sets the `Cache-Control` of the page. The scaffold of all of it is `bifrost init --native <directory>`.
+
+`bifrost build` also compiles the browser build to `dist/web`, copies it inside the generated server, and serves it from there, or from `BIFROST_WASM_DIR` when set, so one command produces the pages, the server, and the app the server hands to the browser. `bifrost dev` sets `BIFROST_DEV`, which makes `web.Shell` carry the script that reloads a page when the server restarts.
 - `route.go` exports any of `Get`, `Post`, `Put`, `Patch`, `Delete`, `Head`, and `Options`.
 - `middleware.go` exports `Middleware`, which wraps every route below it.
 - `server.go` exports `Serve` and is only valid at the route root.

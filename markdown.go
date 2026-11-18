@@ -23,6 +23,10 @@ func markdownRequested(ctx context.Context) bool {
 
 func (a *App) ResolveMarkdown(mux *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if a == nil || a.runtime == nil {
+			mux.ServeHTTP(w, request)
+			return
+		}
 		_, pattern := mux.Handler(request)
 		_, serverRoute := a.runtime.serverPatterns[pattern]
 		if acceptsMarkdown(request.Header.Get("Accept")) && serverRoute {

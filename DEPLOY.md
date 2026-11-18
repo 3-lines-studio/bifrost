@@ -34,6 +34,9 @@ BIFROST_BUN=/usr/local/bin/bun .bifrost/bifrost-app
 | Variable | Use |
 | --- | --- |
 | `BIFROST_ADDR` | Listen address, `:8080` by default. |
+| `BIFROST_SITE_URL` | The app's public address, as `https://example.com`; generated mains serve `/sitemap.xml` and `/robots.txt` from it. |
+| `BIFROST_WASM_DIR` | Where the browser build is: `app.wasm`, its gzip and `wasm_exec.js`. A generated main serves the copy `bifrost build` put inside it, and this directory instead when set. |
+| `BIFROST_DEV` | Set by `bifrost dev`: the pages then follow the server, and reload the tab when it restarts. A build never sets it. |
 | `BIFROST_BUN` | `bun` executable for the renderer. Falls back to `PATH`. |
 | `BIFROST_IDLE_TIMEOUT` | Exit after this long without connections, for socket-activated stacks. |
 | `LISTEN_FDS` / `LISTEN_PID` | systemd socket activation. `bifrost.Serve` serves the inherited socket. |
@@ -41,6 +44,25 @@ BIFROST_BUN=/usr/local/bin/bun .bifrost/bifrost-app
 | `BIFROST_RUNTIME_SCRIPT` | Publish the extracted renderer script at this path for that supervisor. |
 
 `bifrost.Serve` installs the idle shutdown and the inherited socket, and generated App Router mains use it.
+
+## The browser build
+
+An app of Go pages ships two artifacts: the server, and `dist/web` with the
+`app.wasm` and `wasm_exec.js` that `bifrost build` writes. Serve them together
+and leave them in place: the server reads `app.wasm` on the first request,
+compresses it once with brotli and once with gzip, and answers an ETag after
+that, so a deploy does not need a CDN in front for the app to load quickly
+(13.8 MB on the wire become 3.1 MB with brotli and 3.7 MB with gzip).
+
+```
+/app/app               the server
+/app/dist/web/         app.wasm, wasm_exec.js
+BIFROST_SITE_URL=https://example.com /app/app
+```
+
+A proxy in front must pass `Accept-Encoding` through, and must not compress
+`app.wasm` again: it already carries `Content-Encoding: br` or `gzip`, and
+compressing it twice costs CPU for nothing.
 
 ## Health and readiness
 

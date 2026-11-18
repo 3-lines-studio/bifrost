@@ -1,0 +1,5 @@
+{
+  "name": "Bifrost + MyGo",
+  "identifier": "dev.bifrost.mygo-example",
+  "out": "dist"
+}

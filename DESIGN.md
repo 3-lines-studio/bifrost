@@ -21,15 +21,20 @@ React is the only V1 frontend. The renderer boundary stays private until a secon
 
 ## Smallest supported system
 
-Version 2 starts with three page kinds:
+Version 2 starts with four page kinds:
 
 | Kind | Go work | JS server work | Browser work |
 |---|---|---|---|
 | Server | Load props on each request | Render on each request | Hydrate |
 | Static | Generate props at build time | Render at build time | Hydrate |
 | Client | None | None | Mount |
+| Native | Load props and render HTML on each request | None | None |
 
-Every route has exactly one kind. These are presets, not flags. This avoids invalid combinations such as client-only plus a server loader.
+Every route has exactly one kind. These are presets, not flags. This avoids invalid combinations such as client-only plus a server loader. Native sits outside the frontend pipeline: it needs no view file, no build, no manifest, and no assets, so an app of only Native routes runs from `go build`. It shares an app with the other kinds: the build covers the JS views, and native routes render in process beside them.
+
+The MyGo adapter sits beside the Native kind, in its own module, so the core keeps its standard-library dependencies. It turns the accessibility tree of a MyGo view into the body of a Native page (`seo`), boots the WebAssembly build over that HTML (`web`), and calls the server from every target (`client`, `auth`). The App Router generates the composition, so a page declares a view, its metadata, and its dependencies and nothing about how they are served.
+
+Four decisions keep that composition honest. A view that takes no props draws the same page for every request, so the generated server renders it once and keeps the bytes: a static page costs a renderer run per process, not per request. A link's URL is not in the accessibility tree, so `seo.Link` records the one the view drew, and the page keeps `Links` only for the views that call `ui.Link` directly. A sitemap cannot name the pages of a pattern with a parameter, so a `Sitemap` in the page lists them and the route carries them with `WithSitemap`. A load that answers 404 shows the not-found page above it, because an address nobody serves is not a failure to retry. The browser build is copied inside the server at build time, so a deploy is one file, and a dev server points the same server at the directory on disk instead, where it can rebuild it.
 
 Baseline public API:
 

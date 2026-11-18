@@ -4,8 +4,37 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
 ## Unreleased
 
+### Native pages
+
+- A page whose view takes no props renders once: the generated server keeps the HTML of `seo.Body` and `web.Shell` in a `sync.OnceValue`, so a static Go page costs no renderer time after the first request.
+- `NativePage` carries `Keywords`, `Type`, and `Alternates`: the subject a search engine reads, the `og:type` of the card ("website" when the page has a title), and the same page in other languages as `link rel=alternate` elements. A `Schema` that is a JSON array becomes one script per value.
+- `Route.WithSitemap` lists the paths a pattern cannot name, which is how a blog lists its posts. A Go page returns them from `Sitemap()`, and the generated server passes them on.
+- A load that answers 404 shows the page of `not-found.go` above it, instead of the error page, and keeps `Error()` for everything else.
+- `Route.WithError` gives a Native route a page for a loader that fails, with the status the error wraps or a 500, never cached. A redirect still redirects and a response hook still answers first.
+- `NativePage` carries `Image`, `Robots`, `Schema`, `Lang`, and `Dir`: `og:image` with a `summary_large_image` card, the crawler directives, a JSON-LD value written with its `<` escaped, and document attributes the page sets for itself.
+- `Config.SiteURL` makes `Register` serve `/sitemap.xml` with every route whose pattern has no parameter, and the paths a route adds with `WithSitemap`, and `/robots.txt` pointing at it, both with an ETag. `WithNoIndex` keeps a route out of the sitemap; the generated App Router reads the address from `BIFROST_SITE_URL`.
+
+- A Go page can export `Screen`, its view for the MyGo app, typed by an interface the page declares: `bifrost build` writes `zz_bifrost_routes.go` at the root with `func appPages(app *app) []appPage`, so the app's router comes from the same tree as the server, checked by the compiler.
+- The App Router reads `View` in `page.go` as a Go page, next to `page.tsx` for React: a directory has one or the other, and both is an error. The generated server composes `seo.Body` and `web.Shell` from `View`, `Metadata`, `Links`, and `Props`, so the page imports only `ui` and the WebAssembly build carries no server code. It keeps `Load` and `Cache`, and a tree of only Go pages compiles without Bun or Vite. `bifrost dev` rebuilds and restarts a tree of only Go pages when `app/` changes, without Bun or Vite, and `bifrost routes` lists them.
+
+- `bifrost.Native` declares a page rendered in process by a Go function: no view file, no Vite, no Bun, no assets. Bifrost composes the document and keeps the loader, props, limits, middleware, hooks, error handling, and `WithCache` behavior of server routes. An app of only Native routes builds with `go build` and never runs `bifrost build`. Native routes share an app with JS routes, and the runtime merges their handlers, so a page moves from React to Go one route at a time.
+
+### MyGo
+
+- The `mygo` module renders a MyGo native UI view to HTML for `Native` pages: `seo.Body` reads the accessibility tree of MyGo's headless tester, and `web.Shell` boots the WebAssembly build over that HTML at the page the URL names. It is a module of its own, so Bifrost keeps no MyGo dependency.
+- `mygo/client` calls the server with `fetch` in a browser and `net/http` elsewhere: the wasm build drops about 6.9 MB, from 21.0 MB to 14.1 MB. A call made on the goroutine the app draws on would wait for an answer that arrives on that same goroutine, so it answers `client.ErrUIThread` instead of deadlocking the build.
+- `mygo/auth` keeps the bearer token in the platform's secret store, or in localStorage in a browser. `auth.Session` holds it, stamps it on every request, and renews it once when the server answers 401 through a `Refresher`, signing out when it cannot.
+- `seo.Link` draws the link `ui.Link` draws and records where it goes, so the HTML a crawler reads carries its URL: the accessibility tree holds a link's name, not its target.
+- `web.Shell` dresses the content it serves until the app draws: a readable measure, system fonts and the page's headings, instead of a column of unstyled text.
+- `web.Reload` makes an open page follow a dev server: an `EventSource` on `web.ReloadPath`, answered by `web.ReloadHandler`, reloads the tab when another process answers. A build leaves it out.
+- `web.FileServerFS` serves a browser build from any `fs.FS`, embedded with `//go:embed` or on disk, and serves the compressed file a build leaves beside it. The compression of a build no request has asked for yet happens in the background at startup.
+- `web.FileServer` prefers brotli over gzip, 3.1 MB from 13.8 MB, and reads the file again when it changes, so a development rebuild needs no restart.
+- The spinner shows 400 ms after the navigation starts, so a cached build never flashes it, and it has no text to translate.
+
 ### App Router
 
+- The Go page metadata is `seo.Head`, a type instead of a struct the page had to name, with `Title`, `Description`, `Canonical`, `Image`, `Robots`, `Schema`, `Lang`, and `Dir`.
+- `layout.go` wraps the pages of its directory and the ones below it on the server and in the app; `not-found.go` answers the paths no page holds with a 404; `error.go` answers a page whose `Load` failed, with the status the error wraps or a 500, `noindex` and uncached. A `page.go` with `Screen` and no `View` is a screen of the app: the server answers the shell with `noindex` and leaves it out of the sitemap.
 - A `commands` package in the module root turns the app binary into a
   multi-command one: `./app migrate` runs the command and exits before the app
   is built, and no arguments start the server. One artifact for the server, the
@@ -35,6 +64,9 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 - `init` resolves the CLI with `go get -tool`, so `go tool bifrost` runs offline from the module graph instead of `go run` fetching it every time.
 - The classic scaffold uses `bifrost.Serve`, so it gets `BIFROST_ADDR`, systemd socket activation, and `BIFROST_IDLE_TIMEOUT` like generated App Router mains.
 - New `DEPLOY.md`: artifact sizes, environment variables, readiness, saturation, containers, and the bee setup.
+- `init --native` scaffolds a MyGo app of Go pages: no Bun, no Vite, no React. `app/page.go`, `layout.go`, `not-found.go`, and a second public page, with the `mygo.json` the app needs.
+- `bifrost build` compiles the browser build to `dist/web` beside the server, and the generated main serves it from `BIFROST_WASM_DIR`, or `dist/web`. `bifrost dev` rebuilds the wasm beside the server when a Go file changes.
+- `bifrost.Serve` defines no flags: it listens on `BIFROST_ADDR`, so a program parses its own flags without a late `-addr` registration failing the parse.
 
 ## v1.3.11
 

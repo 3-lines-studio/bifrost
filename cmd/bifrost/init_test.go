@@ -106,3 +106,44 @@ func TestTreeStampIgnoresBuildOutput(t *testing.T) {
 		t.Fatalf("build output changed tree stamp: %q != %q", first, second)
 	}
 }
+
+func TestRunInitScaffoldsNativePages(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "native-app")
+	if err := runInit([]string{"--no-install", "--native", target}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"main.go", "app/page.go", "app/about/page.go", "app/layout.go", "app/error.go", "app/not-found.go", "mygo.json", ".gitignore"} {
+		if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(name))); err != nil {
+			t.Fatalf("the scaffold is missing %s: %v", name, err)
+		}
+	}
+	for _, name := range []string{"package.json", "vite.config.ts", "app/page.tsx"} {
+		if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(name))); !os.IsNotExist(err) {
+			t.Fatalf("the native scaffold has %s", name)
+		}
+	}
+	page, err := os.ReadFile(filepath.Join(target, "app", "page.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"func View(props Props)", "func Screen()", "func Metadata(props Props) seo.Head", "func Load(", `seo.Link(c, "About", "/about")`, "func Cache() string"} {
+		if !strings.Contains(string(page), expected) {
+			t.Fatalf("app/page.go does not contain %q:\n%s", expected, page)
+		}
+	}
+	main, err := os.ReadFile(filepath.Join(target, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"appPages(a)", "mygo.NewWindow", "type app struct"} {
+		if !strings.Contains(string(main), expected) {
+			t.Fatalf("main.go does not contain %q:\n%s", expected, main)
+		}
+	}
+}
+
+func TestRunInitRejectsNativeWithClassic(t *testing.T) {
+	if err := runInit([]string{"--no-install", "--native", "--classic", t.TempDir()}); err == nil {
+		t.Fatal("native and classic scaffolded together")
+	}
+}

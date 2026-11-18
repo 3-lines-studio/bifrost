@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -713,14 +714,14 @@ func TestGeneratedMainSetsRenderConcurrency(t *testing.T) {
 		return string(source)
 	}
 
-	if err := writeAppRouterMain(root, generated, nil, nil, 4, 0, ""); err != nil {
+	if err := writeAppRouterMain(root, generated, []appRoute{{Pattern: "/", View: "page.tsx"}}, nil, 4, 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	if text := read(); !strings.Contains(text, "Assets: bifrostAssets, RenderConcurrency: 4, Routes:") {
 		t.Fatalf("generated main does not set the render concurrency:\n%s", text)
 	}
 
-	if err := writeAppRouterMain(root, generated, nil, nil, 0, 0, ""); err != nil {
+	if err := writeAppRouterMain(root, generated, []appRoute{{Pattern: "/", View: "page.tsx"}}, nil, 0, 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	if text := read(); strings.Contains(text, "RenderConcurrency: ") {
@@ -773,7 +774,7 @@ func TestGeneratedModuleUsesTheWorkingTreeForDevelopmentVersions(t *testing.T) {
 	development := []string{"devel", "devel+1a2b3c4d5e6f", "v1.3.11-0.20260924213727-f23f09ff9bad", "v0.0.0-20260924213727-f23f09ff9bad", "v1.3.11-0.20260924213727-f23f09ff9bad+dirty"}
 	for _, version := range development {
 		bifrost.Version = version
-		if err := writeAppRouterModule(generated, userModule); err != nil {
+		if err := writeAppRouterModule(generated, userModule, false); err != nil {
 			t.Fatal(err)
 		}
 		if source := read(); !strings.Contains(source, "replace github.com/3-lines-studio/bifrost => ") {
@@ -782,7 +783,7 @@ func TestGeneratedModuleUsesTheWorkingTreeForDevelopmentVersions(t *testing.T) {
 	}
 
 	bifrost.Version = "v1.3.10"
-	if err := writeAppRouterModule(generated, userModule); err != nil {
+	if err := writeAppRouterModule(generated, userModule, false); err != nil {
 		t.Fatal(err)
 	}
 	if source := read(); strings.Contains(source, "replace github.com/3-lines-studio/bifrost => ") {
@@ -804,14 +805,14 @@ func TestGeneratedMainSetsRenderQueue(t *testing.T) {
 		return string(source)
 	}
 
-	if err := writeAppRouterMain(root, generated, nil, nil, 0, 512, ""); err != nil {
+	if err := writeAppRouterMain(root, generated, []appRoute{{Pattern: "/", View: "page.tsx"}}, nil, 0, 512, ""); err != nil {
 		t.Fatal(err)
 	}
 	if text := read(); !strings.Contains(text, "Assets: bifrostAssets, RenderQueue: 512, Routes:") {
 		t.Fatalf("generated main does not set the render queue:\n%s", text)
 	}
 
-	if err := writeAppRouterMain(root, generated, nil, nil, 0, 0, ""); err != nil {
+	if err := writeAppRouterMain(root, generated, []appRoute{{Pattern: "/", View: "page.tsx"}}, nil, 0, 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	if text := read(); strings.Contains(text, "RenderQueue: ") {
@@ -987,7 +988,7 @@ func TestGeneratedModuleRequiresUserModule(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.25.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeAppRouterModule(generated, root); err != nil {
+	if err := writeAppRouterModule(generated, root, false); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(generated, "go.mod"))
@@ -1012,7 +1013,7 @@ func TestGoRouteRows(t *testing.T) {
 		{kind: "api", pattern: "GET /posts/api/{slug}", source: "posts/api/slug_/route.go"},
 		{kind: "api", pattern: "POST /posts/api/{slug}", source: "posts/api/slug_/route.go"},
 	}
-	if rows := goRouteRows(goDirs); !slices.Equal(rows, want) {
+	if rows := goRouteRows(nil, goDirs); !slices.Equal(rows, want) {
 		t.Fatalf("goRouteRows() = %+v, want %+v", rows, want)
 	}
 	if rows := (*appRouter)(nil).routeRows(); rows != nil {
@@ -1148,5 +1149,491 @@ func TestPrepareAppRouterAppRejectsEmptyTrees(t *testing.T) {
 	}
 	if _, err := prepareAppRouter(context.Background(), projectRoot, appRoot, 0, 0); err == nil {
 		t.Fatal("an empty route root was accepted")
+	}
+}
+
+func TestDiscoverNativePage(t *testing.T) {
+	root := t.TempDir()
+	app := filepath.Join(root, "app")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "page.go"), []byte("package app\n\nfunc View() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := discoverRoutes(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || !routes[0].Native || !routes[0].PageGo {
+		t.Fatalf("routes %+v", routes)
+	}
+	if routes[0].Pattern != "/{$}" || routes[0].ImportPath != "" {
+		t.Fatalf("route %+v", routes[0])
+	}
+}
+
+func TestDiscoverNativePageAndPageTSX(t *testing.T) {
+	root := t.TempDir()
+	app := filepath.Join(root, "app")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "page.tsx"), []byte("export default function Page() { return null; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "page.go"), []byte("package app\n\nfunc View() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := discoverRoutes(app)
+	if err == nil || !strings.Contains(err.Error(), "React or Go") {
+		t.Fatalf("error %v", err)
+	}
+}
+
+func TestDiscoverPageGoWithoutViewOrScreen(t *testing.T) {
+	root := t.TempDir()
+	app := filepath.Join(root, "app")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "page.go"), []byte("package app\n\nfunc Load() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := discoverRoutes(app)
+	if err == nil || !strings.Contains(err.Error(), "neither View nor Screen") {
+		t.Fatalf("error %v", err)
+	}
+}
+
+func TestGeneratedMainNativePage(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	routes := []appRoute{
+		{Directory: ".", Pattern: "/{$}", Native: true, PageGo: true, ImportPath: "example.com/app", Alias: "route0", HasLoader: true},
+	}
+	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`bifrost.Native("/{$}", render0, load0)`,
+		`route0 "example.com/app"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated main misses %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Assets: bifrostAssets") {
+		t.Fatalf("generated main embeds assets:\n%s", text)
+	}
+}
+
+func TestGeneratedMainMixedPages(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\ntype app struct{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routes := []appRoute{
+		{Directory: ".", Pattern: "/{$}", View: "pages/home.tsx"},
+		{Directory: "native", Pattern: "/native", Native: true, PageGo: true, ImportPath: "example.com/app/native", Alias: "route0"},
+	}
+	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`bifrost.Server("/{$}", "pages/home.tsx", load0)`,
+		`bifrost.Native("/native", render1, nil)`,
+		"Assets: bifrostAssets",
+		`web.FileServerFS(wasmSource())`,
+		`if dir := os.Getenv("BIFROST_WASM_DIR"); dir != "" {`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated main misses %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestAppRouterRootsWithGoPage(t *testing.T) {
+	root := t.TempDir()
+	app := filepath.Join(root, "app")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "page.go"), []byte("package app\n\nfunc View() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project, routes, ok, err := appRouterRoots(root, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || project != root || routes != app {
+		t.Fatalf("project %q routes %q ok %v", project, routes, ok)
+	}
+}
+
+func TestWriteAppRoutes(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n\ntype app struct{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routes := []appRoute{
+		{Pattern: "/{$}", Native: true, Screen: true, ImportPath: "example.com/app/app", Alias: "route0"},
+		{Pattern: "/notes/{slug}", Native: true, Screen: true, ScreenArgs: 1, ImportPath: "example.com/app/notes/slug_", Alias: "route1"},
+		{Pattern: "/server", View: "pages/home.tsx"},
+	}
+	if err := writeAppRoutes(root, routes); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "zz_bifrost_routes.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`route1 "example.com/app/app"`,
+		`route2 "example.com/app/notes/slug_"`,
+		`{Pattern: "/", View: route1.Screen()}`,
+		`{Pattern: "/notes/{slug}", View: route2.Screen(app)}`,
+		`func appPages(app *app) []appPage`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("table misses %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestWriteAppRoutesWithoutMain(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "zz_bifrost_routes.go"), []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routes := []appRoute{{Pattern: "/", Native: true, Screen: true, ImportPath: "example.com/app", Alias: "route0"}}
+	if err := writeAppRoutes(root, routes); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "zz_bifrost_routes.go")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale table remains: %v", err)
+	}
+}
+
+func TestDiscoverScreen(t *testing.T) {
+	root := t.TempDir()
+	app := filepath.Join(root, "app")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := "package app\n\nfunc View() {}\n\nfunc Screen(deps interface{}) {}\n"
+	if err := os.WriteFile(filepath.Join(app, "page.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := discoverRoutes(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || !routes[0].Screen || routes[0].ScreenArgs != 1 {
+		t.Fatalf("routes %+v", routes)
+	}
+}
+
+func TestGoRouteRowsNative(t *testing.T) {
+	rows := goRouteRows([]appRoute{{Directory: ".", Pattern: "/{$}", Native: true}}, nil)
+	if len(rows) != 1 || rows[0].kind != "native" || rows[0].pattern != "/{$}" || rows[0].source != "page.go" {
+		t.Fatalf("rows %+v", rows)
+	}
+}
+
+func TestDiscoverScreenOnlyPage(t *testing.T) {
+	root := t.TempDir()
+	app := filepath.Join(root, "app")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := "package app\n\nimport \"github.com/egoist/mygo/ui\"\n\nfunc Screen() func(*ui.Context) { return nil }\n"
+	if err := os.WriteFile(filepath.Join(app, "page.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := discoverRoutes(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("routes %+v", routes)
+	}
+	route := routes[0]
+	if !route.Native || !route.ScreenOnly || !route.Screen || route.ScreenArgs != 0 {
+		t.Fatalf("route %+v", route)
+	}
+}
+
+func TestDiscoverLayoutChain(t *testing.T) {
+	root := t.TempDir()
+	layout := "package app\n\nimport \"github.com/egoist/mygo/ui\"\n\nfunc Layout(page func(*ui.Context)) func(*ui.Context) { return page }\n"
+	for _, directory := range []string{".", "blog"} {
+		path := filepath.Join(root, directory, "layout.go")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(layout), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chain, err := layoutChain(root, "blog/post")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chain) != 2 || chain[0].Directory != "blog" || chain[1].Directory != "." {
+		t.Fatalf("chain %+v", chain)
+	}
+}
+
+func TestDiscoverLayoutWithoutLayoutFunction(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "layout.go"), []byte("package app\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := layoutChain(root, "."); err == nil || !strings.Contains(err.Error(), "needs Layout") {
+		t.Fatalf("error %v", err)
+	}
+}
+
+func TestAppendGoNotFoundRoutes(t *testing.T) {
+	root := t.TempDir()
+	source := "package app\n\nfunc NotFound() func() {}\n\nfunc NotFoundMetadata() struct{} { return struct{}{} }\n"
+	if err := os.WriteFile(filepath.Join(root, "not-found.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := appendGoNotFoundRoutes(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("routes %+v", routes)
+	}
+	route := routes[0]
+	if !route.GoNotFound || route.Pattern != "/{path...}" || route.ViewName != "NotFound" || route.MetadataName != "NotFoundMetadata" || !route.HasMetadata {
+		t.Fatalf("route %+v", route)
+	}
+	treeRules := filepath.Join(root, "not-found.go")
+	if err := os.WriteFile(treeRules, []byte("package app\n\nfunc View() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendGoNotFoundRoutes(root, nil); err == nil || !strings.Contains(err.Error(), "NotFound()") {
+		t.Fatalf("error %v", err)
+	}
+}
+
+func TestGeneratedMainScreenOnlyPage(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	routes := []appRoute{
+		{Directory: "settings", Pattern: "/settings", Native: true, ScreenOnly: true, PageGo: true, HasMetadata: true, ImportPath: "example.com/app/settings", Alias: "route0"},
+	}
+	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`var body0 = sync.OnceValue(func() []byte {`,
+		`return web.Shell(nil, shellOptions...)`,
+		`page := bifrost.NativePage{Body: body0()}`,
+		`meta := route0.Metadata()`,
+		`page.Image, page.Robots, page.Schema, page.Lang, page.Dir = meta.Image, meta.Robots, meta.Schema, meta.Lang, meta.Dir`,
+		`if page.Robots == "" {`,
+		`page.Robots = "noindex"`,
+		`bifrost.Native("/settings", render0, nil)`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated main misses %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestGeneratedMainWrapsLayouts(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	routes := []appRoute{{
+		Directory:  "blog",
+		Pattern:    "/blog/{$}",
+		Native:     true,
+		PageGo:     true,
+		ImportPath: "example.com/app/blog",
+		Alias:      "route0",
+		Layouts: []layoutRef{
+			{Directory: "blog", ImportPath: "example.com/app/blog", Alias: "route1"},
+			{Directory: ".", ImportPath: "example.com/app", Alias: "route2"},
+		},
+	}}
+	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `seo.Body(route2.Layout(route1.Layout(route0.View())), seo.Options{Links: nil})`; !strings.Contains(string(data), want) {
+		t.Fatalf("generated main misses %q:\n%s", want, data)
+	}
+}
+
+func TestGeneratedMainNotFoundPage(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	routes := []appRoute{{
+		Directory:    ".",
+		Pattern:      "/{path...}",
+		Native:       true,
+		PageGo:       true,
+		GoNotFound:   true,
+		ViewName:     "NotFound",
+		ImportPath:   "example.com/app",
+		Alias:        "route0",
+		HasMetadata:  true,
+		MetadataName: "NotFoundMetadata",
+	}}
+	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`func loadGoNotFound0(r *http.Request) (any, error) {`,
+		`return bifrost.PageData{Status: http.StatusNotFound}, nil`,
+		`seo.Body(route0.NotFound(), seo.Options{Links: nil})`,
+		`meta := route0.NotFoundMetadata()`,
+		`bifrost.Native("/{path...}", render0, loadGoNotFound0)`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated main misses %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestErrorViewFindsNearest(t *testing.T) {
+	root := t.TempDir()
+	source := "package app\n\nfunc Error(err error) func() { return nil }\n"
+	blog := filepath.Join(root, "blog", "error.go")
+	if err := os.MkdirAll(filepath.Dir(blog), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blog, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "error.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	view, err := errorView(root, "blog/post")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Directory != "blog" {
+		t.Fatalf("view %+v", view)
+	}
+	view, err = errorView(root, "about")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Directory != "." {
+		t.Fatalf("view %+v", view)
+	}
+	if view, err := errorView(t.TempDir(), "about"); err != nil || view.Directory != "" {
+		t.Fatalf("view %+v err %v", view, err)
+	}
+}
+
+func TestErrorViewNeedsErrorFunction(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "error.go"), []byte("package app\n\nfunc View() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := errorView(root, "."); err == nil || !strings.Contains(err.Error(), "Error(err error)") {
+		t.Fatalf("error %v", err)
+	}
+}
+
+func TestGeneratedMainErrorPage(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, ".bifrost", "app")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	routes := []appRoute{{
+		Directory:  "blog",
+		Pattern:    "/blog/{$}",
+		Native:     true,
+		PageGo:     true,
+		ImportPath: "example.com/app/blog",
+		Alias:      "route0",
+		Error:      layoutRef{Directory: ".", ImportPath: "example.com/app", Alias: "route1"},
+		ErrorLayouts: []layoutRef{
+			{Directory: ".", ImportPath: "example.com/app", Alias: "route1"},
+		},
+		ErrorMeta:  true,
+		ErrorLinks: true,
+	}}
+	if err := writeAppRouterMain(root, generated, routes, nil, 0, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(generated, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`func renderError0(ctx context.Context, err error) (bifrost.NativePage, error) {`,
+		`seo.Body(route1.Layout(route1.Error(err)), seo.Options{Links: route1.Links})`,
+		`meta := route1.ErrorMetadata()`,
+		`page.Robots = "noindex"`,
+		`bifrost.Native("/blog/{$}", render0, nil).WithError(renderError0)`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated main misses %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestNearestNotFound(t *testing.T) {
+	at := map[string]int{".": 3, "blog": 7}
+	cases := map[string]int{".": 3, "blog": 7, "blog/post": 7, "about": 3, "a/b/c": 3}
+	for directory, want := range cases {
+		got, ok := nearestNotFound(at, directory)
+		if !ok || got != want {
+			t.Errorf("%s: %d %v, want %d", directory, got, ok, want)
+		}
+	}
+	if at, ok := nearestNotFound(map[string]int{}, "blog"); ok {
+		t.Errorf("found %d without a not-found page", at)
 	}
 }

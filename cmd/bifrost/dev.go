@@ -53,6 +53,12 @@ func runDev(args []string) error {
 		if err != nil {
 			return err
 		}
+		if app.NativeOnly {
+			if *prepareOnly {
+				return nil
+			}
+			return runNativeDev(app)
+		}
 		router = &app
 		packagePath = app.Package
 		*dir = app.ProjectRoot
@@ -199,6 +205,32 @@ func runDev(args []string) error {
 		return errors.New("bifrost: Vite development bridge did not become healthy")
 	}
 
+	// The browser build runs beside the app, as it does for native pages: the
+	// server reads the new wasm once it lands.
+	var wasmBuild chan struct{}
+	requestWasm := func() {}
+	if router != nil && router.NativePages {
+		wasmBuild = make(chan struct{}, 1)
+		requestWasm = func() {
+			select {
+			case wasmBuild <- struct{}{}:
+			default:
+			}
+		}
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-wasmBuild:
+					if err := buildWasm(ctx, router.ProjectRoot, false); err != nil {
+						_, _ = fmt.Fprintln(os.Stderr, "bifrost:", err)
+					}
+				}
+			}
+		}()
+	}
+
 	buildAndStart := func() error {
 		options := builder.Options{Package: packagePath, Dir: buildDir, Development: true, SourceMaps: false, ViteConfig: *viteConfig, OnDescribe: func(description protocol.DescribeResult) {
 			printRouteTable(description, router.routeRows())
@@ -236,9 +268,16 @@ func runDev(args []string) error {
 		child.Stdout = os.Stdout
 		child.Stderr = os.Stderr
 		child.Stdin = os.Stdin
-		child.Env = append(os.Environ(), "BIFROST_DEV_DIR="+devDir, fmt.Sprintf("BIFROST_VITE_PORT=%d", *vitePort), "BIFROST_VITE_SOCKET="+socket, "BIFROST_VITE_CONFIG="+*viteConfig)
+		child.Env = append(os.Environ(), "BIFROST_DEV=1", "BIFROST_DEV_DIR="+devDir, fmt.Sprintf("BIFROST_VITE_PORT=%d", *vitePort), "BIFROST_VITE_SOCKET="+socket, "BIFROST_VITE_CONFIG="+*viteConfig)
+		if router != nil {
+			child.Env = append(child.Env, "BIFROST_WASM_DIR="+wasmOutput(router.ProjectRoot))
+		}
 		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		return child.Start()
+		if err := child.Start(); err != nil {
+			return err
+		}
+		requestWasm()
+		return nil
 	}
 	if err := buildAndStart(); err != nil {
 		return err

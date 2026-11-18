@@ -1,10 +1,18 @@
-.PHONY: check test race vet gate demo bench fuzz throughput integration dev-integration reproducible
+.PHONY: check test mygo-test mygo-e2e race vet gate demo bench fuzz throughput integration dev-integration reproducible
 
 check: test race vet gate demo
 
 test:
 	@test -z "$$(gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'))" || (gofmt -l -- $$(find . -name '*.go' -not -path './example/basic/.bifrost/*'); exit 1)
 	go test ./...
+
+mygo-test:
+	cd mygo && go vet ./... && go test ./...
+	cd mygo/example && go vet ./... && go test ./... && GOOS=js GOARCH=wasm go build -o /dev/null .
+	cd mygo/demo && go vet ./... && go test ./... && GOOS=js GOARCH=wasm go build -o /dev/null .
+
+mygo-e2e:
+	BIFROST_E2E=1 go test -count=1 -run 'TestEndToEndNativeApp|TestEndToEndDemoApp' ./cmd/bifrost
 
 race:
 	go test -race ./...

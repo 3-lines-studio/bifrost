@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestPruneStaleDevelopmentFilesRemovesUnlockedRuns(t *testing.T) {
@@ -45,5 +46,39 @@ func TestPruneStaleDevelopmentFilesRemovesUnlockedRuns(t *testing.T) {
 		if _, err := os.Stat(kept); err != nil {
 			t.Fatalf("%s was removed: %v", kept, err)
 		}
+	}
+}
+
+func TestDevWatchesTheWholeTree(t *testing.T) {
+	root := t.TempDir()
+	store := filepath.Join(root, "store")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	notes := filepath.Join(store, "store.go")
+	if err := os.WriteFile(notes, []byte("package store\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first, err := goTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, err := goTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != same {
+		t.Fatal("stamp changed without a change")
+	}
+	later := time.Now().Add(time.Second)
+	if err := os.Chtimes(notes, later, later); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := goTreeStamp(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed == first {
+		t.Fatal("a package beside app/ does not restart the server")
 	}
 }

@@ -3,7 +3,6 @@ package bifrost
 import (
 	"context"
 	"errors"
-	"flag"
 	"net"
 	"net/http"
 	"os"
@@ -13,14 +12,13 @@ import (
 	"time"
 )
 
+// Serve listens on BIFROST_ADDR, or :8080, and serves handler until ctx is
+// done. It defines no flags, so the program's own flags parse as usual.
 func Serve(ctx context.Context, handler http.Handler) error {
 	addr := os.Getenv("BIFROST_ADDR")
 	if addr == "" {
 		addr = ":8080"
 	}
-	flag.StringVar(&addr, "addr", addr, "HTTP listen address")
-	flag.Parse()
-
 	listener := inheritedListener()
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	startIdleShutdown(ctx, server)

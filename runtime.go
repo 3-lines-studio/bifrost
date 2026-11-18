@@ -42,6 +42,12 @@ type pageRenderSink interface {
 	committed() bool
 }
 
+// ErrRendererBusy reports that every renderer is busy beyond the queue wait.
+var ErrRendererBusy = errors.New("bifrost: renderer is busy")
+
+// renderRetryAfter is the Retry-After of a busy renderer, in seconds.
+const renderRetryAfter = "1"
+
 type renderer interface {
 	Render(context.Context, renderRequest, renderSink) error
 	Close(context.Context) error
@@ -353,12 +359,16 @@ func (h *developmentStaticHandler) ServeHTTP(w http.ResponseWriter, request *htt
 const statusClientClosedRequest = 499
 
 func (h *serverPageHandler) serveError(w http.ResponseWriter, request *http.Request, err error) {
+	serveRouteError(w, request, h.hooks, err)
+}
+
+func serveRouteError(w http.ResponseWriter, request *http.Request, hooks registeredHooks, err error) {
 	if request.Context().Err() == context.Canceled && errors.Is(err, context.Canceled) {
 		w.WriteHeader(statusClientClosedRequest)
 		return
 	}
-	if h.hooks.errorHandler != nil {
-		h.hooks.errorHandler(w, request, err)
+	if hooks.errorHandler != nil {
+		hooks.errorHandler(w, request, err)
 		return
 	}
 	serveDefaultError(w, request, err)
