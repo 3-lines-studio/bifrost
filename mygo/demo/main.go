@@ -26,6 +26,7 @@ import (
 	"github.com/3-lines-studio/bifrost/mygo/file"
 	"github.com/3-lines-studio/bifrost/mygo/qr"
 	"github.com/3-lines-studio/bifrost/mygo/upload"
+	"github.com/3-lines-studio/bifrost/mygo/web"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -61,6 +62,7 @@ type uploadItem struct {
 }
 
 func main() {
+	web.FragmentLocation()
 	instance := &app{base: serverURL(), router: ui.NewRouter("/")}
 	instance.session = auth.NewSession(auth.System()).WithRefresh(instance.renew)
 	mygo.App.WhenReady(func() {

@@ -21,6 +21,7 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 
 ### MyGo
 
+- `web.Shell` leaves the URL alone: the app reads the page the server answered from `location.pathname`, and a link to a screen is the one the site names. An app whose router follows MyGo's history in the fragment calls `web.FragmentLocation()` before its first frame, which puts the path there, as the shell used to for every app.
 - `mygo/client` sends a `Blob` where it is (memory, a range of a file of the disk or a `File` of the browser) and reports the bytes as they go out with `OnUpload`; `client.Copy` writes an answer to a writer as it arrives. In a browser a request with a blob or with progress goes with `XMLHttpRequest`, which takes a `File` without a copy and reports its upload.
 - `mygo/file` picks files in a window's dialog or in the browser's picker, opens one by path, reads a range as a request body, and saves a download. `mygo/exif` reads the size, orientation, camera, lens, exposure, time and place of a JPEG, PNG or WebP from its headers, without decoding the picture.
 - `mygo/data` caches the values a screen reads: one load per key on a goroutine of its own, `Loading`, `Ready` and `Failed` states, invalidation, refresh, optimistic writes, and changes to apply in `Window.Update`.

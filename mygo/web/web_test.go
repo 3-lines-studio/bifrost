@@ -22,7 +22,6 @@ func TestShellBootsApp(t *testing.T) {
 		`}).catch(function(){`,
 		`<script src="/wasm_exec.js"></script>`,
 		`fetch("/app.wasm")`,
-		`history.replaceState(null,"","#"+location.pathname)`,
 		`go.run(result.instance)`,
 		`if(seo){seo.remove()}`,
 	}
@@ -33,6 +32,9 @@ func TestShellBootsApp(t *testing.T) {
 	}
 	if strings.Contains(body, `<div id="seo">`) {
 		t.Errorf("body has content: %s", body)
+	}
+	if strings.Contains(body, "history.replaceState") {
+		t.Errorf("the shell rewrites the URL: %s", body)
 	}
 	if strings.Contains(body, "Loading") {
 		t.Errorf("body has a translatable label: %s", body)

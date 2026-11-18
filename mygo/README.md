@@ -96,10 +96,13 @@ func ErrorMetadata() seo.Head              { ... }
 Bifrost composes each document: `seo.Body` renders the view in MyGo's headless
 tester from the accessibility tree of its first frame, and `web.Shell` wraps it
 in `<div id="seo">`, adds the empty `#mygo` element, and boots `/app.wasm` over
-it at the URL's path. The bootstrap happens in the fragment, because MyGo's
-first router follows the tab's history: `/pricing` becomes `#/pricing`. The
-spinner waits 400 ms, so a cached build never flashes it, and a build that
-fails to load leaves the HTML visible.
+it. The shell leaves the URL as it is: an app reads `location.pathname` for the
+page the server answered, and keeps `/order/failed` that way, a link anyone can
+share. An app whose router follows MyGo's history in the fragment, as one of
+`ui.Router` does, calls `web.FragmentLocation()` before its first frame, which
+puts the path there: `/pricing` becomes `#/pricing`. The spinner waits 400 ms,
+so a cached build never flashes it, and a build that fails to load leaves the
+HTML visible.
 
 `bifrost build` compiles the browser build to `dist/web` (`app.wasm` with
 `-ldflags=-s -w`, its gzip, and the `wasm_exec.js` of the toolchain), copies it

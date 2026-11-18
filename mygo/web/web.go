@@ -30,8 +30,9 @@ const style = `html,body{margin:0;height:100%;color-scheme:light dark}` +
 	`@keyframes mygo-spin{to{transform:rotate(360deg)}}` +
 	`@media (prefers-reduced-motion:reduce){.mygo-spinner{animation:none}}`
 
-// The boot script starts the app at the URL's path: MyGo's first router
-// follows the tab's history in the fragment, so /pricing becomes #/pricing.
+// The boot script starts the app at the URL it was served for, and leaves the
+// URL alone: the app reads location.pathname, or, when its router follows the
+// tab's history in the fragment, FragmentLocation puts the path there.
 // The content stays until the app runs, and stays for good when the build is
 // missing, so a failed fetch degrades to the HTML. The spinner waits 400ms
 // before showing, so a cached build does not flash it.
@@ -39,7 +40,6 @@ const script = `(function(){` +
 	`var seo=document.getElementById("seo");` +
 	`var loader=document.getElementById("mygo-loading");` +
 	`var root=document.getElementById("mygo");` +
-	`if(location.pathname!=="/"&&!location.hash){history.replaceState(null,"","#"+location.pathname)}` +
 	`var timer=setTimeout(function(){if(loader){loader.style.display="flex"}},400);` +
 	`if(typeof Go==="undefined"){clearTimeout(timer);return}` +
 	`var go=new Go();` +
