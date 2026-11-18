@@ -9,6 +9,10 @@ It is a module of its own, so Bifrost keeps its dependencies to the standard
 library and MyGo is downloaded only by apps that use it.
 
 [example](example) is the smallest app: a page, a screen and an API.
+[demo](demo) is all of it: SEO metadata, a blog with a dynamic sitemap, a
+layout tree, an error page, a not-found page, a sign-in flow and a single-binary
+deploy. `BIFROST_E2E=1 go test ./cmd/bifrost -run TestEndToEndDemoApp` builds
+the demo and reads every route it serves.
 
 ## The App Router contract
 

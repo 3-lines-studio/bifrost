@@ -102,6 +102,8 @@ Native routes render in process: they start no renderer and read no assets. They
 
 For a MyGo native UI view, the `mygo` module renders it to this HTML from the accessibility tree of MyGo's headless tester: `seo.Body(view, seo.Options{Links: links})`, and `web.Shell` wraps it with a loading overlay and the script that boots the WebAssembly build over it. It is a module of its own, so Bifrost's dependencies do not change. The [App Router](#the-app-router) generates all of it from `app/page.go`.
 
+[`mygo/demo`](mygo/demo) is the app that exercises all of it: public pages with canonical, social card, keywords, alternates and JSON-LD, a blog whose posts a loader names and a sitemap lists, layouts under layouts, an error page, a not-found page, screens the app draws alone, a sign-in flow on `auth`, and a binary that carries the browser build.
+
 ## Sitemap and robots
 
 Set `Config.SiteURL` to the public address, as `https://example.com`, and `Register` serves `/sitemap.xml` with every route whose pattern has no parameter, and `/robots.txt` pointing at it. `WithSitemap(paths...)` lists the pages a pattern cannot name, as every post of a blog, which is what a Go page's `Sitemap()` returns. Both carry an ETag and an hour of cache. Routes declared `WithNoIndex` stay out of the sitemap, which is how the app's screens stay out of a search engine. The generated App Router main reads the address from `BIFROST_SITE_URL`.
