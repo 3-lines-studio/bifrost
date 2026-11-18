@@ -305,7 +305,15 @@ the words of each.
 - The app's own font goes in with `ui.RegisterFont(data, family)` and an
   `//go:embed` of the file, and a text takes it with `.Font(family, size)`. The
   HTML `web.Shell` serves is styled with the system stack, so a page reads in
-  the system font until the app draws.
+  the system font until the app draws. Register one face per family: a browser
+  draws every text of a family in the one face it holds, so a regular and a
+  bold under the same name are all bold.
+- MyGo takes an app for an English one until it declares the languages it is
+  written in (`mygo.App.SetLanguages`, its own first), whatever the person
+  reads: `Context.Locale` says English and the screens say it too.
+- A view fills the window with `FillHeight` on its root: `Grow(1)` gives an
+  element the free space of a parent that has a height, and the root of a
+  window has none until it is filled.
 
 ## Size
 
