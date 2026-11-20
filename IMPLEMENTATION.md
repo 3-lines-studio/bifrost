@@ -63,7 +63,7 @@ This file separates the accepted scope from ideas explicitly deferred by the que
 - Strict artifact path, size, and SHA-256 verification.
 - Hashed immutable assets, ETags, conditional requests, public assets, and header hooks.
 - Low-priority module preloads prevent the client graph from competing with high-priority LCP resources.
-- Compression remains the HTTP server, CDN, or reverse proxy's job.
+- Brotli and gzip variants are written at build time and negotiated from `Accept-Encoding`; documents and navigation payloads are gzipped per request.
 
 ### Development and CLI
 

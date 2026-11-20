@@ -55,6 +55,7 @@ type runtimeState struct {
 	serverPatterns map[string]struct{}
 	files          map[string]protocol.FileRef
 	public         map[string]protocol.FileRef
+	encodings      map[string]map[string]protocol.FileRef
 	devProxy       http.Handler
 }
 
@@ -77,6 +78,7 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 		serverPatterns: make(map[string]struct{}),
 		files:          make(map[string]protocol.FileRef),
 		public:         manifest.public,
+		encodings:      manifest.encodings,
 	}
 	maps.Copy(state.files, manifest.clientFiles)
 	for _, route := range manifest.routes {
@@ -162,7 +164,7 @@ func compileRuntime(app *App, assets fs.FS, manifest *compiledManifest, render r
 				for _, document := range builtRoute.Documents {
 					files[document.Path] = document.File
 				}
-				handler = &staticPageHandler{assets: assets, files: files, headers: app.hooks.assetHeaders}
+				handler = &staticPageHandler{assets: assets, files: files, encodings: manifest.encodings, headers: app.hooks.assetHeaders}
 			}
 		case routeClient:
 			document, err := shell.ClientDocument(emptyProps)
@@ -260,6 +262,9 @@ func (h *serverPageHandler) renderProps(w http.ResponseWriter, request *http.Req
 	if markdownRequested(request.Context()) {
 		sink = &markdownRenderSink{writer: w, limits: h.limits}
 	} else {
+		encoded := newDocumentWriter(w, request)
+		defer encoded.Close()
+		w = encoded
 		sink = h.newSink(w, request, propsJSON, document, status)
 	}
 	var started time.Time
@@ -432,9 +437,10 @@ func (s *httpRenderSink) finish() error {
 }
 
 type staticPageHandler struct {
-	assets  fs.FS
-	files   map[string]protocol.FileRef
-	headers AssetHeaderHook
+	assets    fs.FS
+	files     map[string]protocol.FileRef
+	encodings map[string]map[string]protocol.FileRef
+	headers   AssetHeaderHook
 }
 
 func (h *staticPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
@@ -443,7 +449,7 @@ func (h *staticPageHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 		http.NotFound(w, request)
 		return
 	}
-	serveArtifact(w, request, h.assets, file, "text/html; charset=utf-8", "no-cache", h.headers, false)
+	serveArtifact(w, request, h.assets, file, h.encodings[file.Path], "text/html; charset=utf-8", "no-cache", h.headers, false)
 }
 
 type clientPageHandler struct {
@@ -476,13 +482,14 @@ func (h *publicAssetHandler) ServeHTTP(w http.ResponseWriter, request *http.Requ
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	serveArtifact(w, request, h.assets, h.file, contentType, "public, max-age=3600", h.headers, true)
+	serveArtifact(w, request, h.assets, h.file, nil, contentType, "public, max-age=3600", h.headers, true)
 }
 
 type assetHandler struct {
-	assets  fs.FS
-	files   map[string]protocol.FileRef
-	headers AssetHeaderHook
+	assets    fs.FS
+	files     map[string]protocol.FileRef
+	encodings map[string]map[string]protocol.FileRef
+	headers   AssetHeaderHook
 }
 
 func (h *assetHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
@@ -496,7 +503,7 @@ func (h *assetHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	serveArtifact(w, request, h.assets, file, contentType, "public, max-age=31536000, immutable", h.headers, false)
+	serveArtifact(w, request, h.assets, file, h.encodings[file.Path], contentType, "public, max-age=31536000, immutable", h.headers, false)
 }
 
 var artifactBuffers = sync.Pool{New: func() any {
@@ -504,11 +511,20 @@ var artifactBuffers = sync.Pool{New: func() any {
 	return &buffer
 }}
 
-func serveArtifact(w http.ResponseWriter, request *http.Request, assets fs.FS, file protocol.FileRef, contentType, cacheControl string, headers AssetHeaderHook, public bool) {
-	etag := `"` + file.Hash + `"`
+func serveArtifact(w http.ResponseWriter, request *http.Request, assets fs.FS, file protocol.FileRef, encoded map[string]protocol.FileRef, contentType, cacheControl string, headers AssetHeaderHook, public bool) {
+	representation, encoding := negotiateEncoding(request.Header.Get("Accept-Encoding"), file, encoded)
+	etag := `"` + representation.Hash
+	if encoding != "" {
+		etag += "-" + encoding
+	}
+	etag += `"`
+	w.Header().Add("Vary", "Accept-Encoding")
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", cacheControl)
 	w.Header().Set("Content-Type", contentType)
+	if encoding != "" {
+		w.Header().Set("Content-Encoding", encoding)
+	}
 	if headers != nil {
 		headers(w.Header(), public)
 	}
@@ -516,13 +532,13 @@ func serveArtifact(w http.ResponseWriter, request *http.Request, assets fs.FS, f
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	opened, err := assets.Open(file.Path)
+	opened, err := assets.Open(representation.Path)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	defer func() { _ = opened.Close() }()
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", file.Size))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", representation.Size))
 	w.WriteHeader(http.StatusOK)
 	if request.Method != http.MethodHead {
 		buffer := artifactBuffers.Get().(*[]byte)

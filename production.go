@@ -152,7 +152,7 @@ func (a *App) Register(mux *http.ServeMux) (err error) {
 	if a.runtime.devProxy != nil {
 		mux.Handle("GET "+strings.TrimSuffix(dochtml.DevPrefix, "/")+"/{path...}", a.runtime.devProxy)
 	}
-	mux.Handle("GET "+dochtml.AssetPrefix+"{path...}", &assetHandler{assets: a.runtime.assets, files: a.runtime.files, headers: a.hooks.assetHeaders})
+	mux.Handle("GET "+dochtml.AssetPrefix+"{path...}", &assetHandler{assets: a.runtime.assets, files: a.runtime.files, encodings: a.runtime.encodings, headers: a.hooks.assetHeaders})
 	publicURLs := make([]string, 0, len(a.runtime.public))
 	for publicURL := range a.runtime.public {
 		publicURLs = append(publicURLs, publicURL)

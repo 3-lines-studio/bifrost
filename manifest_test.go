@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -226,5 +227,64 @@ func TestVerifyFilesSkipsRuntimeHash(t *testing.T) {
 	refs["artifact"] = protocol.FileRef{Path: "artifact", Hash: digestString("other"), Size: 6}
 	if err := verifyFiles(files, refs, "artifact"); err == nil {
 		t.Fatal("size mismatch accepted")
+	}
+}
+
+func TestManifestRejectsUnknownEncodedArtifact(t *testing.T) {
+	files, app, manifest := validManifestFixture(t)
+	compressed := addFixtureFile(files, "dist/missing.js.br", "brotli of nothing")
+	manifest.Encoded = []protocol.EncodedFile{{Path: "dist/missing.js", Encoding: "br", File: compressed}}
+	if _, err := validateManifest(files, app.spec, app.specHash, manifest); err == nil {
+		t.Fatal("expected an error for an encoded artifact without an original")
+	}
+}
+
+func TestManifestRejectsUnknownEncoding(t *testing.T) {
+	files, app, manifest := validManifestFixture(t)
+	compressed := addFixtureFile(files, "dist/server.js.zst", "zstd")
+	manifest.Encoded = []protocol.EncodedFile{{Path: "dist/server.js", Encoding: "zstd", File: compressed}}
+	_, err := validateManifest(files, app.spec, app.specHash, manifest)
+	if err == nil || !strings.Contains(err.Error(), "unsupported encoding") {
+		t.Fatalf("err = %v, want an unsupported encoding error", err)
+	}
+}
+
+func TestManifestRejectsStaleEncodedArtifact(t *testing.T) {
+	files, app, manifest := validManifestFixture(t)
+	compressed := addFixtureFile(files, "dist/server.js.br", "brotli")
+	compressed.Size += 1
+	manifest.Encoded = []protocol.EncodedFile{{Path: "dist/server.js", Encoding: "br", File: compressed}}
+	if _, err := validateManifest(files, app.spec, app.specHash, manifest); err == nil {
+		t.Fatal("expected an error for an encoded artifact with the wrong size")
+	}
+}
+
+func TestManifestIndexesEncodedArtifacts(t *testing.T) {
+	files, app, manifest := validManifestFixture(t)
+	brotli := addFixtureFile(files, "dist/server.js.br", "brotli")
+	gzipped := addFixtureFile(files, "dist/server.js.gz", "gzip")
+	manifest.Encoded = []protocol.EncodedFile{
+		{Path: "dist/server.js", Encoding: "br", File: brotli},
+		{Path: "dist/server.js", Encoding: "gzip", File: gzipped},
+	}
+	compiled, err := validateManifest(files, app.spec, app.specHash, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodings := compiled.encodings["dist/server.js"]
+	if len(encodings) != 2 || encodings["br"] != brotli || encodings["gzip"] != gzipped {
+		t.Fatalf("encodings = %v", encodings)
+	}
+}
+
+func TestManifestRejectsDuplicateEncoding(t *testing.T) {
+	files, app, manifest := validManifestFixture(t)
+	brotli := addFixtureFile(files, "dist/server.js.br", "brotli")
+	manifest.Encoded = []protocol.EncodedFile{
+		{Path: "dist/server.js", Encoding: "br", File: brotli},
+		{Path: "dist/server.js", Encoding: "br", File: brotli},
+	}
+	if _, err := validateManifest(files, app.spec, app.specHash, manifest); err == nil {
+		t.Fatal("expected an error for a duplicate encoding")
 	}
 }

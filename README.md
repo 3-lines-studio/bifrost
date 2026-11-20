@@ -316,7 +316,9 @@ Run `bash scripts/navigation-integration.sh` for production and development brow
 
 Bifrost emits render-blocking styles first, preloads every static client import, and gives module preloads low fetch priority so they do not compete with high-priority LCP images. Vite owns tree shaking and chunking; hashed build assets use one-year immutable caching.
 
-Serve production responses through Brotli or gzip: that belongs to the HTTP server, CDN, or reverse proxy, which owns content negotiation and caching. Import long-lived assets through Vite when possible so they receive hashed immutable URLs; files copied from `public/` keep stable URLs and revalidate by default.
+`bifrost build` writes a Brotli and a gzip variant next to every compressible artifact and records both in the manifest. The runtime negotiates them through `Accept-Encoding` (`br`, then `gzip`, then identity), sets `Vary: Accept-Encoding`, and gives each representation its own ETag, so conditional requests keep working. Rendered documents and client-navigation payloads are compressed per request with gzip, because their bytes are not known at build time. Measured on a real app: 825 KB of page assets and a 67 KB document go out as 198 KB and 10.5 KB, and slow-4G LCP drops from 4.5 s to 1.7 s.
+
+Compressing again in the HTTP server, CDN, or reverse proxy is unnecessary; leave it alone or let it pass the encoded bytes through. Import long-lived assets through Vite when possible so they receive hashed immutable URLs; files copied from `public/` keep stable URLs, revalidate by default, and are served uncompressed.
 
 Track compressed transfer bytes, request count, LCP, CLS, and hydration time under network and CPU throttling; local uncompressed load time is not a useful production browser metric.
 

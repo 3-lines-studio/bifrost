@@ -225,6 +225,19 @@ func Build(ctx context.Context, options Options) error {
 			return err
 		}
 	}
+	var encoded []protocol.EncodedFile
+	if !options.Development && !options.ExternalDevelopment {
+		refs := slices.Clone(clientFiles)
+		for _, route := range routes {
+			for _, document := range route.Documents {
+				refs = append(refs, document.File)
+			}
+		}
+		encoded, err = compressArtifacts(ctx, temporary, refs)
+		if err != nil {
+			return err
+		}
+	}
 	public, err := copyPublic(describe.SourceRoot, temporary)
 	if err != nil {
 		return err
@@ -256,6 +269,7 @@ func Build(ctx context.Context, options Options) error {
 		Routes:      routes,
 		ClientFiles: clientFiles,
 		Public:      public,
+		Encoded:     encoded,
 	}
 	if manifest.Toolchain.Bun == "" {
 		return errors.New("bifrost: cannot determine Bun version")

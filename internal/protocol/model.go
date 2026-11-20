@@ -2,7 +2,7 @@ package protocol
 
 import "encoding/json"
 
-const Schema uint32 = 3
+const Schema uint32 = 4
 
 type Spec struct {
 	Schema uint32      `json:"schema"`
@@ -59,6 +59,15 @@ type Manifest struct {
 	Routes      []BuiltRoute  `json:"routes"`
 	ClientFiles []FileRef     `json:"clientFiles,omitempty"`
 	Public      []PublicAsset `json:"public,omitempty"`
+	Encoded     []EncodedFile `json:"encoded,omitempty"`
+}
+
+// EncodedFile is a precompressed variant of a build artifact. Path names the
+// artifact it encodes; File is the compressed artifact itself.
+type EncodedFile struct {
+	Path     string  `json:"path"`
+	Encoding string  `json:"encoding"`
+	File     FileRef `json:"file"`
 }
 
 type PublicAsset struct {

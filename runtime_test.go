@@ -2,11 +2,14 @@ package bifrost
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -615,5 +618,147 @@ func TestPublicAssetHeadersCanOverrideDefaults(t *testing.T) {
 	}
 	if got := response.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("Cache-Control = %q, want %q", got, "no-store")
+	}
+}
+
+func encodedRuntimeFixture(t *testing.T) (*runtimeState, protocol.FileRef) {
+	t.Helper()
+	files, app, manifest := validManifestFixture(t)
+	brotli := addFixtureFile(files, "dist/server.js.br", "brotli body")
+	gzipped := addFixtureFile(files, "dist/server.js.gz", "gzip body")
+	manifest.Encoded = []protocol.EncodedFile{
+		{Path: "dist/server.js", Encoding: "br", File: brotli},
+		{Path: "dist/server.js", Encoding: "gzip", File: gzipped},
+	}
+	compiled, err := validateManifest(files, app.spec, app.specHash, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	render := &fakeRenderer{render: func(context.Context, renderRequest, renderSink) error { return nil }}
+	state, err := compileRuntime(app, files, compiled, render)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state, brotli
+}
+
+func TestAssetHandlerServesPrecompressedArtifact(t *testing.T) {
+	state, brotli := encodedRuntimeFixture(t)
+	handler := &assetHandler{assets: state.assets, files: state.files, encodings: state.encodings}
+
+	testCases := []struct {
+		name     string
+		accept   string
+		encoding string
+		body     string
+		size     int64
+	}{
+		{"brotli", "br, gzip", "br", "brotli body", brotli.Size},
+		{"gzip", "gzip", "gzip", "gzip body", int64(len("gzip body"))},
+		{"identity", "identity", "", "server client", int64(len("server client"))},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/_bifrost/dist/server.js", nil)
+			request.Header.Set("Accept-Encoding", testCase.accept)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d", response.Code)
+			}
+			if got := response.Header().Get("Content-Encoding"); got != testCase.encoding {
+				t.Fatalf("Content-Encoding = %q, want %q", got, testCase.encoding)
+			}
+			if !strings.Contains(strings.Join(response.Header().Values("Vary"), ","), "Accept-Encoding") {
+				t.Fatalf("Vary = %v, want Accept-Encoding", response.Header().Values("Vary"))
+			}
+			if response.Body.String() != testCase.body {
+				t.Fatalf("body = %q, want %q", response.Body.String(), testCase.body)
+			}
+			if got := response.Header().Get("Content-Length"); got != strconv.FormatInt(testCase.size, 10) {
+				t.Fatalf("Content-Length = %q, want %d", got, testCase.size)
+			}
+		})
+	}
+}
+
+func TestAssetHandlerNegotiatesETagPerEncoding(t *testing.T) {
+	state, _ := encodedRuntimeFixture(t)
+	handler := &assetHandler{assets: state.assets, files: state.files, encodings: state.encodings}
+
+	request := httptest.NewRequest(http.MethodGet, "/_bifrost/dist/server.js", nil)
+	request.Header.Set("Accept-Encoding", "br")
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, request)
+	etag := first.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("missing ETag")
+	}
+
+	conditional := httptest.NewRequest(http.MethodGet, "/_bifrost/dist/server.js", nil)
+	conditional.Header.Set("Accept-Encoding", "br")
+	conditional.Header.Set("If-None-Match", etag)
+	second := httptest.NewRecorder()
+	handler.ServeHTTP(second, conditional)
+	if second.Code != http.StatusNotModified {
+		t.Fatalf("conditional status = %d, want 304", second.Code)
+	}
+
+	identity := httptest.NewRequest(http.MethodGet, "/_bifrost/dist/server.js", nil)
+	identity.Header.Set("Accept-Encoding", "identity")
+	identity.Header.Set("If-None-Match", etag)
+	third := httptest.NewRecorder()
+	handler.ServeHTTP(third, identity)
+	if third.Code != http.StatusOK {
+		t.Fatalf("identity status = %d, want 200 for a different representation", third.Code)
+	}
+}
+
+func TestServerHandlerCompressesDocument(t *testing.T) {
+	render := &fakeRenderer{render: func(_ context.Context, _ renderRequest, sink renderSink) error {
+		if err := sink.Head([]byte(`<title>Server</title>`)); err != nil {
+			return err
+		}
+		return sink.Body([]byte(`<main>hello</main>`))
+	}}
+	_, state := runtimeFixture(t, render)
+
+	request := httptest.NewRequest(http.MethodGet, "/server", nil)
+	request.Header.Set("Accept-Encoding", "gzip")
+	response := httptest.NewRecorder()
+	state.handlers["/server"].ServeHTTP(response, request)
+
+	if got := response.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", got)
+	}
+	reader, err := gzip.NewReader(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `<main>hello</main>`) {
+		t.Fatalf("decoded body = %q", body)
+	}
+}
+
+func TestServerHandlerSkipsCompressionWithoutAcceptEncoding(t *testing.T) {
+	render := &fakeRenderer{render: func(_ context.Context, _ renderRequest, sink renderSink) error {
+		if err := sink.Head([]byte(`<title>Server</title>`)); err != nil {
+			return err
+		}
+		return sink.Body([]byte(`<main>hello</main>`))
+	}}
+	_, state := runtimeFixture(t, render)
+
+	response := httptest.NewRecorder()
+	state.handlers["/server"].ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/server", nil))
+	if got := response.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("Content-Encoding = %q, want none", got)
+	}
+	if !strings.Contains(response.Body.String(), `<main>hello</main>`) {
+		t.Fatalf("body = %q", response.Body.String())
 	}
 }

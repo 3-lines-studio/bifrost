@@ -29,6 +29,9 @@ Notable changes, newest first. Releases are tagged `vMAJOR.MINOR.PATCH`.
 - The renderer request frames the encoded props instead of re-marshaling them, so a 4 KB props page spends 0.6 us instead of 4.4 us on the wire payload.
 - Request throughput with 4 KB props: 21.6k to 32.0k requests per second at 32 connections, and p50 at one connection drops from 75.7 us to 49.8 us.
 - Go 1.27 is the minimum. Its toolchain brings the Green Tea GC, size-specialized small allocations, and `encoding/json` backed by v2 to every build.
+- Assets ship precompressed. `bifrost build` writes a Brotli and a gzip variant next to every compressible artifact and records both in the manifest, so the runtime never compresses assets at request time. `serveArtifact` negotiates through `Accept-Encoding`, adds `Vary: Accept-Encoding`, and suffixes each representation's ETag. On a real app the eager client graph of a page goes from 825 KB to 198 KB and slow-4G LCP from 4.5 s to 1.7 s.
+- Rendered documents and App Router navigation payloads compress per request with gzip from a pooled writer: a 67 KB document goes out as 10.5 KB and a 9 KB navigation payload as 2.9 KB. Server-rendered capacity drops about 26% at 20 connections in exchange.
+- The manifest schema is 4: it adds `encoded`, the precompressed variants of each artifact.
 
 ### CLI
 

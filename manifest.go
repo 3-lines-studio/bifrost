@@ -27,6 +27,7 @@ type compiledManifest struct {
 	files       map[string]protocol.FileRef
 	clientFiles map[string]protocol.FileRef
 	public      map[string]protocol.FileRef
+	encodings   map[string]map[string]protocol.FileRef
 }
 
 func parseManifest(data []byte) (protocol.Manifest, error) {
@@ -199,6 +200,34 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 		public[asset.URL] = asset.File
 	}
 
+	encodings := make(map[string]map[string]protocol.FileRef, len(manifest.Encoded))
+	for _, candidate := range manifest.Encoded {
+		if _, exists := files[candidate.Path]; !exists {
+			return nil, fmt.Errorf("bifrost: encoded artifact %q is not a build artifact", candidate.Path)
+		}
+		if candidate.Encoding != "br" && candidate.Encoding != "gzip" {
+			return nil, fmt.Errorf("bifrost: unsupported encoding %q for artifact %q", candidate.Encoding, candidate.Path)
+		}
+		if err := validateFileRef(candidate.File); err != nil {
+			return nil, fmt.Errorf("bifrost: encoded artifact %q: %w", candidate.Path, err)
+		}
+		if existing, exists := files[candidate.File.Path]; exists && existing != candidate.File {
+			return nil, fmt.Errorf("bifrost: encoded artifact %q has conflicting metadata", candidate.File.Path)
+		}
+		if err := collectFile(files, candidate.File); err != nil {
+			return nil, err
+		}
+		byEncoding, exists := encodings[candidate.Path]
+		if !exists {
+			byEncoding = make(map[string]protocol.FileRef, 2)
+			encodings[candidate.Path] = byEncoding
+		}
+		if _, exists := byEncoding[candidate.Encoding]; exists {
+			return nil, fmt.Errorf("bifrost: duplicate %s encoding for artifact %q", candidate.Encoding, candidate.Path)
+		}
+		byEncoding[candidate.Encoding] = candidate.File
+	}
+
 	runtimePath := ""
 	if manifest.Runtime != nil {
 		runtimePath = manifest.Runtime.Path
@@ -206,7 +235,7 @@ func validateManifest(assets fs.FS, spec protocol.Spec, specHash string, manifes
 	if err := verifyFiles(assets, files, runtimePath); err != nil {
 		return nil, err
 	}
-	return &compiledManifest{manifest: manifest, views: views, routes: routes, files: files, clientFiles: clientFiles, public: public}, nil
+	return &compiledManifest{manifest: manifest, views: views, routes: routes, files: files, clientFiles: clientFiles, public: public, encodings: encodings}, nil
 }
 
 func validatePublicURL(value string) error {
