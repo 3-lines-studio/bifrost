@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -217,6 +218,15 @@ func TestRemoveRuntimeDirectoryKeepsLockedRuntime(t *testing.T) {
 
 func TestRuntimeBaseUsesUserCache(t *testing.T) {
 	cache := t.TempDir()
+	if runtime.GOOS == "darwin" {
+		// os.UserCacheDir ignores XDG_CACHE_HOME on macOS.
+		t.Setenv("HOME", cache)
+		want := filepath.Join(cache, "Library", "Caches", "bifrost")
+		if got := runtimeBase(); got != want {
+			t.Fatalf("runtimeBase = %q, want %q", got, want)
+		}
+		return
+	}
 	t.Setenv("XDG_CACHE_HOME", cache)
 	if got, want := runtimeBase(), filepath.Join(cache, "bifrost"); got != want {
 		t.Fatalf("runtimeBase = %q, want %q", got, want)

@@ -75,15 +75,20 @@ func rendererAt(t *testing.T) (*atomic.Int64, chan testRender, string) {
 
 func writeFrame(t *testing.T, conn net.Conn, kind byte, payload string) {
 	t.Helper()
+	if err := tryFrame(conn, kind, payload); err != nil {
+		t.Error(err)
+	}
+}
+
+func tryFrame(conn net.Conn, kind byte, payload string) error {
 	var header [5]byte
 	header[0] = kind
 	binary.BigEndian.PutUint32(header[1:], uint32(len(payload)))
 	if _, err := conn.Write(header[:]); err != nil {
-		t.Error(err)
+		return err
 	}
-	if _, err := conn.Write([]byte(payload)); err != nil {
-		t.Error(err)
-	}
+	_, err := conn.Write([]byte(payload))
+	return err
 }
 
 func TestRenderDecodesOrderedFrames(t *testing.T) {
@@ -229,9 +234,11 @@ func TestRenderDialsAfterRecover(t *testing.T) {
 	accepted, requests, socket := rendererAt(t)
 	go func() {
 		for range 2 {
+			// The client may drop the first connection while it recovers; a
+			// write that lands after that is not what this test is about.
 			request := <-requests
-			writeFrame(t, request.conn, frameHead, "<title>Hi</title>")
-			writeFrame(t, request.conn, frameDone, "")
+			_ = tryFrame(request.conn, frameHead, "<title>Hi</title>")
+			_ = tryFrame(request.conn, frameDone, "")
 		}
 	}()
 	process := &Process{socket: socket}
