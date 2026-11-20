@@ -232,7 +232,6 @@ type productionRenderer struct {
 	root        string
 	executable  string
 	args        []string
-	environment []string
 	workDir     string
 	devRoutes   string
 	start       func() (renderProcess, error)

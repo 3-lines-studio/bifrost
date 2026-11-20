@@ -74,7 +74,7 @@ func (b *Bridge) waitHealthy() error {
 		if err == nil {
 			return nil
 		}
-		if b.child != nil && b.child.exited() {
+		if b.child != nil && b.exited() {
 			if err := b.processError(); err != nil {
 				return fmt.Errorf("bridge exited during startup: %w", err)
 			}
@@ -89,7 +89,7 @@ func (b *Bridge) Healthy(ctx context.Context) error {
 	if b == nil || b.client == nil {
 		return errors.New("bridge is not initialized")
 	}
-	if b.child != nil && b.child.exited() {
+	if b.child != nil && b.exited() {
 		if err := b.processError(); err != nil {
 			return fmt.Errorf("bridge exited: %w", err)
 		}
@@ -191,7 +191,7 @@ func (b *Bridge) Close(ctx context.Context) error {
 		return nil
 	}
 	b.Recover()
-	b.child.stop(ctx)
+	b.stop(ctx)
 	if b.child != nil && b.cmd != nil && b.cmd.Process != nil {
 		_ = os.Remove(b.socket)
 	}

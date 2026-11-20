@@ -160,7 +160,7 @@ func (p *Process) waitHealthy() error {
 		if err == nil {
 			return nil
 		}
-		if p.child != nil && p.child.exited() {
+		if p.child != nil && p.exited() {
 			if err := p.processError(); err != nil {
 				return fmt.Errorf("renderer exited during startup: %w", err)
 			}
@@ -177,7 +177,7 @@ func (p *Process) Healthy(ctx context.Context) error {
 	if p == nil || p.socket == "" {
 		return errors.New("renderer process is not initialized")
 	}
-	if p.child != nil && p.child.exited() {
+	if p.child != nil && p.exited() {
 		if err := p.processError(); err != nil {
 			return fmt.Errorf("renderer exited: %w", err)
 		}
@@ -344,7 +344,7 @@ func (p *Process) Close(ctx context.Context) error {
 		return nil
 	}
 	p.Recover()
-	p.child.stop(ctx)
+	p.stop(ctx)
 	if p.cmd != nil && p.cmd.Process != nil {
 		_ = os.Remove(p.socket)
 	}
